@@ -159,6 +159,40 @@ export default function App() {
     ? (days[sheet.pk] || []).find((x) => x.id === sheet.id) ?? null
     : null;
 
+  // Is the sheet's entry sitting on an expired page? Then moving it forward
+  // must be a migration (original stays, marked ›) — never a silent move.
+  const sheetOnPast = (() => {
+    if (!sheet) return false;
+    const sc = keyScope(sheet.pk);
+    return sc ? sheet.pk < nowKeys[sc] : false;
+  })();
+  const sheetMigrates =
+    sheetOnPast && sheetEntry?.type === "task" && sheetEntry?.state === "open";
+
+  // Migration history: walk the migratedFrom chain both ways (spec §4.3)
+  const sheetHistory: string[] = (() => {
+    if (!sheetEntry) return [];
+    const all = Object.values(days).flat();
+    const byId = new Map(all.map((e) => [e.id, e]));
+    const byFrom = new Map(
+      all.filter((e) => e.migratedFrom).map((e) => [e.migratedFrom as string, e])
+    );
+    const chain: string[] = [sheetEntry.pageKey];
+    let cur: Entry | undefined = sheetEntry;
+    for (let i = 0; i < 20 && cur?.migratedFrom; i++) {
+      cur = byId.get(cur.migratedFrom);
+      if (!cur) break;
+      chain.unshift(cur.pageKey);
+    }
+    cur = sheetEntry;
+    for (let i = 0; i < 20; i++) {
+      cur = byFrom.get(cur!.id);
+      if (!cur) break;
+      chain.push(cur.pageKey);
+    }
+    return chain.length > 1 ? chain : [];
+  })();
+
   const renderEntry = (e: Entry, pk: string, sc: Scope | null) => (
     <li key={e.id} className="entry">
       <button
@@ -540,6 +574,20 @@ export default function App() {
                 <div style={S.sheetEntry}>
                   <span style={{ marginRight: 8 }}>{GLYPH[sheetEntry.type]}</span>
                   {sheetEntry.text}
+                  {sheetHistory.length > 0 && (
+                    <div
+                      style={{ fontSize: 11.5, color: "#6B7683", marginTop: 6 }}
+                    >
+                      migration history:{" "}
+                      {sheetHistory
+                        .map(
+                          (pk) =>
+                            pageLabel(pk) +
+                            (pk === sheetEntry.pageKey ? " (this page)" : "")
+                        )
+                        .join(" › ")}
+                    </div>
+                  )}
                 </div>
                 <button
                   className="sheetBtn"
@@ -558,21 +606,45 @@ export default function App() {
                     {sheetEntry.state === "done" ? "Reopen task" : "Mark complete"}
                   </button>
                 )}
-                <div style={S.sheetGroupLabel}>Move to</div>
-                <div style={S.sheetRow}>
-                  {SCOPES.filter((t) => t !== sheet.scope).map((t) => (
-                    <button
-                      key={t}
-                      className="sheetBtn isCompact"
-                      onClick={() => {
-                        moveTo(sheet.id, nowKeys[t]);
-                        closeSheet();
-                      }}
-                    >
-                      {SCOPE_LABEL[t]}
-                    </button>
-                  ))}
-                </div>
+                {sheetMigrates ? (
+                  <>
+                    <div style={S.sheetGroupLabel}>
+                      Migrate to (original stays here, marked ›)
+                    </div>
+                    <div style={S.sheetRow}>
+                      {SCOPES.map((t) => (
+                        <button
+                          key={t}
+                          className="sheetBtn isCompact"
+                          onClick={() => {
+                            migrateEntry(sheet.id, nowKeys[t]);
+                            closeSheet();
+                          }}
+                        >
+                          › {SCOPE_LABEL[t]}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={S.sheetGroupLabel}>Move to</div>
+                    <div style={S.sheetRow}>
+                      {SCOPES.filter((t) => t !== sheet.scope).map((t) => (
+                        <button
+                          key={t}
+                          className="sheetBtn isCompact"
+                          onClick={() => {
+                            moveTo(sheet.id, nowKeys[t]);
+                            closeSheet();
+                          }}
+                        >
+                          {SCOPE_LABEL[t]}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
                 <button
                   className="sheetBtn"
                   onClick={() => {
