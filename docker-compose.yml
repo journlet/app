@@ -1,0 +1,26 @@
+services:
+  # Hot-reload dev server: docker compose up dev
+  # → http://localhost:5173
+  dev:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      # keep container node_modules separate from the host's (macOS vs Linux binaries)
+      - node_modules:/app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+
+  # Production build served by nginx: docker compose up web --build
+  # → http://localhost:8080
+  web:
+    build: .
+    ports:
+      - "8080:80"
+    profiles: ["web"]
+
+volumes:
+  node_modules:

@@ -24,6 +24,17 @@ npm run build    # type-check + production build into dist/ (adds 404.html fallb
 npm run icons    # regenerate PWA icons from the SVG mark
 ```
 
+## Run with Docker
+
+```
+docker compose up dev            # hot-reload dev server → http://localhost:5173
+docker compose --profile web up --build   # production build via nginx → http://localhost:8080
+```
+
+The dev service mounts the source and keeps its own `node_modules` volume, so host and container installs never clash. The web service is a multi-stage build (Node builds `dist/`, nginx serves it with SPA fallback and sensible caching: `index.html` and `sw.js` uncached, hashed assets immutable).
+
+Note: the service worker registers on localhost, but installability and full PWA behaviour need HTTPS — use the journlet.com deployment for phone installs.
+
 ## Deploy (GitHub Pages at journlet.com)
 
 The repo deploys via `.github/workflows/deploy.yml`: every push to `main` builds and publishes `dist/` to GitHub Pages. One-time setup:
