@@ -4,11 +4,14 @@ import {
   SCOPES,
   SCOPE_LABEL,
   keyScope,
+  keyToAnchor,
   pageLabel,
   periodKey,
-  scopeSub,
+  periodSub,
+  shiftAnchor,
   todayKey,
 } from "./lib/dates";
+import IndexView from "./IndexView";
 import type { Scope } from "./lib/dates";
 import { GLYPH, STATE_GLYPH } from "./lib/types";
 import type { Entry } from "./lib/types";
@@ -54,6 +57,14 @@ export default function App() {
   const [editText, setEditText] = useState<string | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [view, setView] = useState<"spread" | "index">("spread");
+  // Per-section browsing anchors; today unless the user steps away
+  const [anchors, setAnchors] = useState<Record<Scope, string>>(() => ({
+    day: todayKey(),
+    week: todayKey(),
+    month: todayKey(),
+    year: todayKey(),
+  }));
   const [customDate, setCustomDate] = useState(todayKey());
   const [customGran, setCustomGran] = useState<Scope>("day");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -197,15 +208,35 @@ export default function App() {
       <header style={S.header}>
         <div style={S.brandRow}>
           <span style={S.brand}>Journlet</span>
-          <span style={S.saveDot}>
-            {saveState === "saving" ? "saving…" : "saved"}
+          <span style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+            <button
+              className="miniBtn"
+              onClick={() => setView(view === "index" ? "spread" : "index")}
+            >
+              {view === "index" ? "back to journal" : "index"}
+            </button>
+            <span style={S.saveDot}>
+              {saveState === "saving" ? "saving…" : "saved"}
+            </span>
           </span>
         </div>
       </header>
 
       <main style={S.paper}>
         {!loaded && <div style={S.empty}>opening journal…</div>}
-        {loaded && pastOpen.length > 0 && (
+        {loaded && view === "index" && (
+          <IndexView
+            days={days}
+            nowKeys={nowKeys}
+            onOpen={(pk) => {
+              const sc = keyScope(pk);
+              if (!sc) return;
+              setAnchors((a) => ({ ...a, [sc]: keyToAnchor(pk) }));
+              setView("spread");
+            }}
+          />
+        )}
+        {loaded && view === "spread" && pastOpen.length > 0 && (
           <button className="reviewBanner" onClick={() => setReviewing(true)}>
             <span style={{ fontWeight: 600 }}>
               {pastOpen.length} open task{pastOpen.length === 1 ? "" : "s"} from
@@ -215,14 +246,57 @@ export default function App() {
           </button>
         )}
         {loaded &&
+          view === "spread" &&
           SCOPES.map((sc) => {
-            const pk = nowKeys[sc];
+            const pk = periodKey(sc, anchors[sc]);
+            const isCurrent = pk === nowKeys[sc];
+            const isFuture = pk > nowKeys[sc];
             const entries = days[pk] || [];
+            const step = (delta: number) =>
+              setAnchors((a) => ({
+                ...a,
+                [sc]: shiftAnchor(sc, a[sc], delta),
+              }));
             return (
               <section key={sc} style={S.section}>
                 <div style={S.sectionHead}>
-                  <h2 style={S.sectionTitle}>{SCOPE_LABEL[sc]}</h2>
-                  <span style={S.sectionSub}>{scopeSub(sc)}</span>
+                  <h2 style={S.sectionTitle}>
+                    {isCurrent ? SCOPE_LABEL[sc] : pageLabel(pk)}
+                  </h2>
+                  <span style={S.sectionSub}>
+                    {isCurrent
+                      ? periodSub(sc, anchors[sc])
+                      : isFuture
+                        ? "future page"
+                        : "past page"}
+                  </span>
+                  <span style={S.sectionNav}>
+                    <button
+                      className="miniBtn"
+                      onClick={() => step(-1)}
+                      aria-label={`Previous ${sc}`}
+                    >
+                      ‹ previous
+                    </button>
+                    {!isCurrent && (
+                      <button
+                        className="miniBtn"
+                        onClick={() =>
+                          setAnchors((a) => ({ ...a, [sc]: todayKey() }))
+                        }
+                        aria-label={`Back to current ${sc}`}
+                      >
+                        back to now
+                      </button>
+                    )}
+                    <button
+                      className="miniBtn"
+                      onClick={() => step(1)}
+                      aria-label={`Next ${sc}`}
+                    >
+                      next ›
+                    </button>
+                  </span>
                 </div>
                 {entries.length === 0 && (
                   <div style={S.sectionEmpty}>nothing logged</div>
@@ -233,7 +307,7 @@ export default function App() {
               </section>
             );
           })}
-        {loaded && futureItems.length > 0 && (
+        {loaded && view === "spread" && futureItems.length > 0 && (
           <section style={S.section}>
             <div style={S.sectionHead}>
               <h2 style={S.sectionTitle}>Scheduled ahead</h2>
@@ -628,6 +702,12 @@ const S: Record<string, CSSProperties> = {
     lineHeight: 1.15,
   },
   sectionSub: { fontSize: 11.5, color: INK_SOFT },
+  sectionNav: {
+    marginLeft: "auto",
+    display: "flex",
+    gap: 4,
+    flexShrink: 0,
+  },
   sectionEmpty: {
     color: INK_SOFT,
     fontSize: 12.5,
