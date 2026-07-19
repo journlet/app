@@ -264,6 +264,28 @@ body {
   color: var(--ink-soft);
   text-align: center;
 }
+.indexRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 4px;
+  font-family: inherit;
+  font-size: 14.5px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.indexRow:hover {
+  background: rgba(255, 255, 255, 0.65);
+}
+.indexRow:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
 .toastBtn {
   background: none;
   border: none;
