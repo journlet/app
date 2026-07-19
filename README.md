@@ -41,8 +41,8 @@ The repo deploys via `.github/workflows/deploy.yml`: every push to `main` builds
 
 1. Create the repo and push: `git remote add origin git@github.com:journlet/app.git && git push -u origin main`
 2. In the repo, Settings → Pages → Source: **GitHub Actions**.
-3. DNS for journlet.com at your registrar: four A records on the apex pointing to GitHub Pages (185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153) and optionally a www CNAME to `journlet.github.io`.
-4. Settings → Pages → Custom domain: enter `journlet.com` (the `public/CNAME` file keeps it set across deploys) and tick **Enforce HTTPS** once the certificate is issued.
+3. DNS at your registrar: a CNAME record for `app` pointing to `journlet.github.io`. (The apex journlet.com is reserved for a future landing page — four A records to 185.199.108.153 / .109 / .110 / .111.153 when needed.)
+4. Settings → Pages → Custom domain: enter `app.journlet.com` (the `public/CNAME` file keeps it set across deploys) and tick **Enforce HTTPS** once the certificate is issued.
 
 Then install on your phone: open https://app.journlet.com in Safari (iOS) → Share → Add to Home Screen, or Chrome (Android) → Install app.
 
