@@ -5,7 +5,8 @@
 import type { CSSProperties } from "react";
 import { SCOPES, keyScope, pageLabel } from "./lib/dates";
 import type { Scope } from "./lib/dates";
-import type { Entry } from "./lib/types";
+import { colPageKey } from "./lib/types";
+import type { Collection, Entry, Habit } from "./lib/types";
 
 const GROUP_LABEL: Record<Scope, string> = {
   day: "Days",
@@ -17,10 +18,22 @@ const GROUP_LABEL: Record<Scope, string> = {
 interface Props {
   days: Record<string, Entry[]>;
   nowKeys: Record<Scope, string>;
+  collections: Collection[];
+  habits: Habit[];
   onOpen: (pk: string) => void;
+  onOpenCollection: (id: string) => void;
+  onNewCollection: () => void;
 }
 
-export default function IndexView({ days, nowKeys, onOpen }: Props) {
+export default function IndexView({
+  days,
+  nowKeys,
+  collections,
+  habits,
+  onOpen,
+  onOpenCollection,
+  onNewCollection,
+}: Props) {
   const groups: Record<Scope, string[]> = {
     day: [],
     week: [],
@@ -39,11 +52,57 @@ export default function IndexView({ days, nowKeys, onOpen }: Props) {
     <div>
       <div style={ST.head}>
         <h2 style={ST.title}>Index</h2>
-        <span style={ST.sub}>every page with entries</span>
+        <span style={ST.sub}>collections and every page with entries</span>
+        <span style={ST.nav}>
+          <button className="miniBtn" onClick={onNewCollection}>
+            new collection
+          </button>
+        </span>
       </div>
+      <section style={ST.group}>
+        <div style={ST.groupLabel}>Collections</div>
+        {collections.length === 0 && (
+          <div style={ST.empty}>
+            No collections yet — a collection is a freeform named page, like a
+            reading list or a habit tracker.
+          </div>
+        )}
+        <ul style={ST.list}>
+          {collections.map((c) => {
+            const colEntries = days[colPageKey(c.id)] || [];
+            const open = colEntries.filter(
+              (e) => e.type === "task" && e.state === "open"
+            ).length;
+            const habitCount = habits.filter(
+              (h) => h.collectionId === c.id
+            ).length;
+            const meta =
+              c.kind === "habits"
+                ? `${habitCount} habit${habitCount === 1 ? "" : "s"}`
+                : `${colEntries.length} entr${colEntries.length === 1 ? "y" : "ies"}` +
+                  (open > 0 ? ` · ${open} open` : "");
+            return (
+              <li key={c.id}>
+                <button
+                  className="indexRow"
+                  onClick={() => onOpenCollection(c.id)}
+                >
+                  <span>
+                    {c.name}
+                    <span className="typeTag">
+                      {c.kind === "habits" ? "habit tracker" : "list"}
+                    </span>
+                  </span>
+                  <span style={ST.count}>{meta}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
       {total === 0 && (
         <div style={ST.empty}>
-          Nothing here yet — pages appear in the index as you log entries.
+          No pages yet — they appear in the index as you log entries.
         </div>
       )}
       {SCOPES.map((sc) =>
@@ -102,6 +161,7 @@ const ST: Record<string, CSSProperties> = {
     lineHeight: 1.15,
   },
   sub: { fontSize: 11.5, color: INK_SOFT },
+  nav: { marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 },
   empty: { color: INK_SOFT, fontSize: 13, fontStyle: "italic", padding: "10px 4px" },
   group: { marginBottom: 14 },
   groupLabel: {

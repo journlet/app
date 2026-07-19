@@ -286,6 +286,80 @@ body {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
+.typeTag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 8px;
+}
+.habitWrap {
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+table.habits {
+  border-collapse: collapse;
+}
+.habits th {
+  font-size: 10px;
+  color: var(--ink-soft);
+  font-weight: 500;
+  padding: 2px 0 6px;
+  min-width: 30px;
+  text-align: center;
+}
+.habits th.today {
+  color: var(--ink);
+  font-weight: 700;
+}
+.habits td.name {
+  font-size: 13.5px;
+  padding: 4px 10px 4px 4px;
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  background: var(--paper);
+}
+.cell {
+  width: 30px;
+  height: 30px;
+  text-align: center;
+}
+.cellBtn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  margin: 0 auto;
+  display: block;
+}
+.cellBtn.isFilled {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.cellBtn.isToday {
+  border-color: var(--ink);
+  border-style: dashed;
+}
+.cellBtn.isFilled.isToday {
+  border-style: solid;
+}
+.cellBtn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.streak {
+  font-size: 11px;
+  color: var(--ink-soft);
+  padding-left: 8px;
+  white-space: nowrap;
+}
 .toastBtn {
   background: none;
   border: none;

@@ -12,6 +12,15 @@ import {
   todayKey,
 } from "./lib/dates";
 import IndexView from "./IndexView";
+import CollectionView from "./CollectionView";
+import { colPageKey } from "./lib/types";
+import type { CollectionKind } from "./lib/types";
+import {
+  addCollection,
+  removeCollection,
+  restoreCollection,
+} from "./store/journal";
+import type { CollectionSnapshot } from "./store/journal";
 import type { Scope } from "./lib/dates";
 import { GLYPH, STATE_GLYPH } from "./lib/types";
 import type { Entry } from "./lib/types";
@@ -38,11 +47,14 @@ interface SheetTarget {
 }
 
 interface DeletedToast {
-  entry: Entry;
+  entry?: Entry;
+  colSnap?: CollectionSnapshot;
 }
 
+type View = "spread" | "index" | { col: string };
+
 export default function App() {
-  const { loaded, saveState, days } = useJournal();
+  const { loaded, saveState, days, collections, habits } = useJournal();
 
   const sticky = useRef(loadSticky());
   const [captureScope, _setCaptureScope] = useState<CaptureScope>(
@@ -57,7 +69,8 @@ export default function App() {
   const [editText, setEditText] = useState<string | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
-  const [view, setView] = useState<"spread" | "index">("spread");
+  const [view, setView] = useState<View>("spread");
+  const [newCol, setNewCol] = useState<{ name: string; kind: CollectionKind } | null>(null);
   // Per-section browsing anchors; today unless the user steps away
   const [anchors, setAnchors] = useState<Record<Scope, string>>(() => ({
     day: todayKey(),
@@ -122,30 +135,42 @@ export default function App() {
       (days[k] || []).forEach((e) => futureItems.push({ pk: k, scope: sc, entry: e }));
     });
 
+  // Collection currently open, if any
+  const activeCol =
+    typeof view === "object"
+      ? collections.find((c) => c.id === view.col) ?? null
+      : null;
+
   const submitEntry = useCallback(() => {
     const text = input.trim();
     if (!text) return;
-    const pk =
-      captureScope === "date"
+    const pk = activeCol
+      ? colPageKey(activeCol.id)
+      : captureScope === "date"
         ? periodKey(customGran, customDate)
         : nowKeys[captureScope];
     addEntry(pk, captureType, text, capturePriority);
     setInput("");
     inputRef.current?.focus();
     // sticky state intentionally retained (spec §4.1)
-  }, [input, captureScope, captureType, capturePriority, customDate, customGran, nowKeys]);
+  }, [input, activeCol, captureScope, captureType, capturePriority, customDate, customGran, nowKeys]);
 
-  const deleteWithUndo = (id: string) => {
-    const snapshot = removeEntry(id);
-    if (!snapshot) return;
-    setToast({ entry: snapshot });
+  const showToast = (t: DeletedToast) => {
+    setToast(t);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 6000);
   };
 
+  const deleteWithUndo = (id: string) => {
+    const snapshot = removeEntry(id);
+    if (!snapshot) return;
+    showToast({ entry: snapshot });
+  };
+
   const undoDelete = () => {
     if (!toast) return;
-    restoreEntry(toast.entry);
+    if (toast.entry) restoreEntry(toast.entry);
+    if (toast.colSnap) restoreCollection(toast.colSnap);
     setToast(null);
     if (toastTimer.current) clearTimeout(toastTimer.current);
   };
@@ -245,9 +270,9 @@ export default function App() {
           <span style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
             <button
               className="miniBtn"
-              onClick={() => setView(view === "index" ? "spread" : "index")}
+              onClick={() => setView(view === "spread" ? "index" : "spread")}
             >
-              {view === "index" ? "back to journal" : "index"}
+              {view === "spread" ? "index" : "back to journal"}
             </button>
             <span style={S.saveDot}>
               {saveState === "saving" ? "saving…" : "saved"}
@@ -262,11 +287,29 @@ export default function App() {
           <IndexView
             days={days}
             nowKeys={nowKeys}
+            collections={collections}
+            habits={habits}
             onOpen={(pk) => {
               const sc = keyScope(pk);
               if (!sc) return;
               setAnchors((a) => ({ ...a, [sc]: keyToAnchor(pk) }));
               setView("spread");
+            }}
+            onOpenCollection={(id) => setView({ col: id })}
+            onNewCollection={() => setNewCol({ name: "", kind: "list" })}
+          />
+        )}
+        {loaded && activeCol && (
+          <CollectionView
+            collection={activeCol}
+            entries={days[colPageKey(activeCol.id)] || []}
+            habits={habits.filter((h) => h.collectionId === activeCol.id)}
+            renderEntry={(e) => renderEntry(e, colPageKey(activeCol.id), null)}
+            onBackToIndex={() => setView("index")}
+            onDelete={() => {
+              const snap = removeCollection(activeCol.id);
+              setView("index");
+              if (snap) showToast({ colSnap: snap });
             }}
           />
         )}
@@ -383,7 +426,9 @@ export default function App() {
         )}
       </main>
 
+      {activeCol?.kind !== "habits" && (
       <footer style={S.captureWrap}>
+        {!activeCol && (
         <div style={S.scopeRow} role="tablist" aria-label="Log into">
           {([...SCOPES, "date"] as CaptureScope[]).map((sc) => (
             <button
@@ -400,7 +445,8 @@ export default function App() {
             </button>
           ))}
         </div>
-        {captureScope === "date" && (
+        )}
+        {!activeCol && captureScope === "date" && (
           <div style={S.dateControls}>
             <input
               type="date"
@@ -458,9 +504,11 @@ export default function App() {
             onChange={(ev) => setInput(ev.target.value)}
             onKeyDown={(ev) => ev.key === "Enter" && submitEntry()}
             placeholder={
-              captureScope === "date"
-                ? "Log for the chosen date…"
-                : `Log for ${SCOPE_LABEL[captureScope].toLowerCase()}…`
+              activeCol
+                ? `Log into ${activeCol.name}…`
+                : captureScope === "date"
+                  ? "Log for the chosen date…"
+                  : `Log for ${SCOPE_LABEL[captureScope].toLowerCase()}…`
             }
             aria-label="New entry"
             enterKeyHint="done"
@@ -478,13 +526,75 @@ export default function App() {
           tap a task's bullet to complete it · ⋯ for entry actions
         </div>
       </footer>
+      )}
 
       {toast && (
         <div style={S.toast} role="status">
-          <span>Entry deleted</span>
+          <span>{toast.colSnap ? "Collection deleted" : "Entry deleted"}</span>
           <button className="toastBtn" onClick={undoDelete}>
             Undo
           </button>
+        </div>
+      )}
+
+      {newCol && (
+        <div style={S.sheetBackdrop} onClick={() => setNewCol(null)}>
+          <div
+            style={S.sheet}
+            role="dialog"
+            aria-label="New collection"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div style={S.sheetHandle} />
+            <div style={S.sheetGroupLabel}>New collection</div>
+            <input
+              style={S.sheetInput}
+              value={newCol.name}
+              autoFocus
+              placeholder="Collection name…"
+              onChange={(ev) => setNewCol({ ...newCol, name: ev.target.value })}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter" && newCol.name.trim()) {
+                  const c = addCollection(newCol.kind, newCol.name.trim());
+                  setNewCol(null);
+                  setView({ col: c.id });
+                }
+              }}
+              aria-label="Collection name"
+            />
+            <div style={S.sheetGroupLabel}>Type</div>
+            <div style={S.sheetRow}>
+              {(["list", "habits"] as CollectionKind[]).map((k) => (
+                <button
+                  key={k}
+                  className="sheetBtn isCompact"
+                  style={
+                    newCol.kind === k
+                      ? { border: "1.5px solid #26323E", fontWeight: 600 }
+                      : undefined
+                  }
+                  aria-pressed={newCol.kind === k}
+                  onClick={() => setNewCol({ ...newCol, kind: k })}
+                >
+                  {k === "habits" ? "Habit tracker" : "List"}
+                </button>
+              ))}
+            </div>
+            <button
+              className="sheetBtn"
+              disabled={!newCol.name.trim()}
+              onClick={() => {
+                const c = addCollection(newCol.kind, newCol.name.trim());
+                setNewCol(null);
+                setView({ col: c.id });
+              }}
+            >
+              Create collection
+            </button>
+            <button className="sheetBtn isQuiet" onClick={() => setNewCol(null)}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -626,7 +736,7 @@ export default function App() {
                       ))}
                     </div>
                   </>
-                ) : (
+                ) : keyScope(sheet.pk) !== null ? (
                   <>
                     <div style={S.sheetGroupLabel}>Move to</div>
                     <div style={S.sheetRow}>
@@ -644,7 +754,7 @@ export default function App() {
                       ))}
                     </div>
                   </>
-                )}
+                ) : null}
                 <button
                   className="sheetBtn"
                   onClick={() => {
