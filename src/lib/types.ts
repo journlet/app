@@ -17,6 +17,27 @@ export interface Entry {
   migratedFrom?: string;
 }
 
+export type CollectionKind = "list" | "habits";
+
+export interface Collection {
+  id: string;
+  kind: CollectionKind;
+  name: string;
+  createdAt: number;
+}
+
+export interface Habit {
+  id: string;
+  collectionId: string;
+  name: string;
+  createdAt: number;
+  /** ISO day keys that are filled */
+  marks: Record<string, true>;
+}
+
+/** Page key for a collection's entries (never matches a period key shape) */
+export const colPageKey = (id: string): string => `col:${id}`;
+
 // • task, ○ event, — note (never substituted, per spec §4.1)
 export const GLYPH: Record<EntryType, string> = {
   task: "•",
