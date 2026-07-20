@@ -13,6 +13,7 @@ import {
 } from "./lib/dates";
 import IndexView from "./IndexView";
 import CollectionView from "./CollectionView";
+import SyncView from "./SyncView";
 import { colPageKey } from "./lib/types";
 import type { CollectionKind } from "./lib/types";
 import {
@@ -51,7 +52,7 @@ interface DeletedToast {
   colSnap?: CollectionSnapshot;
 }
 
-type View = "spread" | "index" | { col: string };
+type View = "spread" | "index" | "sync" | { col: string };
 
 export default function App() {
   const { loaded, saveState, days, collections, habits } = useJournal();
@@ -274,6 +275,11 @@ export default function App() {
             >
               {view === "spread" ? "index" : "back to journal"}
             </button>
+            {view !== "sync" && (
+              <button className="miniBtn" onClick={() => setView("sync")}>
+                sync
+              </button>
+            )}
             <span style={S.saveDot}>
               {saveState === "saving" ? "saving…" : "saved"}
             </span>
@@ -298,6 +304,9 @@ export default function App() {
             onOpenCollection={(id) => setView({ col: id })}
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
+        )}
+        {loaded && view === "sync" && (
+          <SyncView onBack={() => setView("spread")} />
         )}
         {loaded && activeCol && (
           <CollectionView
@@ -426,7 +435,7 @@ export default function App() {
         )}
       </main>
 
-      {activeCol?.kind !== "habits" && (
+      {activeCol?.kind !== "habits" && view !== "sync" && (
       <footer style={S.captureWrap}>
         {!activeCol && (
         <div style={S.scopeRow} role="tablist" aria-label="Log into">

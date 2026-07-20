@@ -24,6 +24,17 @@ npm run build    # type-check + production build into dist/ (adds 404.html fallb
 npm run icons    # regenerate PWA icons from the SVG mark
 ```
 
+## Enable sync (Supabase)
+
+One-time setup, all in the Supabase dashboard:
+
+1. SQL Editor → paste and run `supabase/schema.sql` (tables + RLS + realtime).
+2. Authentication → Sign In / Up: enable Email with magic links (no passwords).
+3. Authentication → URL Configuration: set Site URL to `https://app.journlet.com`.
+4. Project Settings → API: copy the project URL and anon key into `src/lib/supabaseConfig.ts`, commit and push. Both values are safe to publish — RLS and E2EE do the guarding.
+
+In the app: Sync → enter your email → tap the emailed link. First device publishes its wrapped journal key; on any new device, sign in and paste the journal key (Sync → show journal key on the old device). Save that key somewhere safe — losing every device and the key means the journal is unrecoverable, by design.
+
 ## Run with Docker
 
 ```
