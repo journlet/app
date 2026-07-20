@@ -150,10 +150,21 @@ let connectedUserId: string | null = null;
 let dirty = false;
 let started = false;
 
+// Persistent shadow of the server's state this session: what the server
+// has (by id high-water mark) and its CRDT state vector, so catch-ups
+// fetch only unseen rows and pushes send only what the server lacks.
+let shadow: Y.Doc | null = null;
+let lastMaxId = 0;
+
+const ensureShadow = (): Y.Doc => (shadow ??= new Y.Doc());
+
 const teardown = () => {
   if (channel && supabase) void supabase.removeChannel(channel);
   channel = null;
   connectedUserId = null;
+  shadow?.destroy();
+  shadow = null;
+  lastMaxId = 0;
 };
 
 const pushPayload = async (update: Uint8Array): Promise<boolean> => {
@@ -164,6 +175,8 @@ const pushPayload = async (update: Uint8Array): Promise<boolean> => {
       .from("journal_updates")
       .insert({ payload });
     if (error) throw new Error(error.message);
+    // the server now has it — reflect that in the shadow immediately
+    Y.applyUpdate(ensureShadow(), update);
     return true;
   } catch (e) {
     dirty = true;
@@ -261,50 +274,58 @@ const applyRemotePayload = async (payloadB64: string): Promise<void> => {
   }
 };
 
+let reconciling = false;
+
 const reconcile = async (): Promise<boolean> => {
-  if (!supabase || !ring) return false;
-  const shadow = new Y.Doc();
+  if (!supabase || !ring || reconciling) return false;
+  reconciling = true;
+  const sh = ensureShadow();
   try {
-    for (let from = 0; ; from += PAGE) {
+    // Fetch only rows this session hasn't seen yet
+    for (;;) {
       const { data, error } = await supabase
         .from("journal_updates")
-        .select("payload")
+        .select("id,payload")
+        .gt("id", lastMaxId)
         .order("id", { ascending: true })
-        .range(from, from + PAGE - 1);
-      if (error) throw error;
+        .limit(PAGE);
+      if (error) throw new Error(error.message);
       for (const row of data ?? []) {
         try {
           const update = await decryptUpdate(
             ring.dataKey,
             b64decode(row.payload as string)
           );
-          Y.applyUpdate(shadow, update);
+          Y.applyUpdate(sh, update);
           Y.applyUpdate(doc, update, REMOTE_ORIGIN);
         } catch {
           console.warn("journlet: skipped an undecryptable update");
         }
+        lastMaxId = Math.max(lastMaxId, row.id as number);
       }
       if (!data || data.length < PAGE) break;
     }
     // Push whatever the server is missing (offline edits, first sync)
-    const diff = Y.encodeStateAsUpdate(doc, Y.encodeStateVector(shadow));
+    const diff = Y.encodeStateAsUpdate(doc, Y.encodeStateVector(sh));
     if (diff.length > 2) {
       const ok = await pushPayload(diff);
       if (!ok) return false;
     }
     dirty = false;
+    if (connectedUserId) setStatus("synced");
     return true;
   } catch (e) {
     setError(e);
     setStatus(navigator.onLine ? "pending" : "offline");
     return false;
   } finally {
-    shadow.destroy();
+    reconciling = false;
   }
 };
 
 const subscribe = () => {
   if (!supabase || !session || channel) return;
+  let everSubscribed = false;
   channel = supabase
     .channel("journal-updates")
     .on(
@@ -321,6 +342,12 @@ const subscribe = () => {
       }
     )
     .subscribe((state) => {
+      if (state === "SUBSCRIBED") {
+        // A re-join after a dropped socket means events were missed while
+        // down (realtime has no replay) — reconcile to catch up
+        if (everSubscribed) void reconcile();
+        everSubscribed = true;
+      }
       if (state === "CHANNEL_ERROR" || state === "TIMED_OUT")
         setStatus(navigator.onLine ? "pending" : "offline");
     });
@@ -375,6 +402,14 @@ export const startSync = (): void => {
   });
   window.addEventListener("offline", () => {
     if (session) setStatus("offline");
+  });
+
+  // Suspended devices (iOS PWAs especially) miss realtime events with no
+  // replay — catch up whenever the app comes back to the foreground
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !session) return;
+    if (connectedUserId) void reconcile();
+    else void connect();
   });
 };
 
