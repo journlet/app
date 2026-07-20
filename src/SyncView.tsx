@@ -10,6 +10,7 @@ import {
   getSessionEmail,
   getSyncError,
   getSyncStatus,
+  lostDevice,
   isConfigured,
   onSyncStatus,
   pendingJournalKey,
@@ -39,6 +40,8 @@ export default function SyncView({ onBack }: Props) {
   const [email, setEmail] = useState("");
   const [linkSent, setLinkSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
+  const [lostOpen, setLostOpen] = useState(false);
+  const [lostDone, setLostDone] = useState(false);
   const [keyCode, setKeyCode] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [keyEntry, setKeyEntry] = useState("");
@@ -401,6 +404,65 @@ export default function SyncView({ onBack }: Props) {
             To link a new device: install Journlet there, sign in with the
             same email, then enter this journal key when asked.
           </p>
+          <div style={ST.keyBox}>
+            <div style={ST.keyLabel}>Lost a device?</div>
+            {lostDone ? (
+              <p style={{ ...ST.p, marginTop: 0 }}>
+                Done. Every other device has been signed out and your journal
+                key has changed — the new one is shown above. Save it, and
+                use it to re-link the devices you still have.
+              </p>
+            ) : lostOpen ? (
+              <>
+                <p style={{ ...ST.p, marginTop: 0 }}>
+                  This signs out every device except this one and issues a
+                  new journal key. The lost device keeps what it already
+                  holds — no one can remotely erase it — but it can never
+                  download anything new, and the old key stops working.
+                  Afterwards, re-link your remaining devices with the new
+                  key.
+                </p>
+                <div style={ST.row}>
+                  <button
+                    className="sheetBtn isDanger"
+                    style={{ width: "auto" }}
+                    disabled={busy}
+                    onClick={async () => {
+                      setError(null);
+                      setBusy(true);
+                      try {
+                        const newCode = await lostDevice();
+                        setKeyCode(newCode);
+                        setLostDone(true);
+                        setLostOpen(false);
+                      } catch (e) {
+                        setError(
+                          e instanceof Error
+                            ? e.message
+                            : "Could not complete the lost-device steps"
+                        );
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    Sign out other devices and issue a new journal key
+                  </button>
+                  <button
+                    className="sheetBtn isQuiet"
+                    style={{ width: "auto" }}
+                    onClick={() => setLostOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button className="miniBtn" onClick={() => setLostOpen(true)}>
+                lost a device? sign it out
+              </button>
+            )}
+          </div>
           <button
             className="sheetBtn"
             style={{ maxWidth: 260 }}

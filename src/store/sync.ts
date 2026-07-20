@@ -15,9 +15,11 @@ import { doc } from "./journal";
 import {
   decryptUpdate,
   encryptUpdate,
+  generateKeeperKey,
   unwrapDataKey,
   importJournalKeyCode,
   exportJournalKeyCode,
+  wrapDataKey,
 } from "../lib/crypto";
 import type { WrappedDataKey } from "../lib/crypto";
 import { ensureKeys, replaceKeyRing } from "../lib/keystore";
@@ -384,6 +386,28 @@ export const signIn = async (email: string): Promise<void> => {
     options: { emailRedirectTo: window.location.origin },
   });
   if (error) throw new Error(error.message);
+};
+
+// Lost-device response: revoke every other session, then rotate the keeper
+// key (rewrapping the SAME data key — no re-encryption of history). The
+// lost device keeps its local copy — nothing can remotely erase that — but
+// it can never download anything new, and the old journal key code stops
+// unlocking the account. Returns the new journal key code to save.
+export const lostDevice = async (): Promise<string> => {
+  if (!supabase || !session) throw new Error("Not signed in");
+  ring ??= await ensureKeys();
+  const { error: soErr } = await supabase.auth.signOut({ scope: "others" });
+  if (soErr) throw new Error(soErr.message);
+  const keeperKey = await generateKeeperKey();
+  const wrapped = await wrapDataKey(ring.dataKey, keeperKey);
+  const { error } = await supabase
+    .from("journals")
+    .update({ wrapped_key: wrappedToJson(wrapped) })
+    .eq("user_id", session.user.id);
+  if (error) throw new Error(error.message);
+  ring = { keeperKey, dataKey: ring.dataKey, wrapped, createdAt: Date.now() };
+  await replaceKeyRing(ring);
+  return exportJournalKeyCode(keeperKey);
 };
 
 // Sign in by typing the 6-digit code from the email — the only way to get
