@@ -39,22 +39,31 @@ export const requestNotificationPermission =
     return Notification.requestPermission();
   };
 
-const fire = async (title: string, entryId: string): Promise<void> => {
+const fire = async (
+  title: string,
+  entryId: string,
+  remindAt: number
+): Promise<void> => {
+  // Tag is unique per (entry, time): same-tag notifications replace each
+  // other SILENTLY in Chrome unless renotify is set, which is how a
+  // lingering old notification can swallow a new one unseen.
+  const options: NotificationOptions & { renotify?: boolean } = {
+    body: "Journlet reminder",
+    tag: `journlet-${entryId}-${remindAt}`,
+    renotify: true,
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+  };
   try {
     const reg = await navigator.serviceWorker?.ready;
     if (reg) {
-      await reg.showNotification(title, {
-        body: "Journlet reminder",
-        tag: `journlet-${entryId}`,
-        icon: "/icon-192.png",
-        badge: "/icon-192.png",
-      });
+      await reg.showNotification(title, options);
       return;
     }
   } catch {
     // fall through to page-context notification
   }
-  new Notification(title, { body: "Journlet reminder" });
+  new Notification(title, options);
 };
 
 export const checkReminders = async (): Promise<void> => {
@@ -67,7 +76,7 @@ export const checkReminders = async (): Promise<void> => {
     if (e.state === "struck" || e.state === "migrated" || e.state === "done")
       continue;
     if (fired[e.id] === e.remindAt) continue;
-    await fire(e.text, e.id);
+    await fire(e.text, e.id, e.remindAt);
     fired[e.id] = e.remindAt;
     changed = true;
   }
