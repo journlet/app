@@ -66,7 +66,12 @@ export default function SyncView({ onBack }: Props) {
       await signIn(email.trim());
       setLinkSent(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not send the link");
+      const msg = e instanceof Error ? e.message : "";
+      setError(
+        msg && msg !== "{}"
+          ? msg
+          : "The sign-in email could not be sent — the server gave no detail. Usually an SMTP configuration problem; check the Supabase Auth logs."
+      );
     } finally {
       setBusy(false);
     }
