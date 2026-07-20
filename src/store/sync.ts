@@ -197,9 +197,10 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   }
   if (!data) {
     // First device: publish our wrapped data key
-    const { error: insErr } = await supabase
-      .from("journals")
-      .insert({ wrapped_key: wrappedToJson(ring.wrapped) });
+    const { error: insErr } = await supabase.from("journals").insert({
+      user_id: session?.user.id,
+      wrapped_key: wrappedToJson(ring.wrapped),
+    });
     if (insErr) {
       setError(`Server error saving your journal key: ${insErr.message}`);
       setStatus(navigator.onLine ? "pending" : "offline");

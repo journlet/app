@@ -4,7 +4,7 @@
 
 -- One row per user: the data key wrapped by the keeper (journal) key.
 create table if not exists public.journals (
-  user_id uuid primary key references auth.users (id) on delete cascade,
+  user_id uuid primary key default auth.uid() references auth.users (id) on delete cascade,
   wrapped_key jsonb not null,
   created_at timestamptz not null default now()
 );
