@@ -386,6 +386,22 @@ export const signIn = async (email: string): Promise<void> => {
   if (error) throw new Error(error.message);
 };
 
+// Sign in by typing the 6-digit code from the email — the only way to get
+// a session INSIDE an iOS home-screen app, since email links always open
+// in the default browser (whose storage is a different container).
+export const verifyEmailCode = async (
+  email: string,
+  code: string
+): Promise<void> => {
+  if (!supabase) throw new Error("Sync is not configured");
+  const { error } = await supabase.auth.verifyOtp({
+    email: email.trim(),
+    token: code.trim(),
+    type: "email",
+  });
+  if (error) throw new Error(error.message);
+};
+
 export const signOut = async (): Promise<void> => {
   if (!supabase) return;
   teardown();

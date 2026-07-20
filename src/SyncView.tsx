@@ -15,6 +15,7 @@ import {
   provideJournalKey,
   signIn,
   signOut,
+  verifyEmailCode,
 } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
 
@@ -36,6 +37,7 @@ export default function SyncView({ onBack }: Props) {
   const [status, setStatus] = useState<SyncStatus>(getSyncStatus());
   const [email, setEmail] = useState("");
   const [linkSent, setLinkSent] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
   const [keyCode, setKeyCode] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [keyEntry, setKeyEntry] = useState("");
@@ -148,10 +150,44 @@ export default function SyncView({ onBack }: Props) {
             </p>
           )}
           {linkSent ? (
-            <p style={ST.p}>
-              Check your email — the sign-in link brings you straight back
-              here.
-            </p>
+            <>
+              <p style={ST.p}>
+                Check your email. In a normal browser, tapping the link signs
+                you in. In the home-screen app, type the 6-digit code from
+                the same email here instead:
+              </p>
+              <div style={ST.row}>
+                <input
+                  style={{ ...ST.input, minWidth: 120, maxWidth: 160 }}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={otpCode}
+                  placeholder="123456"
+                  onChange={(ev) => setOtpCode(ev.target.value)}
+                  aria-label="Sign-in code from the email"
+                />
+                <button
+                  className="addBtn"
+                  disabled={busy || otpCode.trim().length < 6}
+                  onClick={async () => {
+                    setError(null);
+                    setBusy(true);
+                    try {
+                      await verifyEmailCode(email, otpCode);
+                      setOtpCode("");
+                    } catch (e) {
+                      setError(
+                        e instanceof Error ? e.message : "Code not accepted"
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Sign in with code
+                </button>
+              </div>
+            </>
           ) : (
             <div style={ST.row}>
               <input
