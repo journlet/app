@@ -61,6 +61,12 @@ const idbPut = async (key: string, value: unknown): Promise<void> => {
 
 let ringPromise: Promise<KeyRing> | null = null;
 
+/** Adopt a keyring from another device (journal key entry on link). */
+export const replaceKeyRing = async (ring: KeyRing): Promise<void> => {
+  await idbPut(RING_KEY, ring);
+  ringPromise = Promise.resolve(ring);
+};
+
 /** Load the device keyring, generating one silently on first launch. */
 export const ensureKeys = (): Promise<KeyRing> => {
   ringPromise ??= (async () => {
