@@ -7,5 +7,5 @@
 // Find them in your Supabase dashboard under Project Settings → API.
 // Leave both empty to run the app local-only with sync disabled.
 
-export const SUPABASE_URL = "";
-export const SUPABASE_ANON_KEY = "";
+export const SUPABASE_URL = "https://hpbdtcoskwmcggiyqtde.supabase.co";
+export const SUPABASE_ANON_KEY = "sb_publishable_9gAkQiTJHoEGIpr3Sr_y-A_1tLtJqg1";
