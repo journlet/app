@@ -1256,9 +1256,10 @@ const LINE = "#DCDAD1";
 
 const S: Record<string, CSSProperties> = {
   page: {
-    minHeight: "100dvh",
+    height: "100%",
     display: "flex",
     flexDirection: "column",
+    overflow: "hidden",
     background: PAPER,
     color: INK,
     fontFamily: "'Public Sans', system-ui, sans-serif",
@@ -1328,8 +1329,7 @@ const S: Record<string, CSSProperties> = {
   list: { listStyle: "none", margin: 0, padding: 0 },
   empty: { color: INK_SOFT, fontSize: 14, padding: "26px 4px", fontStyle: "italic" },
   captureWrap: {
-    position: "sticky",
-    bottom: 0,
+    position: "relative",
     zIndex: 30,
     background: PAPER,
     borderTop: `1px solid ${LINE}`,
