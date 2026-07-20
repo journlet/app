@@ -3,10 +3,11 @@
 // join this list when they arrive (build order step 4).
 
 import type { CSSProperties } from "react";
-import { SCOPES, keyScope, pageLabel } from "./lib/dates";
+import { SCOPES, keyScope, pageLabel, todayKey } from "./lib/dates";
 import type { Scope } from "./lib/dates";
 import { colPageKey } from "./lib/types";
 import type { Collection, Entry, Habit } from "./lib/types";
+import { buildMarkdown } from "./lib/exportMd";
 
 const GROUP_LABEL: Record<Scope, string> = {
   day: "Days",
@@ -56,6 +57,20 @@ export default function IndexView({
         <span style={ST.nav}>
           <button className="miniBtn" onClick={onNewCollection}>
             new collection
+          </button>
+          <button
+            className="miniBtn"
+            onClick={() => {
+              const md = buildMarkdown(days, collections, habits);
+              const blob = new Blob([md], { type: "text/markdown" });
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = `journlet-export-${todayKey()}.md`;
+              a.click();
+              URL.revokeObjectURL(a.href);
+            }}
+          >
+            export journal
           </button>
         </span>
       </div>
