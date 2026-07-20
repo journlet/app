@@ -245,7 +245,18 @@ export default function App() {
 
   const saveReminder = async () => {
     if (!sheet || !editRemind) return;
-    const ts = new Date(editRemind).getTime();
+    // Parse the datetime-local value by hand: engines disagree on whether
+    // timezone-less strings are local or UTC (Safari says UTC — an hour
+    // out in BST), so never let new Date(string) guess.
+    const m = editRemind.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!m) return;
+    const ts = new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5])
+    ).getTime();
     if (Number.isNaN(ts)) return;
     if (notificationPermission() === "default")
       await requestNotificationPermission();
