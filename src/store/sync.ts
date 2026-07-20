@@ -92,6 +92,43 @@ const wrappedFromJson = (j: WrappedKeyJson): WrappedDataKey => ({
 
 // ---------- engine state ----------
 
+// A journal key can arrive via QR: the other device shows a link like
+// https://app.journlet.com/#jk=J1-…; the phone camera opens it here. The
+// fragment never reaches any server. We stash it locally (it must survive
+// the magic-link redirect) and apply it once signed in.
+const PENDING_KEY = "journlet-pending-journal-key";
+
+const stashKeyFromUrl = (): void => {
+  const m = window.location.hash.match(/jk=([A-Za-z0-9-]+)/);
+  if (!m) return;
+  try {
+    localStorage.setItem(PENDING_KEY, m[1]);
+  } catch {
+    // storage unavailable — manual entry still works
+  }
+  history.replaceState(
+    null,
+    "",
+    window.location.pathname + window.location.search
+  );
+};
+
+export const pendingJournalKey = (): string | null => {
+  try {
+    return localStorage.getItem(PENDING_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const clearPendingKey = (): void => {
+  try {
+    localStorage.removeItem(PENDING_KEY);
+  } catch {
+    // best effort
+  }
+};
+
 let session: Session | null = null;
 let ring: KeyRing | null = null;
 let channel: RealtimeChannel | null = null;
@@ -275,7 +312,20 @@ const connect = async (): Promise<void> => {
   if (connectedUserId === session.user.id && channel) return;
   setStatus("connecting");
   ring = await ensureKeys();
-  if (!(await ensureJournalKeys())) return;
+  if (!(await ensureJournalKeys())) {
+    // A QR-scanned key may be waiting — try it before asking the user
+    const pending = pendingJournalKey();
+    if (getSyncStatus() === "needs-key" && pending) {
+      try {
+        await provideJournalKey(pending);
+        clearPendingKey();
+      } catch {
+        // wrong or stale key — leave needs-key showing for manual entry
+      }
+    }
+    return;
+  }
+  clearPendingKey(); // linked without needing it
   if (!(await reconcile())) return;
   connectedUserId = session.user.id;
   subscribe();
@@ -287,6 +337,7 @@ const connect = async (): Promise<void> => {
 export const startSync = (): void => {
   if (started || !supabase) return;
   started = true;
+  stashKeyFromUrl();
 
   supabase.auth.onAuthStateChange((_event, s) => {
     const wasUser = session?.user.id;

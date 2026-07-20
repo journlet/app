@@ -3,12 +3,14 @@
 
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
+import QRCode from "qrcode";
 import {
   getJournalKeyCode,
   getSessionEmail,
   getSyncStatus,
   isConfigured,
   onSyncStatus,
+  pendingJournalKey,
   provideJournalKey,
   signIn,
   signOut,
@@ -34,12 +36,25 @@ export default function SyncView({ onBack }: Props) {
   const [email, setEmail] = useState("");
   const [linkSent, setLinkSent] = useState(false);
   const [keyCode, setKeyCode] = useState<string | null>(null);
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [keyEntry, setKeyEntry] = useState("");
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => onSyncStatus(setStatus), []);
+
+  useEffect(() => {
+    if (!keyCode) {
+      setQrUrl(null);
+      return;
+    }
+    void QRCode.toDataURL(`${window.location.origin}/#jk=${keyCode}`, {
+      width: 220,
+      margin: 1,
+      color: { dark: "#26323E", light: "#F5F4EF" },
+    }).then(setQrUrl);
+  }, [keyCode]);
 
   const sendLink = async () => {
     setError(null);
@@ -125,6 +140,12 @@ export default function SyncView({ onBack }: Props) {
             Sign in to sync your journal across devices. Everything is
             end-to-end encrypted — the server only ever stores ciphertext.
           </p>
+          {pendingJournalKey() && (
+            <p style={{ ...ST.p, fontWeight: 600 }}>
+              Journal key received from the QR scan — sign in below and this
+              device links itself.
+            </p>
+          )}
           {linkSent ? (
             <p style={ST.p}>
               Check your email — the sign-in link brings you straight back
@@ -157,8 +178,9 @@ export default function SyncView({ onBack }: Props) {
         <>
           <p style={ST.p}>
             This account already has a journal, encrypted with a different
-            journal key. Enter the key from your other device (Sync → Show
-            journal key) to unlock it here.
+            journal key. Quickest: on your other device open Sync → show
+            journal key, and scan the QR there with this device's camera app.
+            Or type the key in below.
           </p>
           <input
             style={{ ...ST.input, width: "100%", marginBottom: 8 }}
@@ -193,6 +215,19 @@ export default function SyncView({ onBack }: Props) {
             </p>
             {keyCode ? (
               <>
+                {qrUrl && (
+                  <div style={{ textAlign: "center", margin: "4px 0 10px" }}>
+                    <img
+                      src={qrUrl}
+                      alt="Journal key as a QR code"
+                      style={{ width: 220, height: 220, borderRadius: 8 }}
+                    />
+                    <div style={{ fontSize: 12, color: "#6B7683" }}>
+                      on your new device: scan this with the camera app, then
+                      sign in — it links itself
+                    </div>
+                  </div>
+                )}
                 <code style={ST.code}>{keyCode}</code>
                 <div style={{ ...ST.row, marginTop: 8 }}>
                   <button className="miniBtn" onClick={copyKey}>
