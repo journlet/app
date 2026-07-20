@@ -15,6 +15,8 @@ import {
 import IndexView from "./IndexView";
 import CollectionView from "./CollectionView";
 import SyncView from "./SyncView";
+import { getSyncStatus, onSyncStatus } from "./store/sync";
+import type { SyncStatus } from "./store/sync";
 import { colPageKey } from "./lib/types";
 import type { CollectionKind } from "./lib/types";
 import {
@@ -64,6 +66,25 @@ interface DeletedToast {
 }
 
 type View = "spread" | "index" | "sync" | { col: string };
+
+// Always-visible sync state on the header button (spec §4.5); plain words,
+// attention colour when something needs the user
+const SYNC_BADGE: Record<SyncStatus, string> = {
+  disabled: "sync",
+  "signed-out": "sync · signed out",
+  connecting: "sync · connecting…",
+  "needs-key": "sync · key needed",
+  synced: "sync · synced",
+  pending: "sync · waiting",
+  offline: "sync · offline",
+};
+
+const SYNC_ATTENTION: SyncStatus[] = [
+  "signed-out",
+  "needs-key",
+  "pending",
+  "offline",
+];
 
 export default function App() {
   const { loaded, saveState, days, collections, habits, recurrences } =
@@ -259,6 +280,9 @@ export default function App() {
     closeSheet();
   };
 
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatus());
+  useEffect(() => onSyncStatus(setSyncStatus), []);
+
   // Re-render every 30s so due/overdue states stay current
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -433,8 +457,16 @@ export default function App() {
               {view === "spread" ? "index" : "back to journal"}
             </button>
             {view !== "sync" && (
-              <button className="miniBtn" onClick={() => setView("sync")}>
-                sync
+              <button
+                className="miniBtn"
+                style={
+                  SYNC_ATTENTION.includes(syncStatus)
+                    ? { color: "#A33", borderColor: "#E4C9C9" }
+                    : undefined
+                }
+                onClick={() => setView("sync")}
+              >
+                {SYNC_BADGE[syncStatus]}
               </button>
             )}
             <span style={S.saveDot}>
