@@ -151,35 +151,7 @@ export default function SyncView({ onBack }: Props) {
         video: { facingMode: "environment" },
       });
       streamRef.current = stream;
-      setScanning(true);
-      requestAnimationFrame(() => {
-        const video = videoRef.current;
-        if (!video) return;
-        video.srcObject = stream;
-        void video.play();
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        scanTimer.current = setInterval(() => {
-          if (!ctx || video.readyState < 2) return;
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          ctx.drawImage(video, 0, 0);
-          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const found = jsQR(img.data, img.width, img.height);
-          if (!found) return;
-          const code = extractKey(found.data);
-          if (!code) return;
-          stopScan();
-          setBusy(true);
-          provideJournalKey(code)
-            .catch((e) =>
-              setError(
-                e instanceof Error ? e.message : "That key did not work"
-              )
-            )
-            .finally(() => setBusy(false));
-        }, 300);
-      });
+      setScanning(true); // the effect below wires the stream up post-render
     } catch {
       setError(
         "Camera unavailable or blocked — you can type the key in instead."
@@ -187,6 +159,42 @@ export default function SyncView({ onBack }: Props) {
       setScanning(false);
     }
   };
+
+  // Attach the stream and start decoding only after the <video> element is
+  // definitely in the DOM (a first-time permission grant races an rAF here)
+  useEffect(() => {
+    if (!scanning) return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+    video.srcObject = stream;
+    void video.play();
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    scanTimer.current = setInterval(() => {
+      if (!ctx || video.readyState < 2) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      if (canvas.width === 0) return;
+      ctx.drawImage(video, 0, 0);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const found = jsQR(img.data, img.width, img.height);
+      if (!found) return;
+      const code = extractKey(found.data);
+      if (!code) return;
+      stopScan();
+      setBusy(true);
+      provideJournalKey(code)
+        .catch((e) =>
+          setError(e instanceof Error ? e.message : "That key did not work")
+        )
+        .finally(() => setBusy(false));
+    }, 300);
+    return () => {
+      if (scanTimer.current) clearInterval(scanTimer.current);
+      scanTimer.current = null;
+    };
+  }, [scanning, stopScan]);
 
   const signedIn =
     status !== "signed-out" && status !== "disabled" && getSessionEmail();
