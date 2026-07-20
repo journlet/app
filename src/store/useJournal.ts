@@ -22,11 +22,27 @@ export interface JournalSnapshot {
   habits: Habit[];
 }
 
+// Order a page: top-level entries by creation time, each followed by its
+// children (one level deep). Orphans — children whose parent left the page —
+// are promoted to top level.
+const orderPage = (list: Entry[]): Entry[] => {
+  list.sort((a, b) => a.createdAt - b.createdAt);
+  const ids = new Set(list.map((e) => e.id));
+  const ordered: Entry[] = [];
+  for (const e of list) {
+    if (e.parentId && ids.has(e.parentId)) continue; // placed under parent
+    if (e.parentId) e.parentId = undefined; // orphan → promote
+    ordered.push(e);
+    for (const child of list)
+      if (child.parentId === e.id) ordered.push(child);
+  }
+  return ordered;
+};
+
 const group = (list: Entry[]): Record<string, Entry[]> => {
   const days: Record<string, Entry[]> = {};
   for (const e of list) (days[e.pageKey] ??= []).push(e);
-  for (const k of Object.keys(days))
-    days[k].sort((a, b) => a.createdAt - b.createdAt);
+  for (const k of Object.keys(days)) days[k] = orderPage(days[k]);
   return days;
 };
 
