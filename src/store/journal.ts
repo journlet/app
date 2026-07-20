@@ -42,6 +42,7 @@ const toEntry = (m: Y.Map<unknown>): Entry => ({
   pageKey: m.get("pageKey") as string,
   createdAt: m.get("createdAt") as number,
   migratedFrom: (m.get("migratedFrom") as string | undefined) ?? undefined,
+  remindAt: (m.get("remindAt") as number | undefined) ?? undefined,
 });
 
 export const readAll = (): Entry[] => entries.map(toEntry);
@@ -73,7 +74,17 @@ const makeMap = (e: Entry): Y.Map<unknown> => {
   m.set("pageKey", e.pageKey);
   m.set("createdAt", e.createdAt);
   if (e.migratedFrom) m.set("migratedFrom", e.migratedFrom);
+  if (e.remindAt) m.set("remindAt", e.remindAt);
   return m;
+};
+
+export const setReminder = (id: string, remindAt: number | null): void => {
+  const m = findMap(id);
+  if (!m) return;
+  doc.transact(() => {
+    if (remindAt === null) m.delete("remindAt");
+    else m.set("remindAt", remindAt);
+  });
 };
 
 export const addEntry = (

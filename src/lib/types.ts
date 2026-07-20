@@ -15,6 +15,8 @@ export interface Entry {
   createdAt: number;
   /** id of the original entry this one was migrated from, if any */
   migratedFrom?: string;
+  /** reminder time (epoch ms) — synced encrypted like all content (spec §4.6) */
+  remindAt?: number;
 }
 
 export type CollectionKind = "list" | "habits";
