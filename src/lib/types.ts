@@ -21,6 +21,30 @@ export interface Entry {
   migratedFrom?: string;
   /** reminder time (epoch ms) — synced encrypted like all content (spec §4.6) */
   remindAt?: number;
+  /** id of the recurrence rule that materialised this entry */
+  recurrenceId?: string;
+}
+
+export type RecurrenceUnit = "day" | "week" | "month" | "year";
+
+/** A recurring entry rule; instances materialise client-side, no server */
+export interface Recurrence {
+  id: string;
+  text: string;
+  type: EntryType;
+  priority: boolean;
+  inspiration?: boolean;
+  everyN: number;
+  unit: RecurrenceUnit;
+  /** first occurrence day (YYYY-MM-DD) */
+  anchor: string;
+  /** optional reminder time for each occurrence, "HH:MM" */
+  remindTime?: string;
+  /** occurrences up to and including this day already exist */
+  materialisedThrough: string;
+  /** set when the user stops the recurrence */
+  endedAt?: number;
+  createdAt: number;
 }
 
 export type CollectionKind = "list" | "habits";

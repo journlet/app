@@ -11,8 +11,14 @@ import type {
   EntryState,
   EntryType,
   Habit,
+  Recurrence,
+  RecurrenceUnit,
 } from "../lib/types";
 import { colPageKey, uid } from "../lib/types";
+
+// Origin tag for updates applied from the sync layer (shared so other
+// modules can distinguish remote from local changes)
+export const REMOTE_ORIGIN = "journlet-remote";
 
 const DOC_NAME = "journlet-journal-v1";
 
@@ -28,6 +34,10 @@ export const entries = doc.getArray<Y.Map<unknown>>("entries");
 // habit trackers hold habits with per-day marks.
 export const collections = doc.getArray<Y.Map<unknown>>("collections");
 export const habits = doc.getArray<Y.Map<unknown>>("habits");
+
+// Recurring entry rules; instances are ordinary entries tagged with
+// recurrenceId, materialised client-side (no server-side code)
+export const recurrences = doc.getArray<Y.Map<unknown>>("recurrences");
 
 export const persistence = new IndexeddbPersistence(DOC_NAME, doc);
 
@@ -45,6 +55,7 @@ const toEntry = (m: Y.Map<unknown>): Entry => ({
   createdAt: m.get("createdAt") as number,
   migratedFrom: (m.get("migratedFrom") as string | undefined) ?? undefined,
   remindAt: (m.get("remindAt") as number | undefined) ?? undefined,
+  recurrenceId: (m.get("recurrenceId") as string | undefined) ?? undefined,
 });
 
 export const readAll = (): Entry[] => entries.map(toEntry);
@@ -79,7 +90,19 @@ const makeMap = (e: Entry): Y.Map<unknown> => {
   if (e.parentId) m.set("parentId", e.parentId);
   if (e.migratedFrom) m.set("migratedFrom", e.migratedFrom);
   if (e.remindAt) m.set("remindAt", e.remindAt);
+  if (e.recurrenceId) m.set("recurrenceId", e.recurrenceId);
   return m;
+};
+
+/** Insert a fully-formed entry (used by the recurrence materialiser). */
+export const insertEntry = (e: Entry): void => {
+  doc.transact(() => entries.push([makeMap(e)]));
+};
+
+export const tagEntryRecurrence = (id: string, ruleId: string): void => {
+  const m = findMap(id);
+  if (!m) return;
+  doc.transact(() => m.set("recurrenceId", ruleId));
 };
 
 export const setReminder = (id: string, remindAt: number | null): void => {
@@ -303,6 +326,66 @@ export const removeCollection = (id: string): CollectionSnapshot | null => {
     }
   });
   return snap;
+};
+
+// ---------- recurrences ----------
+
+const toRecurrence = (m: Y.Map<unknown>): Recurrence => ({
+  id: m.get("id") as string,
+  text: m.get("text") as string,
+  type: m.get("type") as EntryType,
+  priority: Boolean(m.get("priority")),
+  inspiration: Boolean(m.get("inspiration")) || undefined,
+  everyN: m.get("everyN") as number,
+  unit: m.get("unit") as RecurrenceUnit,
+  anchor: m.get("anchor") as string,
+  remindTime: (m.get("remindTime") as string | undefined) ?? undefined,
+  materialisedThrough: m.get("materialisedThrough") as string,
+  endedAt: (m.get("endedAt") as number | undefined) ?? undefined,
+  createdAt: m.get("createdAt") as number,
+});
+
+export const readRecurrences = (): Recurrence[] => recurrences.map(toRecurrence);
+
+const findRecurrenceMap = (id: string): Y.Map<unknown> | null => {
+  for (let i = 0; i < recurrences.length; i++) {
+    const m = recurrences.get(i);
+    if (m.get("id") === id) return m;
+  }
+  return null;
+};
+
+export const addRecurrence = (
+  r: Omit<Recurrence, "id" | "createdAt">
+): Recurrence => {
+  const rule: Recurrence = { ...r, id: uid(), createdAt: Date.now() };
+  const m = new Y.Map<unknown>();
+  m.set("id", rule.id);
+  m.set("text", rule.text);
+  m.set("type", rule.type);
+  m.set("priority", rule.priority);
+  if (rule.inspiration) m.set("inspiration", true);
+  m.set("everyN", rule.everyN);
+  m.set("unit", rule.unit);
+  m.set("anchor", rule.anchor);
+  if (rule.remindTime) m.set("remindTime", rule.remindTime);
+  m.set("materialisedThrough", rule.materialisedThrough);
+  m.set("createdAt", rule.createdAt);
+  doc.transact(() => recurrences.push([m]));
+  return rule;
+};
+
+export const endRecurrence = (id: string): void => {
+  const m = findRecurrenceMap(id);
+  if (!m) return;
+  doc.transact(() => m.set("endedAt", Date.now()));
+};
+
+export const advanceRecurrence = (id: string, through: string): void => {
+  const m = findRecurrenceMap(id);
+  if (!m) return;
+  if ((m.get("materialisedThrough") as string) >= through) return;
+  doc.transact(() => m.set("materialisedThrough", through));
 };
 
 export const restoreCollection = (snap: CollectionSnapshot): void => {

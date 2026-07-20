@@ -6,6 +6,8 @@ import App from "./App";
 import { ensureKeys } from "./lib/keystore";
 import { startSync } from "./store/sync";
 import { startReminderLoop } from "./store/reminders";
+import { startRecurrenceLoop } from "./store/recurrence";
+import { persistence } from "./store/journal";
 
 registerSW({ immediate: true });
 
@@ -17,6 +19,9 @@ startSync();
 
 // Local reminder notifications (spec §4.6) — no-op until permission granted
 startReminderLoop();
+
+// Recurring entries materialise once the local journal has loaded
+void persistence.whenSynced.then(startRecurrenceLoop);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

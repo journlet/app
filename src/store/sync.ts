@@ -11,7 +11,7 @@
 import * as Y from "yjs";
 import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
-import { doc } from "./journal";
+import { doc, REMOTE_ORIGIN } from "./journal";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -35,7 +35,6 @@ export type SyncStatus =
   | "pending" // local changes not yet on the server
   | "offline";
 
-const REMOTE_ORIGIN = "journlet-remote";
 const PAGE = 1000;
 
 export const isConfigured = (): boolean =>
