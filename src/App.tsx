@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import {
   SCOPES,
   SCOPE_LABEL,
+  dkey,
   keyScope,
   keyToAnchor,
   pageLabel,
@@ -20,7 +21,12 @@ import {
   addCollection,
   removeCollection,
   restoreCollection,
+  setReminder,
 } from "./store/journal";
+import {
+  notificationPermission,
+  requestNotificationPermission,
+} from "./store/reminders";
 import type { CollectionSnapshot } from "./store/journal";
 import type { Scope } from "./lib/dates";
 import { GLYPH, STATE_GLYPH } from "./lib/types";
@@ -68,6 +74,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [sheet, setSheet] = useState<SheetTarget | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
+  const [editRemind, setEditRemind] = useState<string | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [view, setView] = useState<View>("spread");
@@ -142,6 +149,18 @@ export default function App() {
       ? collections.find((c) => c.id === view.col) ?? null
       : null;
 
+  // Due view (spec §4.6): overdue and due-today reminders on open entries
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+  const dueItems: { pk: string; entry: Entry }[] = [];
+  Object.keys(days).forEach((k) => {
+    (days[k] || []).forEach((e) => {
+      if (!e.remindAt || e.state !== "open") return;
+      if (e.remindAt <= endOfToday.getTime()) dueItems.push({ pk: k, entry: e });
+    });
+  });
+  dueItems.sort((a, b) => (a.entry.remindAt ?? 0) - (b.entry.remindAt ?? 0));
+
   const submitEntry = useCallback(() => {
     const text = input.trim();
     if (!text) return;
@@ -179,6 +198,48 @@ export default function App() {
   const closeSheet = () => {
     setSheet(null);
     setEditText(null);
+    setEditRemind(null);
+  };
+
+  // Re-render every 30s so due/overdue states stay current
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const fmtRemind = (ts: number): string => {
+    const d = new Date(ts);
+    const time = d.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return dkey(d) === todayKey()
+      ? time
+      : `${d.toLocaleDateString("en-GB", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+        })}, ${time}`;
+  };
+
+  // datetime-local wants "YYYY-MM-DDTHH:MM" in local time
+  const toLocalInput = (ts: number): string => {
+    const d = new Date(ts);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
+      d.getHours()
+    )}:${p(d.getMinutes())}`;
+  };
+
+  const saveReminder = async () => {
+    if (!sheet || !editRemind) return;
+    const ts = new Date(editRemind).getTime();
+    if (Number.isNaN(ts)) return;
+    if (notificationPermission() === "default")
+      await requestNotificationPermission();
+    setReminder(sheet.id, ts);
+    closeSheet();
   };
 
   const sheetEntry: Entry | null = sheet
@@ -249,6 +310,11 @@ export default function App() {
       >
         {e.priority && <span className="prio">*</span>}
         {e.text}
+        {e.remindAt && (
+          <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
+            remind {fmtRemind(e.remindAt)}
+          </span>
+        )}
       </span>
       <span className="actions">
         <button
@@ -330,6 +396,19 @@ export default function App() {
             </span>
             <span style={{ fontSize: 12.5 }}>Review and migrate ›</span>
           </button>
+        )}
+        {loaded && view === "spread" && dueItems.length > 0 && (
+          <section style={S.section}>
+            <div style={S.sectionHead}>
+              <h2 style={S.sectionTitle}>Due</h2>
+              <span style={S.sectionSub}>reminders — overdue and today</span>
+            </div>
+            <ul style={S.list}>
+              {dueItems.map(({ pk, entry }) =>
+                renderEntry(entry, pk, keyScope(pk))
+              )}
+            </ul>
+          </section>
         )}
         {loaded &&
           view === "spread" &&
@@ -688,7 +767,49 @@ export default function App() {
             onClick={(ev) => ev.stopPropagation()}
           >
             <div style={S.sheetHandle} />
-            {editText === null ? (
+            {editRemind !== null ? (
+              <>
+                <div style={S.sheetGroupLabel}>Reminder</div>
+                <input
+                  type="datetime-local"
+                  style={S.sheetInput}
+                  value={editRemind}
+                  onChange={(ev) => setEditRemind(ev.target.value)}
+                  aria-label="Reminder date and time"
+                />
+                {notificationPermission() === "denied" && (
+                  <p style={{ fontSize: 12.5, color: "#6B7683", margin: "0 4px 10px" }}>
+                    Notifications are blocked in your browser settings, so
+                    nothing will pop up — but anything due still appears in
+                    the Due section at the top of the journal.
+                  </p>
+                )}
+                <button
+                  className="sheetBtn"
+                  disabled={!editRemind}
+                  onClick={() => void saveReminder()}
+                >
+                  Save reminder
+                </button>
+                {sheetEntry.remindAt && (
+                  <button
+                    className="sheetBtn isDanger"
+                    onClick={() => {
+                      setReminder(sheet.id, null);
+                      closeSheet();
+                    }}
+                  >
+                    Remove reminder
+                  </button>
+                )}
+                <button
+                  className="sheetBtn isQuiet"
+                  onClick={() => setEditRemind(null)}
+                >
+                  Back
+                </button>
+              </>
+            ) : editText === null ? (
               <>
                 <div style={S.sheetEntry}>
                   <span style={{ marginRight: 8 }}>{GLYPH[sheetEntry.type]}</span>
@@ -713,6 +834,18 @@ export default function App() {
                   onClick={() => setEditText(sheetEntry.text)}
                 >
                   Edit text
+                </button>
+                <button
+                  className="sheetBtn"
+                  onClick={() =>
+                    setEditRemind(
+                      toLocalInput(sheetEntry.remindAt ?? Date.now() + 3600_000)
+                    )
+                  }
+                >
+                  {sheetEntry.remindAt
+                    ? `Change reminder (${fmtRemind(sheetEntry.remindAt)})`
+                    : "Set reminder"}
                 </button>
                 {sheetEntry.type === "task" && (
                   <button
