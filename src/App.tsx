@@ -19,11 +19,15 @@ import { colPageKey } from "./lib/types";
 import type { CollectionKind } from "./lib/types";
 import {
   addCollection,
+  addRecurrence,
+  endRecurrence,
   removeCollection,
   restoreCollection,
   setParent,
   setReminder,
+  tagEntryRecurrence,
 } from "./store/journal";
+import type { RecurrenceUnit } from "./lib/types";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -62,7 +66,8 @@ interface DeletedToast {
 type View = "spread" | "index" | "sync" | { col: string };
 
 export default function App() {
-  const { loaded, saveState, days, collections, habits } = useJournal();
+  const { loaded, saveState, days, collections, habits, recurrences } =
+    useJournal();
 
   const sticky = useRef(loadSticky());
   const [captureScope, _setCaptureScope] = useState<CaptureScope>(
@@ -79,6 +84,11 @@ export default function App() {
   const [sheet, setSheet] = useState<SheetTarget | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
   const [editRemind, setEditRemind] = useState<string | null>(null);
+  const [editRepeat, setEditRepeat] = useState<{
+    n: string;
+    unit: RecurrenceUnit;
+    time: string;
+  } | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [view, setView] = useState<View>("spread");
@@ -210,6 +220,43 @@ export default function App() {
     setSheet(null);
     setEditText(null);
     setEditRemind(null);
+    setEditRepeat(null);
+  };
+
+  const cadenceLabel = (n: number, unit: RecurrenceUnit) =>
+    `every ${n > 1 ? `${n} ` : ""}${unit}${n > 1 ? "s" : ""}`;
+
+  const saveRepeat = () => {
+    if (!sheet || !sheetEntry || !editRepeat) return;
+    const n = Math.max(1, parseInt(editRepeat.n, 10) || 1);
+    const time = /^\d{2}:\d{2}$/.test(editRepeat.time)
+      ? editRepeat.time
+      : undefined;
+    const rule = addRecurrence({
+      text: sheetEntry.text,
+      type: sheetEntry.type,
+      priority: sheetEntry.priority,
+      inspiration: sheetEntry.inspiration,
+      everyN: n,
+      unit: editRepeat.unit,
+      anchor: sheet.pk,
+      remindTime: time,
+      materialisedThrough: sheet.pk,
+    });
+    tagEntryRecurrence(sheet.id, rule.id);
+    if (time && !sheetEntry.remindAt) {
+      const [hh, mm] = time.split(":").map(Number);
+      const d = new Date(sheet.pk + "T00:00");
+      const ts = new Date(
+        d.getFullYear(),
+        d.getMonth(),
+        d.getDate(),
+        hh,
+        mm
+      ).getTime();
+      setReminder(sheet.id, ts);
+    }
+    closeSheet();
   };
 
   // Re-render every 30s so due/overdue states stay current
@@ -352,6 +399,11 @@ export default function App() {
         {e.remindAt && (
           <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
             remind {fmtRemind(e.remindAt)}
+          </span>
+        )}
+        {e.recurrenceId && (
+          <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
+            repeats
           </span>
         )}
       </span>
@@ -818,7 +870,75 @@ export default function App() {
             onClick={(ev) => ev.stopPropagation()}
           >
             <div style={S.sheetHandle} />
-            {editRemind !== null ? (
+            {editRepeat !== null ? (
+              <>
+                <div style={S.sheetGroupLabel}>Repeat this entry</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ fontSize: 14 }}>every</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={editRepeat.n}
+                    onChange={(ev) =>
+                      setEditRepeat({ ...editRepeat, n: ev.target.value })
+                    }
+                    style={{ ...S.sheetInput, width: 72, marginBottom: 0 }}
+                    aria-label="Repeat interval"
+                  />
+                  <div style={{ display: "flex", gap: 4, flex: 1 }}>
+                    {(["day", "week", "month", "year"] as RecurrenceUnit[]).map(
+                      (u) => (
+                        <button
+                          key={u}
+                          className={
+                            "scopeBtn" + (editRepeat.unit === u ? " isActive" : "")
+                          }
+                          style={{
+                            background:
+                              editRepeat.unit === u ? "#FFFFFF" : "none",
+                          }}
+                          onClick={() =>
+                            setEditRepeat({ ...editRepeat, unit: u })
+                          }
+                        >
+                          {u}s
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+                <div style={S.sheetGroupLabel}>
+                  Reminder time on each occurrence (optional)
+                </div>
+                <input
+                  type="time"
+                  value={editRepeat.time}
+                  onChange={(ev) =>
+                    setEditRepeat({ ...editRepeat, time: ev.target.value })
+                  }
+                  style={{ ...S.sheetInput, maxWidth: 160 }}
+                  aria-label="Reminder time for each occurrence"
+                />
+                <p style={{ fontSize: 12.5, color: "#6B7683", margin: "0 4px 10px" }}>
+                  Starting from this entry's page, a fresh copy appears{" "}
+                  {cadenceLabel(
+                    Math.max(1, parseInt(editRepeat.n, 10) || 1),
+                    editRepeat.unit
+                  )}
+                  . Completing one occurrence never touches the next.
+                </p>
+                <button className="sheetBtn" onClick={saveRepeat}>
+                  Start repeating
+                </button>
+                <button
+                  className="sheetBtn isQuiet"
+                  onClick={() => setEditRepeat(null)}
+                >
+                  Back
+                </button>
+              </>
+            ) : editRemind !== null ? (
               <>
                 <div style={S.sheetGroupLabel}>Reminder</div>
                 <input
@@ -931,6 +1051,42 @@ export default function App() {
                     Move to top level
                   </button>
                 )}
+                {keyScope(sheet.pk) === "day" &&
+                  !sheetEntry.recurrenceId && (
+                    <button
+                      className="sheetBtn"
+                      onClick={() =>
+                        setEditRepeat({
+                          n: "1",
+                          unit: "week",
+                          time: sheetEntry.remindAt
+                            ? new Date(sheetEntry.remindAt)
+                                .toTimeString()
+                                .slice(0, 5)
+                            : "",
+                        })
+                      }
+                    >
+                      Repeat this entry…
+                    </button>
+                  )}
+                {sheetEntry.recurrenceId &&
+                  (() => {
+                    const rule = recurrences.find(
+                      (r) => r.id === sheetEntry.recurrenceId && !r.endedAt
+                    );
+                    return rule ? (
+                      <button
+                        className="sheetBtn"
+                        onClick={() => {
+                          endRecurrence(rule.id);
+                          closeSheet();
+                        }}
+                      >
+                        Stop repeating ({cadenceLabel(rule.everyN, rule.unit)})
+                      </button>
+                    ) : null;
+                  })()}
                 {sheetMigrates ? (
                   <>
                     <div style={S.sheetGroupLabel}>

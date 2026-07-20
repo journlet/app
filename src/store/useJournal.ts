@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Collection, Entry, Habit } from "../lib/types";
+import type { Collection, Entry, Habit, Recurrence } from "../lib/types";
 import {
   collections as collectionsArr,
   doc,
@@ -9,6 +9,8 @@ import {
   readAll,
   readCollections,
   readHabits,
+  readRecurrences,
+  recurrences as recurrencesArr,
 } from "./journal";
 
 export type SaveState = "saved" | "saving";
@@ -20,6 +22,7 @@ export interface JournalSnapshot {
   days: Record<string, Entry[]>;
   collections: Collection[];
   habits: Habit[];
+  recurrences: Recurrence[];
 }
 
 // Order a page: top-level entries by creation time, each followed by its
@@ -50,6 +53,7 @@ export function useJournal(): JournalSnapshot {
   const [days, setDays] = useState<Record<string, Entry[]>>({});
   const [collections, setCollections] = useState<Collection[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
+  const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -59,6 +63,7 @@ export function useJournal(): JournalSnapshot {
       setDays(group(readAll()));
       setCollections(readCollections());
       setHabits(readHabits());
+      setRecurrences(readRecurrences());
     };
 
     // y-indexeddb writes every update; surface a brief "saving…" cue
@@ -71,6 +76,7 @@ export function useJournal(): JournalSnapshot {
     entries.observeDeep(refresh);
     collectionsArr.observeDeep(refresh);
     habitsArr.observeDeep(refresh);
+    recurrencesArr.observeDeep(refresh);
     doc.on("update", onUpdate);
     persistence.whenSynced.then(() => {
       refresh();
@@ -81,10 +87,11 @@ export function useJournal(): JournalSnapshot {
       entries.unobserveDeep(refresh);
       collectionsArr.unobserveDeep(refresh);
       habitsArr.unobserveDeep(refresh);
+      recurrencesArr.unobserveDeep(refresh);
       doc.off("update", onUpdate);
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, []);
 
-  return { loaded, saveState, days, collections, habits };
+  return { loaded, saveState, days, collections, habits, recurrences };
 }
