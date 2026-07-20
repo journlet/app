@@ -1,9 +1,10 @@
 // Sync screen: magic-link sign in, sync status, journal key save/entry,
 // sign out. Every action plainly labelled (spec §4.1 no-guessing rule).
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import QRCode from "qrcode";
+import jsQR from "jsqr";
 import {
   getJournalKeyCode,
   getSessionEmail,
@@ -119,6 +120,74 @@ export default function SyncView({ onBack }: Props) {
     }
   };
 
+  // ---- in-app QR scanning (the only linking path that works inside an
+  // iOS home-screen app, where external links open in the browser) ----
+  const [scanning, setScanning] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopScan = useCallback(() => {
+    if (scanTimer.current) clearInterval(scanTimer.current);
+    scanTimer.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setScanning(false);
+  }, []);
+
+  useEffect(() => stopScan, [stopScan]);
+
+  const extractKey = (s: string): string | null => {
+    const m = s.match(/jk=([A-Za-z0-9-]+)/);
+    if (m) return m[1];
+    const t = s.trim();
+    return /^J1-/i.test(t) ? t : null;
+  };
+
+  const startScan = async () => {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
+      streamRef.current = stream;
+      setScanning(true);
+      requestAnimationFrame(() => {
+        const video = videoRef.current;
+        if (!video) return;
+        video.srcObject = stream;
+        void video.play();
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        scanTimer.current = setInterval(() => {
+          if (!ctx || video.readyState < 2) return;
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const found = jsQR(img.data, img.width, img.height);
+          if (!found) return;
+          const code = extractKey(found.data);
+          if (!code) return;
+          stopScan();
+          setBusy(true);
+          provideJournalKey(code)
+            .catch((e) =>
+              setError(
+                e instanceof Error ? e.message : "That key did not work"
+              )
+            )
+            .finally(() => setBusy(false));
+        }, 300);
+      });
+    } catch {
+      setError(
+        "Camera unavailable or blocked — you can type the key in instead."
+      );
+      setScanning(false);
+    }
+  };
+
   const signedIn =
     status !== "signed-out" && status !== "disabled" && getSessionEmail();
 
@@ -221,9 +290,40 @@ export default function SyncView({ onBack }: Props) {
           <p style={ST.p}>
             This account already has a journal, encrypted with a different
             journal key. Quickest: on your other device open Sync → show
-            journal key, and scan the QR there with this device's camera app.
-            Or type the key in below.
+            journal key, then scan its QR with the camera button below. Or
+            type the key in.
           </p>
+          {scanning ? (
+            <div style={{ marginBottom: 10 }}>
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                style={{
+                  width: "100%",
+                  maxWidth: 320,
+                  borderRadius: 10,
+                  border: `1px solid ${LINE}`,
+                  display: "block",
+                }}
+              />
+              <button
+                className="sheetBtn isQuiet"
+                style={{ maxWidth: 320 }}
+                onClick={stopScan}
+              >
+                Cancel scanning
+              </button>
+            </div>
+          ) : (
+            <button
+              className="sheetBtn"
+              style={{ maxWidth: 320, marginBottom: 10 }}
+              onClick={() => void startScan()}
+            >
+              Scan journal key with the camera
+            </button>
+          )}
           <input
             style={{ ...ST.input, width: "100%", marginBottom: 8 }}
             value={keyEntry}
@@ -265,8 +365,8 @@ export default function SyncView({ onBack }: Props) {
                       style={{ width: 220, height: 220, borderRadius: 8 }}
                     />
                     <div style={{ fontSize: 12, color: "#6B7683" }}>
-                      on your new device: scan this with the camera app, then
-                      sign in — it links itself
+                      on your new device: sign in, then Sync → "Scan journal
+                      key with the camera" and point it here
                     </div>
                   </div>
                 )}
