@@ -55,6 +55,19 @@ const setStatus = (s: SyncStatus) => {
 
 export const getSyncStatus = (): SyncStatus => status;
 
+// Last server error, surfaced on the Sync screen so a schema/RLS problem
+// doesn't masquerade as "offline"
+let lastError: string | null = null;
+export const getSyncError = (): string | null => lastError;
+const setError = (e: unknown) => {
+  lastError =
+    e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
+  listeners.forEach((fn) => fn(status));
+};
+const clearError = () => {
+  lastError = null;
+};
+
 export const onSyncStatus = (fn: (s: SyncStatus) => void): (() => void) => {
   listeners.add(fn);
   fn(status);
@@ -149,10 +162,11 @@ const pushPayload = async (update: Uint8Array): Promise<boolean> => {
     const { error } = await supabase
       .from("journal_updates")
       .insert({ payload });
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
-  } catch {
+  } catch (e) {
     dirty = true;
+    setError(e);
     setStatus(navigator.onLine ? "pending" : "offline");
     return false;
   }
@@ -177,7 +191,8 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     .select("wrapped_key")
     .maybeSingle();
   if (error) {
-    setStatus("offline");
+    setError(`Server error reading your journal: ${error.message}`);
+    setStatus(navigator.onLine ? "pending" : "offline");
     return false;
   }
   if (!data) {
@@ -186,7 +201,8 @@ const ensureJournalKeys = async (): Promise<boolean> => {
       .from("journals")
       .insert({ wrapped_key: wrappedToJson(ring.wrapped) });
     if (insErr) {
-      setStatus("offline");
+      setError(`Server error saving your journal key: ${insErr.message}`);
+      setStatus(navigator.onLine ? "pending" : "offline");
       return false;
     }
     return true;
@@ -276,7 +292,8 @@ const reconcile = async (): Promise<boolean> => {
     }
     dirty = false;
     return true;
-  } catch {
+  } catch (e) {
+    setError(e);
     setStatus(navigator.onLine ? "pending" : "offline");
     return false;
   } finally {
@@ -310,6 +327,7 @@ const subscribe = () => {
 const connect = async (): Promise<void> => {
   if (!supabase || !session) return;
   if (connectedUserId === session.user.id && channel) return;
+  clearError();
   setStatus("connecting");
   ring = await ensureKeys();
   if (!(await ensureJournalKeys())) {

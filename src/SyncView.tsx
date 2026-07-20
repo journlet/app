@@ -7,6 +7,7 @@ import QRCode from "qrcode";
 import {
   getJournalKeyCode,
   getSessionEmail,
+  getSyncError,
   getSyncStatus,
   isConfigured,
   onSyncStatus,
@@ -262,6 +263,9 @@ export default function SyncView({ onBack }: Props) {
       )}
 
       {error && <p style={ST.error}>{error}</p>}
+      {getSyncError() && (
+        <p style={ST.error}>Last sync problem: {getSyncError()}</p>
+      )}
     </section>
   );
 }
