@@ -28,10 +28,11 @@ const fmtStamp = (ts: number): string =>
 const entryLine = (e: Entry): string => {
   const glyph =
     e.state === "done" ? "×" : e.state === "migrated" ? ">" : GLYPH[e.type];
-  let text = `${e.priority ? "\\* " : ""}${glyph} ${e.text}`;
+  const signifiers = `${e.priority ? "\\* " : ""}${e.inspiration ? "! " : ""}`;
+  let text = `${signifiers}${glyph} ${e.text}`;
   if (e.state === "struck") text = `~~${text}~~`;
   if (e.remindAt) text += ` _(remind ${fmtStamp(e.remindAt)})_`;
-  return `- ${text}`;
+  return `${e.parentId ? "  " : ""}- ${text}`;
 };
 
 export const buildMarkdown = (

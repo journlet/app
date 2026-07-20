@@ -21,6 +21,7 @@ import {
   addCollection,
   removeCollection,
   restoreCollection,
+  setParent,
   setReminder,
 } from "./store/journal";
 import {
@@ -71,6 +72,9 @@ export default function App() {
   const [capturePriority, _setCapturePriority] = useState(
     sticky.current.priority
   );
+  const [captureInspiration, _setCaptureInspiration] = useState(
+    sticky.current.inspiration
+  );
   const [input, setInput] = useState("");
   const [sheet, setSheet] = useState<SheetTarget | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
@@ -109,6 +113,13 @@ export default function App() {
     _setCapturePriority((prev) => {
       const next = fn(prev);
       sticky.current.priority = next;
+      persistSticky();
+      return next;
+    });
+  const setCaptureInspiration = (fn: (v: boolean) => boolean) =>
+    _setCaptureInspiration((prev) => {
+      const next = fn(prev);
+      sticky.current.inspiration = next;
       persistSticky();
       return next;
     });
@@ -169,11 +180,11 @@ export default function App() {
       : captureScope === "date"
         ? periodKey(customGran, customDate)
         : nowKeys[captureScope];
-    addEntry(pk, captureType, text, capturePriority);
+    addEntry(pk, captureType, text, capturePriority, captureInspiration);
     setInput("");
     inputRef.current?.focus();
     // sticky state intentionally retained (spec §4.1)
-  }, [input, activeCol, captureScope, captureType, capturePriority, customDate, customGran, nowKeys]);
+  }, [input, activeCol, captureScope, captureType, capturePriority, captureInspiration, customDate, customGran, nowKeys]);
 
   const showToast = (t: DeletedToast) => {
     setToast(t);
@@ -246,6 +257,22 @@ export default function App() {
     ? (days[sheet.pk] || []).find((x) => x.id === sheet.id) ?? null
     : null;
 
+  // Nesting context: candidate parent above, and whether this entry has kids
+  const sheetPageList = sheet ? days[sheet.pk] || [] : [];
+  const sheetHasChildren = sheetEntry
+    ? sheetPageList.some((x) => x.parentId === sheetEntry.id)
+    : false;
+  const sheetNestTarget = (() => {
+    if (!sheet || !sheetEntry || sheetEntry.parentId || sheetHasChildren)
+      return null;
+    const idx = sheetPageList.findIndex((x) => x.id === sheet.id);
+    for (let i = idx - 1; i >= 0; i--)
+      if (!sheetPageList[i].parentId) return sheetPageList[i];
+    return null;
+  })();
+  const trunc = (s: string, n: number) =>
+    s.length > n ? s.slice(0, n - 1) + "…" : s;
+
   // Is the sheet's entry sitting on an expired page? Then moving it forward
   // must be a migration (original stays, marked ›) — never a silent move.
   const sheetOnPast = (() => {
@@ -281,7 +308,7 @@ export default function App() {
   })();
 
   const renderEntry = (e: Entry, pk: string, sc: Scope | null) => (
-    <li key={e.id} className="entry">
+    <li key={e.id} className={"entry" + (e.parentId ? " isSub" : "")}>
       <button
         className={
           "bullet" +
@@ -309,6 +336,7 @@ export default function App() {
         }
       >
         {e.priority && <span className="prio">*</span>}
+        {e.inspiration && <span className="insp">!</span>}
         {e.text}
         {e.remindAt && (
           <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
@@ -585,6 +613,18 @@ export default function App() {
           >
             *
           </button>
+          <button
+            className={"prioBtn" + (captureInspiration ? " isOn" : "")}
+            onClick={() => {
+              setCaptureInspiration((v) => !v);
+              inputRef.current?.focus();
+            }}
+            title="Toggle inspiration"
+            aria-pressed={captureInspiration}
+            aria-label="Inspiration"
+          >
+            !
+          </button>
           <input
             ref={inputRef}
             style={S.captureInput}
@@ -856,6 +896,28 @@ export default function App() {
                     }}
                   >
                     {sheetEntry.state === "done" ? "Reopen task" : "Mark complete"}
+                  </button>
+                )}
+                {sheetNestTarget && (
+                  <button
+                    className="sheetBtn"
+                    onClick={() => {
+                      setParent(sheet.id, sheetNestTarget.id);
+                      closeSheet();
+                    }}
+                  >
+                    Nest under "{trunc(sheetNestTarget.text, 34)}"
+                  </button>
+                )}
+                {sheetEntry.parentId && (
+                  <button
+                    className="sheetBtn"
+                    onClick={() => {
+                      setParent(sheet.id, null);
+                      closeSheet();
+                    }}
+                  >
+                    Move to top level
                   </button>
                 )}
                 {sheetMigrates ? (

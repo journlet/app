@@ -38,6 +38,8 @@ const toEntry = (m: Y.Map<unknown>): Entry => ({
   type: m.get("type") as EntryType,
   text: m.get("text") as string,
   priority: Boolean(m.get("priority")),
+  inspiration: Boolean(m.get("inspiration")) || undefined,
+  parentId: (m.get("parentId") as string | undefined) ?? undefined,
   state: m.get("state") as EntryState,
   pageKey: m.get("pageKey") as string,
   createdAt: m.get("createdAt") as number,
@@ -73,6 +75,8 @@ const makeMap = (e: Entry): Y.Map<unknown> => {
   m.set("state", e.state);
   m.set("pageKey", e.pageKey);
   m.set("createdAt", e.createdAt);
+  if (e.inspiration) m.set("inspiration", true);
+  if (e.parentId) m.set("parentId", e.parentId);
   if (e.migratedFrom) m.set("migratedFrom", e.migratedFrom);
   if (e.remindAt) m.set("remindAt", e.remindAt);
   return m;
@@ -91,13 +95,15 @@ export const addEntry = (
   pageKey: string,
   type: EntryType,
   text: string,
-  priority: boolean
+  priority: boolean,
+  inspiration = false
 ): Entry => {
   const e: Entry = {
     id: uid(),
     type,
     text,
     priority,
+    inspiration: inspiration || undefined,
     state: "open",
     pageKey,
     createdAt: Date.now(),
@@ -139,7 +145,21 @@ export const setText = (id: string, text: string): void => {
 export const moveTo = (id: string, targetPageKey: string): void => {
   const m = findMap(id);
   if (!m || m.get("pageKey") === targetPageKey) return;
-  doc.transact(() => m.set("pageKey", targetPageKey));
+  doc.transact(() => {
+    m.set("pageKey", targetPageKey);
+    // nesting doesn't survive a move — the parent stays behind
+    m.delete("parentId");
+  });
+};
+
+/** Nest an entry under a parent (null = back to top level). One level only. */
+export const setParent = (id: string, parentId: string | null): void => {
+  const m = findMap(id);
+  if (!m) return;
+  doc.transact(() => {
+    if (parentId === null) m.delete("parentId");
+    else m.set("parentId", parentId);
+  });
 };
 
 export const removeEntry = (id: string): Entry | null => {
@@ -170,6 +190,7 @@ export const migrateEntry = (id: string, targetPageKey: string): void => {
         pageKey: targetPageKey,
         createdAt: Date.now(),
         migratedFrom: original.id,
+        parentId: undefined, // nesting stays with the original page
       }),
     ]);
   });

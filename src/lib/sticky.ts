@@ -10,12 +10,18 @@ export type CaptureScope = Scope | "date";
 export interface CaptureSticky {
   type: EntryType;
   priority: boolean;
+  inspiration: boolean;
   scope: CaptureScope;
 }
 
 const KEY = "journlet-capture-v1";
 
-const DEFAULTS: CaptureSticky = { type: "task", priority: false, scope: "day" };
+const DEFAULTS: CaptureSticky = {
+  type: "task",
+  priority: false,
+  inspiration: false,
+  scope: "day",
+};
 
 export const loadSticky = (): CaptureSticky => {
   try {

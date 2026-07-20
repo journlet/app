@@ -9,6 +9,10 @@ export interface Entry {
   type: EntryType;
   text: string;
   priority: boolean;
+  /** ! signifier (spec §4.1) */
+  inspiration?: boolean;
+  /** parent entry id — sub-bullets one level deep (spec §4.1, §9) */
+  parentId?: string;
   state: EntryState;
   /** Period the entry lives on: YYYY-MM-DD | YYYY-Www | YYYY-MM | YYYY */
   pageKey: string;

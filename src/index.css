@@ -90,6 +90,13 @@ body {
   border-radius: 3px;
   font-weight: 700;
 }
+.insp {
+  font-weight: 800;
+  margin-right: 6px;
+}
+.entry.isSub {
+  margin-left: 28px;
+}
 .actions {
   display: flex;
   gap: 4px;
