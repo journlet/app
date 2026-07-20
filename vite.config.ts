@@ -5,6 +5,9 @@ import { VitePWA } from "vite-plugin-pwa";
 // journlet.com is served from the domain root, so base stays "/"
 export default defineConfig({
   base: "/",
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16) + "Z"),
+  },
   plugins: [
     react(),
     VitePWA({

@@ -477,6 +477,9 @@ export default function SyncView({ onBack }: Props) {
       {getSyncError() && (
         <p style={ST.error}>Last sync problem: {getSyncError()}</p>
       )}
+      <p style={{ fontSize: 11, color: "#6B7683", marginTop: 16 }}>
+        build {__BUILD_TIME__}
+      </p>
     </section>
   );
 }
