@@ -125,6 +125,30 @@ export default function App() {
   const [customGran, setCustomGran] = useState<Scope>("day");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const footerRef = useRef<HTMLElement>(null);
+
+  // Pin the capture bar to the visual viewport: iOS shrinks it under the
+  // keyboard while sticky elements track the layout viewport, leaving the
+  // bar stranded mid-screen otherwise
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const align = () => {
+      const el = footerRef.current;
+      if (!el) return;
+      const offset = Math.max(
+        0,
+        window.innerHeight - vv.height - vv.offsetTop
+      );
+      el.style.transform = offset > 1 ? `translateY(-${offset}px)` : "";
+    };
+    vv.addEventListener("resize", align);
+    vv.addEventListener("scroll", align);
+    return () => {
+      vv.removeEventListener("resize", align);
+      vv.removeEventListener("scroll", align);
+    };
+  }, []);
 
   const persistSticky = () => saveSticky(sticky.current);
 
@@ -638,7 +662,7 @@ export default function App() {
       </main>
 
       {activeCol?.kind !== "habits" && view !== "sync" && (
-      <footer style={S.captureWrap}>
+      <footer ref={footerRef} style={S.captureWrap}>
         {!activeCol && (
         <div style={S.scopeRow} role="tablist" aria-label="Log into">
           {([...SCOPES, "date"] as CaptureScope[]).map((sc) => (
@@ -1240,7 +1264,7 @@ const S: Record<string, CSSProperties> = {
     fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   header: {
-    padding: "18px 20px 6px",
+    padding: "calc(12px + env(safe-area-inset-top)) 20px 6px",
     maxWidth: 560,
     width: "100%",
     margin: "0 auto",
@@ -1274,6 +1298,8 @@ const S: Record<string, CSSProperties> = {
   sectionHead: {
     display: "flex",
     alignItems: "baseline",
+    flexWrap: "wrap",
+    rowGap: 2,
     gap: 10,
     borderBottom: `1px solid ${LINE}`,
     paddingBottom: 4,
@@ -1304,6 +1330,7 @@ const S: Record<string, CSSProperties> = {
   captureWrap: {
     position: "sticky",
     bottom: 0,
+    zIndex: 30,
     background: PAPER,
     borderTop: `1px solid ${LINE}`,
     padding: "8px 20px calc(12px + env(safe-area-inset-bottom))",

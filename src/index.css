@@ -159,10 +159,13 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 1px;
   padding: 0 2px;
   flex-shrink: 0;
   color: var(--ink);
+  min-width: 34px;
+  height: 40px;
 }
 .typeLabel {
   font-size: 9px;
@@ -174,8 +177,9 @@ body {
   background: none;
   border: 1px dashed var(--line);
   border-radius: 6px;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
+  align-self: center;
   font-size: 16px;
   font-weight: 700;
   line-height: 1;
