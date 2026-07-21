@@ -2,7 +2,7 @@
 
 export type EntryType = "task" | "event" | "note";
 
-export type EntryState = "open" | "done" | "struck" | "migrated";
+export type EntryState = "open" | "done" | "struck" | "migrated" | "scheduled";
 
 export interface Entry {
   id: string;
@@ -75,8 +75,9 @@ export const GLYPH: Record<EntryType, string> = {
   note: "—",
 };
 
-// × complete
-export const STATE_GLYPH = { done: "×" } as const;
+// × complete, > migrated (moved to a current page), < scheduled (moved to a
+// future page) — spec §4.1
+export const STATE_GLYPH = { done: "×", migrated: ">", scheduled: "<" } as const;
 
 export const uid = (): string =>
   Math.random().toString(36).slice(2, 10) + Date.now().toString(36);

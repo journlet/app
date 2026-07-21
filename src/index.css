@@ -80,11 +80,13 @@ body {
   color: var(--ink-soft);
   text-decoration: line-through;
 }
-.etext.isMigrated {
+.etext.isMigrated,
+.etext.isScheduled {
   color: var(--ink-soft);
   font-style: italic;
 }
-.bullet.isMigrated {
+.bullet.isMigrated,
+.bullet.isScheduled {
   color: var(--ink-soft);
 }
 .prio {

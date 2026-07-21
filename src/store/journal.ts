@@ -15,6 +15,7 @@ import type {
   RecurrenceUnit,
 } from "../lib/types";
 import { colPageKey, uid } from "../lib/types";
+import { isFutureKey } from "../lib/dates";
 
 // Origin tag for updates applied from the sync layer (shared so other
 // modules can distinguish remote from local changes)
@@ -197,14 +198,16 @@ export const restoreEntry = (e: Entry): void => {
   doc.transact(() => entries.push([makeMap(e)]));
 };
 
-// Migrate: mark the original > on its old page, copy forward as open.
+// Migrate: mark the original on its old page, copy forward as open.
+// Purist notation (spec §4.1): > when the copy lands on a current or past
+// page, < ("scheduled") when it lands on a future page.
 // Honest history — the original never moves or disappears (spec §4.3).
 export const migrateEntry = (id: string, targetPageKey: string): void => {
   const m = findMap(id);
   if (!m) return;
   const original = toEntry(m);
   doc.transact(() => {
-    m.set("state", "migrated");
+    m.set("state", isFutureKey(targetPageKey) ? "scheduled" : "migrated");
     entries.push([
       makeMap({
         ...original,

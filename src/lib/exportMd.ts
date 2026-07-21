@@ -27,7 +27,13 @@ const fmtStamp = (ts: number): string =>
 
 const entryLine = (e: Entry): string => {
   const glyph =
-    e.state === "done" ? "×" : e.state === "migrated" ? ">" : GLYPH[e.type];
+    e.state === "done"
+      ? "×"
+      : e.state === "migrated"
+        ? ">"
+        : e.state === "scheduled"
+          ? "<"
+          : GLYPH[e.type];
   const signifiers = `${e.priority ? "\\* " : ""}${e.inspiration ? "! " : ""}`;
   let text = `${signifiers}${glyph} ${e.text}`;
   if (e.state === "struck") text = `~~${text}~~`;
@@ -46,7 +52,7 @@ export const buildMarkdown = (
     `_Exported ${fmtStamp(Date.now())}_`,
     "",
     "Notation: • task, ○ event, — note, × complete, > migrated,",
-    "\\* priority, ~~struck through~~ no longer relevant.",
+    "< scheduled, \\* priority, ~~struck through~~ no longer relevant.",
     "",
   ];
 

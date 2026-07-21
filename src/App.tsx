@@ -105,6 +105,8 @@ export default function App() {
   const [input, setInput] = useState("");
   const [sheet, setSheet] = useState<SheetTarget | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
+  // Date chosen in the sheet's "Schedule to a future date" control
+  const [schedDate, setSchedDate] = useState("");
   const [editRemind, setEditRemind] = useState<string | null>(null);
   const [editRepeat, setEditRepeat] = useState<{
     n: string;
@@ -372,6 +374,7 @@ export default function App() {
     setEditText(null);
     setEditRemind(null);
     setEditRepeat(null);
+    setSchedDate("");
   };
 
   const cadenceLabel = (n: number, unit: RecurrenceUnit) =>
@@ -525,7 +528,8 @@ export default function App() {
         className={
           "bullet" +
           (e.state === "done" ? " isDone" : "") +
-          (e.state === "migrated" ? " isMigrated" : "")
+          (e.state === "migrated" ? " isMigrated" : "") +
+          (e.state === "scheduled" ? " isScheduled" : "")
         }
         onClick={() =>
           e.type === "task" ? toggleDone(e.id) : cycleType(e.id)
@@ -533,18 +537,17 @@ export default function App() {
         title={e.type === "task" ? "Tap to complete" : "Tap to change type"}
         aria-label={`${e.type}, ${e.state}`}
       >
-        {e.state === "done"
-          ? STATE_GLYPH.done
-          : e.state === "migrated"
-            ? ">"
-            : GLYPH[e.type]}
+        {e.state === "done" || e.state === "migrated" || e.state === "scheduled"
+          ? STATE_GLYPH[e.state]
+          : GLYPH[e.type]}
       </button>
       <span
         className={
           "etext" +
           (e.state === "done" ? " isDone" : "") +
           (e.state === "struck" ? " isStruck" : "") +
-          (e.state === "migrated" ? " isMigrated" : "")
+          (e.state === "migrated" ? " isMigrated" : "") +
+          (e.state === "scheduled" ? " isScheduled" : "")
         }
       >
         {e.priority && <span className="prio">*</span>}
@@ -1345,6 +1348,36 @@ export default function App() {
                     </div>
                   </>
                 ) : null}
+                {sheetEntry.type === "task" &&
+                  sheetEntry.state === "open" &&
+                  keyScope(sheet.pk) !== null && (
+                    <>
+                      <div style={S.sheetGroupLabel}>
+                        Schedule to a future date (original stays here, marked
+                        ‹)
+                      </div>
+                      <div style={S.sheetRow}>
+                        <input
+                          type="date"
+                          value={schedDate}
+                          min={shiftAnchor("day", today, 1)}
+                          onChange={(ev) => setSchedDate(ev.target.value)}
+                          style={S.dateInput}
+                          aria-label="Schedule to date"
+                        />
+                        <button
+                          className="sheetBtn isCompact"
+                          disabled={!schedDate || schedDate <= today}
+                          onClick={() => {
+                            migrateEntry(sheet.id, schedDate);
+                            closeSheet();
+                          }}
+                        >
+                          ‹ Schedule
+                        </button>
+                      </div>
+                    </>
+                  )}
                 <button
                   className="sheetBtn"
                   onClick={() => {

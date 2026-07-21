@@ -73,7 +73,7 @@ export const checkReminders = async (): Promise<void> => {
   let changed = false;
   for (const e of readAll()) {
     if (!e.remindAt || e.remindAt > now) continue;
-    if (e.state === "struck" || e.state === "migrated" || e.state === "done")
+    if (e.state !== "open")
       continue;
     if (fired[e.id] === e.remindAt) continue;
     await fire(e.text, e.id, e.remindAt);

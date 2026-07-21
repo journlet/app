@@ -61,6 +61,12 @@ export const keyScope = (k: string): Scope | null => {
   return null;
 };
 
+/** Is this period key ahead of the current period of its own scope? */
+export const isFutureKey = (pk: string): boolean => {
+  const sc = keyScope(pk);
+  return sc ? pk > periodKey(sc, todayKey()) : false;
+};
+
 export const fmt = (dt: Date, opts: Intl.DateTimeFormatOptions): string =>
   dt.toLocaleDateString("en-GB", opts);
 
