@@ -137,6 +137,20 @@ body {
   border-color: var(--ink);
   color: var(--ink);
 }
+/* Section nav: full words where there's room, short ones on narrow
+   screens so the page title never gets squashed. aria-labels carry the
+   full wording either way. */
+.navShort {
+  display: none;
+}
+@media (max-width: 480px) {
+  .navLong {
+    display: none;
+  }
+  .navShort {
+    display: inline;
+  }
+}
 .scopeBtn {
   flex: 1;
   background: none;
