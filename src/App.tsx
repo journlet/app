@@ -296,12 +296,23 @@ export default function App() {
         entry,
       })
     ),
-    ...recurrences
-      .filter((r) => !r.endedAt)
-      .map((r): ScheduledRow => {
-        const dayKey = nextOccurrence(r, today);
-        return { kind: "rule", sort: dayKey, dayKey, rule: r };
-      }),
+    ...(() => {
+      // A rule's next occurrence may already exist as a real entry (the
+      // entry made recurring sits on a future page, or an instance was
+      // materialised) — skip the preview then, the real row covers it
+      const covered = new Set(
+        futureItems
+          .filter((f) => f.entry.recurrenceId)
+          .map((f) => `${f.entry.recurrenceId}:${f.pk}`)
+      );
+      return recurrences
+        .filter((r) => !r.endedAt)
+        .map((r) => {
+          const dayKey = nextOccurrence(r, today);
+          return { kind: "rule" as const, sort: dayKey, dayKey, rule: r };
+        })
+        .filter((row) => !covered.has(`${row.rule.id}:${row.dayKey}`));
+    })(),
   ].sort((a, b) => (a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0));
 
   // Collection currently open, if any
@@ -674,8 +685,8 @@ export default function App() {
                     {isCurrent
                       ? periodSub(sc, anchors[sc])
                       : isFuture
-                        ? "future page"
-                        : "past page"}
+                        ? "future"
+                        : "past"}
                   </span>
                   <span style={S.sectionNav}>
                     <button
@@ -742,6 +753,17 @@ export default function App() {
                         }}
                       >
                         {pageLabel(row.pk)}
+                        {(() => {
+                          const rule =
+                            row.entry.recurrenceId &&
+                            recurrences.find(
+                              (r) =>
+                                r.id === row.entry.recurrenceId && !r.endedAt
+                            );
+                          return rule
+                            ? ` — repeats ${cadenceLabel(rule.everyN, rule.unit)}`
+                            : null;
+                        })()}
                       </span>
                     </span>
                     <span className="actions">
