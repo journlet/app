@@ -43,6 +43,7 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Feedback:** Bottom entry area takes too much space; should collapse to an icon.
 **Assessment:** The footer stacks the scope tab row (day/week/month/year/date), an optional date input, and the capture bar (type glyph, priority, inspiration, text input, add) — three rows worst case.
 **Fix:** Collapsed-by-default capture: a single compact bar (or icon button) that expands to the full control set on focus/tap. All controls remain plainly labelled when expanded, per the labelling constraint. Sticky scope/type prefs already persist (`sticky.ts`) so the collapsed state loses nothing.
+**Alternative (pinned 21 Jul):** on small screens, open capture as a full-screen form instead of an expanding bottom bar. Sidesteps iOS keyboard-pinning fragility entirely (the form owns the whole viewport), gives room for plainly labelled controls, and is a common mobile pattern. Decide between the two when picking this up.
 **Effort:** Medium.
 
 ### 5. Keyboard pushes content up; capture bar should pin to keyboard
