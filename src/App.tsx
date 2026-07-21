@@ -795,6 +795,20 @@ export default function App() {
                 ...a,
                 [sc]: shiftAnchor(sc, a[sc], delta),
               }));
+            // Browsing a future week/month/year: also list everything
+            // scheduled *within* the period (on finer-grained pages or as
+            // recurrence previews) — the page's own entries alone would
+            // contradict the Future log
+            const withinRows =
+              sc !== "day" && isFuture
+                ? scheduledRows.filter((r) => {
+                    const rpk = r.kind === "entry" ? r.pk : r.dayKey;
+                    if (rpk === pk) return false;
+                    const anchor =
+                      r.kind === "entry" ? keyToAnchor(r.pk) : r.dayKey;
+                    return periodKey(sc, anchor) === pk;
+                  })
+                : [];
             return (
               <section key={sc} style={S.section}>
                 <div style={S.sectionHead}>
@@ -850,6 +864,18 @@ export default function App() {
                     <ul style={S.list}>
                       {laterThisMonth.map((row) =>
                         renderScheduledRow(row, true)
+                      )}
+                    </ul>
+                  </>
+                )}
+                {withinRows.length > 0 && (
+                  <>
+                    <div style={S.subGroupLabel}>
+                      Scheduled in {pageLabel(pk)}
+                    </div>
+                    <ul style={S.list}>
+                      {withinRows.map((row) =>
+                        renderScheduledRow(row, sc !== "year")
                       )}
                     </ul>
                   </>
