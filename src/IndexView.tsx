@@ -21,8 +21,10 @@ interface Props {
   nowKeys: Record<Scope, string>;
   collections: Collection[];
   habits: Habit[];
+  futureCount: number;
   onOpen: (pk: string) => void;
   onOpenCollection: (id: string) => void;
+  onOpenFutureLog: () => void;
   onNewCollection: () => void;
 }
 
@@ -31,8 +33,10 @@ export default function IndexView({
   nowKeys,
   collections,
   habits,
+  futureCount,
   onOpen,
   onOpenCollection,
+  onOpenFutureLog,
   onNewCollection,
 }: Props) {
   const groups: Record<Scope, string[]> = {
@@ -74,6 +78,22 @@ export default function IndexView({
           </button>
         </span>
       </div>
+      {/* Future log sits at the front of the book, as in a physical
+          journal (spec §4.2, revised 21 July 2026) */}
+      {futureCount > 0 && (
+        <section style={ST.group}>
+          <ul style={ST.list}>
+            <li>
+              <button className="indexRow" onClick={onOpenFutureLog}>
+                <span style={{ fontWeight: 600 }}>Future log</span>
+                <span style={ST.count}>
+                  {futureCount} item{futureCount === 1 ? "" : "s"}
+                </span>
+              </button>
+            </li>
+          </ul>
+        </section>
+      )}
       <section style={ST.group}>
         <div style={ST.groupLabel}>Collections</div>
         {collections.length === 0 && (

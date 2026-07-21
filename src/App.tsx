@@ -68,7 +68,7 @@ interface DeletedToast {
   colSnap?: CollectionSnapshot;
 }
 
-type View = "spread" | "index" | "sync" | { col: string };
+type View = "spread" | "index" | "sync" | "future" | { col: string };
 
 // Always-visible sync state on the header button (spec §4.5); plain words,
 // attention colour when something needs the user
@@ -363,6 +363,7 @@ export default function App() {
     else futureLogGroups.push({ gk, rows: [r] });
   });
   futureLogGroups.sort((a, b) => (a.gk < b.gk ? -1 : 1));
+  const futureLogCount = futureLogGroups.reduce((n, g) => n + g.rows.length, 0);
 
   // Collection currently open, if any
   const activeCol =
@@ -754,7 +755,9 @@ export default function App() {
               setAnchors((a) => ({ ...a, [sc]: keyToAnchor(pk) }));
               setView("spread");
             }}
+            futureCount={futureLogCount}
             onOpenCollection={(id) => setView({ col: id })}
+            onOpenFutureLog={() => setView("future")}
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
         )}
@@ -897,7 +900,23 @@ export default function App() {
               </section>
             );
           })}
-        {loaded && view === "spread" && futureLogGroups.length > 0 && (
+        {/* Future log lives on its own page, like the front of a physical
+            journal (spec §4.2, revised 21 July 2026) — the spread keeps only
+            a one-line summary link so the "now" page stays uncluttered */}
+        {loaded && view === "spread" && futureLogCount > 0 && (
+          <button
+            className="indexRow"
+            style={S.futureLogLink}
+            onClick={() => setView("future")}
+          >
+            <span style={{ fontWeight: 600 }}>Future log</span>
+            <span style={{ fontSize: 11.5, color: "#6B7683" }}>
+              {futureLogCount} item{futureLogCount === 1 ? "" : "s"} · from
+              next month on ›
+            </span>
+          </button>
+        )}
+        {loaded && view === "future" && (
           <section style={S.section}>
             <div style={S.sectionHead}>
               <h2 style={S.sectionTitle}>Future log</h2>
@@ -906,6 +925,12 @@ export default function App() {
                 period arrives
               </span>
             </div>
+            {futureLogCount === 0 && (
+              <div style={S.empty}>
+                Nothing scheduled ahead — use "date…" on the capture bar to
+                log an entry to a future page.
+              </div>
+            )}
             {futureLogGroups.map(({ gk, rows }) => (
               <div key={gk}>
                 <div style={S.flGroupHead}>
@@ -1643,6 +1668,16 @@ const S: Record<string, CSSProperties> = {
     letterSpacing: "0.08em",
     color: INK_SOFT,
     margin: "8px 4px 2px",
+  },
+  futureLogLink: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 8,
+    width: "100%",
+    marginTop: 10,
+    paddingTop: 8,
+    borderTop: "1px solid #DCDAD1",
   },
   flGroupHead: {
     display: "flex",
