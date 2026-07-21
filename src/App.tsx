@@ -677,13 +677,27 @@ export default function App() {
         </span>
       </li>
     ) : (
+      // Rule previews are display-only: the real entry is created when the
+      // day arrives, so there are no ⋯ actions. Muted ink plus a plainly
+      // labelled tag keep them from passing as real entries (no-guessing
+      // rule, spec §4.1)
       <li key={`rule-${row.rule.id}`} className="entry">
-        <span className="bullet" aria-hidden="true">
+        <span
+          className="bullet"
+          aria-hidden="true"
+          style={{ color: "#6B7683" }}
+        >
           &lt;
         </span>
-        <span className="etext">
+        <span className="etext" style={{ color: "#6B7683" }}>
           {row.rule.priority && <span className="prio">*</span>}
           {row.rule.text}
+          <span
+            className="typeTag"
+            title="Created automatically when the day arrives"
+          >
+            preview
+          </span>
           <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
             {whenLabel(row.dayKey, grouped)} — repeats{" "}
             {cadenceLabel(row.rule.everyN, row.rule.unit)}
