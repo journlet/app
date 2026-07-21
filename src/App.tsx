@@ -29,7 +29,8 @@ import {
   setReminder,
   tagEntryRecurrence,
 } from "./store/journal";
-import type { RecurrenceUnit } from "./lib/types";
+import type { Recurrence, RecurrenceUnit } from "./lib/types";
+import { nextOccurrence } from "./store/recurrence";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -279,6 +280,29 @@ export default function App() {
       if (k <= nowKeys[sc]) return;
       (days[k] || []).forEach((e) => futureItems.push({ pk: k, scope: sc, entry: e }));
     });
+
+  // Scheduled ahead also previews each active recurrence rule's next
+  // occurrence. Display-only rows — the real entry is materialised when
+  // its day arrives (remediation item 2a), so nothing is written here.
+  type ScheduledRow =
+    | { kind: "entry"; sort: string; pk: string; entry: Entry }
+    | { kind: "rule"; sort: string; dayKey: string; rule: Recurrence };
+  const scheduledRows: ScheduledRow[] = [
+    ...futureItems.map(
+      ({ pk, entry }): ScheduledRow => ({
+        kind: "entry",
+        sort: keyToAnchor(pk),
+        pk,
+        entry,
+      })
+    ),
+    ...recurrences
+      .filter((r) => !r.endedAt)
+      .map((r): ScheduledRow => {
+        const dayKey = nextOccurrence(r, today);
+        return { kind: "rule", sort: dayKey, dayKey, rule: r };
+      }),
+  ].sort((a, b) => (a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0));
 
   // Collection currently open, if any
   const activeCol =
@@ -659,7 +683,8 @@ export default function App() {
                       onClick={() => step(-1)}
                       aria-label={`Previous ${sc}`}
                     >
-                      ‹ previous
+                      ‹ <span className="navLong">previous</span>
+                      <span className="navShort">prev</span>
                     </button>
                     {!isCurrent && (
                       <button
@@ -669,7 +694,8 @@ export default function App() {
                         }
                         aria-label={`Back to current ${sc}`}
                       >
-                        back to now
+                        <span className="navLong">back to now</span>
+                        <span className="navShort">now</span>
                       </button>
                     )}
                     <button
@@ -690,7 +716,7 @@ export default function App() {
               </section>
             );
           })}
-        {loaded && view === "spread" && futureItems.length > 0 && (
+        {loaded && view === "spread" && scheduledRows.length > 0 && (
           <section style={S.section}>
             <div style={S.sectionHead}>
               <h2 style={S.sectionTitle}>Scheduled ahead</h2>
@@ -699,34 +725,64 @@ export default function App() {
               </span>
             </div>
             <ul style={S.list}>
-              {futureItems.map(({ pk, entry: e }) => (
-                <li key={e.id} className="entry">
-                  <span className="bullet" aria-hidden="true">
-                    &lt;
-                  </span>
-                  <span className="etext">
-                    {e.priority && <span className="prio">*</span>}
-                    {e.text}
-                    <span
-                      style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}
-                    >
-                      {pageLabel(pk)}
+              {scheduledRows.map((row) =>
+                row.kind === "entry" ? (
+                  <li key={row.entry.id} className="entry">
+                    <span className="bullet" aria-hidden="true">
+                      &lt;
                     </span>
-                  </span>
-                  <span className="actions">
-                    <button
-                      className="miniBtn moreBtn"
-                      onClick={() =>
-                        setSheet({ scope: keyScope(pk), pk, id: e.id })
-                      }
-                      aria-label="Entry actions"
-                      aria-haspopup="dialog"
-                    >
-                      ⋯
-                    </button>
-                  </span>
-                </li>
-              ))}
+                    <span className="etext">
+                      {row.entry.priority && <span className="prio">*</span>}
+                      {row.entry.text}
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          color: "#6B7683",
+                          marginLeft: 8,
+                        }}
+                      >
+                        {pageLabel(row.pk)}
+                      </span>
+                    </span>
+                    <span className="actions">
+                      <button
+                        className="miniBtn moreBtn"
+                        onClick={() =>
+                          setSheet({
+                            scope: keyScope(row.pk),
+                            pk: row.pk,
+                            id: row.entry.id,
+                          })
+                        }
+                        aria-label="Entry actions"
+                        aria-haspopup="dialog"
+                      >
+                        ⋯
+                      </button>
+                    </span>
+                  </li>
+                ) : (
+                  <li key={`rule-${row.rule.id}`} className="entry">
+                    <span className="bullet" aria-hidden="true">
+                      &lt;
+                    </span>
+                    <span className="etext">
+                      {row.rule.priority && <span className="prio">*</span>}
+                      {row.rule.text}
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          color: "#6B7683",
+                          marginLeft: 8,
+                        }}
+                      >
+                        {pageLabel(row.dayKey)} — repeats{" "}
+                        {cadenceLabel(row.rule.everyN, row.rule.unit)}
+                      </span>
+                    </span>
+                  </li>
+                )
+              )}
             </ul>
           </section>
         )}

@@ -19,7 +19,7 @@ import {
 
 const MAX_CATCHUP = 100; // occurrences per rule per pass — safety valve
 
-const nextOccurrence = (r: Recurrence, after: string): string => {
+export const nextOccurrence = (r: Recurrence, after: string): string => {
   // Walk forward from the anchor in rule-sized steps until past `after`
   const d = toDate(r.anchor);
   let k = r.anchor;
