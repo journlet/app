@@ -114,6 +114,10 @@ export default function App() {
   const [reviewing, setReviewing] = useState(false);
   const [view, setView] = useState<View>("spread");
   const [newCol, setNewCol] = useState<{ name: string; kind: CollectionKind } | null>(null);
+  // The current day key, kept fresh across midnight and app resume; every
+  // "what is today" decision in render must use this, not todayKey()
+  const [today, setToday] = useState(todayKey());
+  const todayRef = useRef(today);
   // Per-section browsing anchors; today unless the user steps away
   const [anchors, setAnchors] = useState<Record<Scope, string>>(() => ({
     day: todayKey(),
@@ -125,28 +129,74 @@ export default function App() {
   const [customGran, setCustomGran] = useState<Scope>("day");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const footerRef = useRef<HTMLElement>(null);
 
-  // Pin the capture bar to the visual viewport: iOS shrinks it under the
-  // keyboard while sticky elements track the layout viewport, leaving the
-  // bar stranded mid-screen otherwise
+  // Keyboard handling (iOS): the keyboard shrinks the visual viewport but
+  // not the layout viewport, and WebKit scrolls the page to reveal the
+  // focused input — shoving the header and journal content up the screen.
+  // Counter both: shrink the app frame to the visual viewport height so
+  // the capture bar (still in normal flow at the bottom) rests on top of
+  // the keyboard, and pin the layout viewport back to the top. Browsers
+  // that honour interactive-widget=resizes-content (set in index.html)
+  // do this natively and report nothing obscured, so the effect is inert.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    const root = document.getElementById("root");
+    if (!root) return;
     const align = () => {
-      const el = footerRef.current;
-      if (!el) return;
-      const offset = Math.max(
+      const obscured = Math.max(
         0,
         window.innerHeight - vv.height - vv.offsetTop
       );
-      el.style.transform = offset > 1 ? `translateY(-${offset}px)` : "";
+      root.style.height = obscured > 1 ? `${vv.height}px` : "";
+      if (obscured > 1) window.scrollTo(0, 0);
     };
     vv.addEventListener("resize", align);
     vv.addEventListener("scroll", align);
+    window.addEventListener("focusout", align);
     return () => {
       vv.removeEventListener("resize", align);
       vv.removeEventListener("scroll", align);
+      window.removeEventListener("focusout", align);
+    };
+  }, []);
+
+  // Day rollover: refresh `today` when the date changes — while the app
+  // stays open (interval) and on resume from background (visibilitychange /
+  // pageshow / focus), since iOS suspends timers in backgrounded PWAs.
+  // Anchors still sitting on the page that was current follow along;
+  // pages the user deliberately navigated to are left alone.
+  useEffect(() => {
+    const check = () => {
+      const now = todayKey();
+      const prev = todayRef.current;
+      if (now === prev) return;
+      todayRef.current = now;
+      setToday(now);
+      setAnchors((a) => {
+        const next = { ...a };
+        let changed = false;
+        SCOPES.forEach((sc) => {
+          if (periodKey(sc, a[sc]) === periodKey(sc, prev)) {
+            next[sc] = now;
+            changed = true;
+          }
+        });
+        return changed ? next : a;
+      });
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", check);
+    window.addEventListener("focus", check);
+    const timer = setInterval(check, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", check);
+      window.removeEventListener("focus", check);
+      clearInterval(timer);
     };
   }, []);
 
@@ -185,7 +235,7 @@ export default function App() {
   }, [loaded]);
 
   const nowKeys = {} as Record<Scope, string>;
-  SCOPES.forEach((sc) => (nowKeys[sc] = periodKey(sc, todayKey())));
+  SCOPES.forEach((sc) => (nowKeys[sc] = periodKey(sc, today)));
 
   // Open tasks living on expired pages, awaiting a migration decision
   const pastOpen: { pk: string; entry: Entry }[] = [];
@@ -320,7 +370,7 @@ export default function App() {
       hour: "2-digit",
       minute: "2-digit",
     });
-    return dkey(d) === todayKey()
+    return dkey(d) === today
       ? time
       : `${d.toLocaleDateString("en-GB", {
           weekday: "short",
@@ -662,7 +712,7 @@ export default function App() {
       </main>
 
       {activeCol?.kind !== "habits" && view !== "sync" && (
-      <footer ref={footerRef} style={S.captureWrap}>
+      <footer style={S.captureWrap}>
         {!activeCol && (
         <div style={S.scopeRow} role="tablist" aria-label="Log into">
           {([...SCOPES, "date"] as CaptureScope[]).map((sc) => (
@@ -686,7 +736,7 @@ export default function App() {
             <input
               type="date"
               value={customDate}
-              min={todayKey()}
+              min={today}
               onChange={(ev) => ev.target.value && setCustomDate(ev.target.value)}
               style={S.dateInput}
               aria-label="Schedule date"
