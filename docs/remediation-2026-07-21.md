@@ -91,6 +91,17 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Fix:** Merge into one status ("saved on this device · synced"), or drop the save dot and keep only the sync badge, surfacing local-save failure as an error state. Aligns with "every UI action plainly labelled".
 **Effort:** Small.
 
+### 11. Sign-out should unlink the journal from the device; signed-out state too quiet
+**Feedback (21 Jul):** Shouldn't be able to link a journal until logged in; logging out should remove the journal from that device. Confusion arose when the app quietly stopped auto-updating while signed out.
+**Assessment:** Linking is already gated on sign-in (the key entry field only appears in the post-sign-in `needs-key` state; a QR scanned while signed out is held as pending and applied after sign-in) but this is not obvious. Sign-out deliberately keeps the journal ("Sign out (journal stays on this device)") per the offline-first design, and the signed-out state is only visible as the small header badge — so sync stops silently.
+**Decision (21 Jul, Gary):** wipe on explicit sign-out only.
+**Fix:**
+- Explicit sign-out removes the journal and keys from the device, behind a clear warning that requires confirming the journal key is saved (unsynced changes and the key are otherwise unrecoverable; server holds ciphertext only).
+- Session expiry or other involuntary sign-out must NOT wipe; instead show a prominent "not syncing — signed in needed" banner on the journal spread itself, not just the header badge.
+- Make the existing sign-in gate on linking explicit in the Sync screen copy.
+- Update the "Lost a device?" copy if needed — its "no one can remotely erase it" claim stays true; wiping is local and voluntary only.
+**Effort:** Medium; touches sync/keystore teardown and needs careful messaging.
+
 ---
 
 ## Suggested sequence
