@@ -143,21 +143,42 @@ export default function App() {
     if (!vv) return;
     const root = document.getElementById("root");
     if (!root) return;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const keyboardOpen = () =>
+      window.innerHeight - vv.height - vv.offsetTop > 1;
     const align = () => {
-      const obscured = Math.max(
-        0,
-        window.innerHeight - vv.height - vv.offsetTop
-      );
-      root.style.height = obscured > 1 ? `${vv.height}px` : "";
-      if (obscured > 1) window.scrollTo(0, 0);
+      root.style.height = keyboardOpen() ? `${vv.height}px` : "";
+      // WebKit pans the page to reveal the focused input even though the
+      // input now sits above the keyboard; undo the pan wherever it landed
+      if (
+        keyboardOpen() &&
+        (window.scrollY > 0 || vv.offsetTop > 0 || vv.pageTop > 0)
+      ) {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+      }
     };
-    vv.addEventListener("resize", align);
+    // The reveal-pan happens after iOS's own keyboard animation, later
+    // than the resize event — re-check as things settle
+    const nudge = () => {
+      align();
+      timers.push(setTimeout(align, 100));
+      timers.push(setTimeout(align, 300));
+      timers.push(setTimeout(align, 600));
+    };
+    vv.addEventListener("resize", nudge);
     vv.addEventListener("scroll", align);
-    window.addEventListener("focusout", align);
+    window.addEventListener("scroll", align);
+    window.addEventListener("focusin", nudge);
+    window.addEventListener("focusout", nudge);
     return () => {
-      vv.removeEventListener("resize", align);
+      timers.forEach(clearTimeout);
+      vv.removeEventListener("resize", nudge);
       vv.removeEventListener("scroll", align);
-      window.removeEventListener("focusout", align);
+      window.removeEventListener("scroll", align);
+      window.removeEventListener("focusin", nudge);
+      window.removeEventListener("focusout", nudge);
     };
   }, []);
 
