@@ -105,6 +105,7 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 ### 12. User preferences
 **Feedback (21 Jul):** A preferences section, e.g. persisting filters; is a Supabase table needed?
 **Assessment:** No new table — and one would violate ciphertext-only. Device-local prefs (filters, view choices) belong in localStorage alongside the existing sticky capture prefs; cross-device prefs belong in an encrypted prefs map inside the Yjs doc, syncing through the existing relay.
+**Position:** Keep it ruthless. A notebook has no settings, and that absence is part of the appeal — every preference is a small tax on it. Filters, quiet hours, dark mode: fine. If the settings page ever needs sections, something has gone wrong.
 **Effort:** Small once a settings surface (item 13) exists.
 
 ### 13. Central menu / settings area
@@ -114,13 +115,15 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 
 ### 14. Shared journals
 **Feedback (21 Jul):** e.g. a journal shared with a partner.
-**Assessment:** Feasible within constraints. Schema currently keys journals and updates to a single user_id; sharing needs journal_id plus a membership table with RLS checking membership (still auth + dumb storage, no server code). Key sharing rides the existing QR flow, done in person. Main cost: the client becomes multi-journal, and lost-device key rotation affects all members. Post-MVP; design the schema migration early since it touches every table.
-**Effort:** Large.
+**Assessment:** Feasible within constraints. Schema currently keys journals and updates to a single user_id; sharing needs journal_id plus a membership table with RLS checking membership (still auth + dumb storage, no server code). Key sharing rides the existing QR flow, done in person. Main cost: the client becomes multi-journal, and lost-device key rotation affects all members.
+**Position:** Interrogate the need before building. The likely real unit of sharing is the collection, not the journal — a shared shopping list, holiday plan or household task list covers most couples' use at roughly a third of the engineering, while the daily log stays private by default. Full shared journals also dilute the product: a journal is personal in a way a list isn't. Recommended approach: live with it a few weeks, note the concrete moments sharing was wished for, then decide journal vs collection as the unit. Either way, design the schema migration early — it touches every table.
+**Effort:** Large (shared journals); medium (shared collections).
 
 ### 15. Performance at scale — yearly volumes
 **Feedback (21 Jul):** Will a growing journal hurt the app? Limit a journal to a year like a physical book?
-**Assessment:** No concern at current volumes, but the whole journal is one in-memory CRDT doc with a forever-growing update log. Yearly volumes (one doc per year, old volumes archived read-only, new notebook each January) cap memory, load time and log size, match bullet journal practice, and give shared journals (item 14) a natural unit. Design before the year turns.
-**Effort:** Medium–large; do the design alongside item 14's schema work.
+**Assessment:** No concern at current volumes, but the whole journal is one in-memory CRDT doc with a forever-growing update log. Yearly volumes (one doc per year, old volumes archived read-only, new notebook each January) cap memory, load time and log size, match bullet journal practice, and give sharing (item 14) a natural unit.
+**Position: endorsed — strongest idea of the four.** The architecturally correct answer (capping doc and log growth) and the philosophically correct one (a notebook ends; closing a year, running an annual migration and starting fresh has real value) are the same idea, and it gives the app a ritual no digital task tool has. Volumes should shape the schema before item 14 does, not after.
+**Effort:** Medium–large; design before the year turns.
 
 ---
 
