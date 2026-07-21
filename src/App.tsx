@@ -4,12 +4,14 @@ import {
   SCOPES,
   SCOPE_LABEL,
   dkey,
+  fmt,
   keyScope,
   keyToAnchor,
   pageLabel,
   periodKey,
   periodSub,
   shiftAnchor,
+  toDate,
   todayKey,
 } from "./lib/dates";
 import IndexView from "./IndexView";
@@ -87,6 +89,10 @@ const SYNC_ATTENTION: SyncStatus[] = [
   "offline",
 ];
 
+// Future log fold state is a device preference, not journal content —
+// kept local like sticky capture state, never synced
+const FOLDS_KEY = "journlet-futurelog-folds";
+
 export default function App() {
   const { loaded, saveState, days, collections, habits, recurrences } =
     useJournal();
@@ -107,6 +113,24 @@ export default function App() {
   const [editText, setEditText] = useState<string | null>(null);
   // Date chosen in the sheet's "Schedule to a future date" control
   const [schedDate, setSchedDate] = useState("");
+  // Folded Future log month groups (device preference, see FOLDS_KEY)
+  const [folds, setFolds] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(FOLDS_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  });
+  const toggleFold = (gk: string) =>
+    setFolds((f) => {
+      const next = { ...f, [gk]: !f[gk] };
+      try {
+        localStorage.setItem(FOLDS_KEY, JSON.stringify(next));
+      } catch {
+        /* fold state is best-effort */
+      }
+      return next;
+    });
   const [editRemind, setEditRemind] = useState<string | null>(null);
   const [editRepeat, setEditRepeat] = useState<{
     n: string;
@@ -316,6 +340,29 @@ export default function App() {
         .filter((row) => !covered.has(`${row.rule.id}:${row.dayKey}`));
     })(),
   ].sort((a, b) => (a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0));
+
+  // Future log (spec §4.2; §11 Q9 resolved 21 July 2026): Carroll's Future
+  // Log starts where the current month ends. Rows landing later this month
+  // stay with the This Month section; everything beyond groups by month
+  // (weeks file under their Monday's month), and year-scoped items sit in
+  // a year bucket until they gain a date. Empty months are skipped — the
+  // paper method pre-draws them only because paper must be allocated.
+  const rowGroupKey = (r: ScheduledRow): string => {
+    if (r.kind === "entry" && keyScope(r.pk) === "year") return r.pk;
+    return (r.kind === "entry" ? keyToAnchor(r.pk) : r.dayKey).slice(0, 7);
+  };
+  const laterThisMonth = scheduledRows.filter(
+    (r) => rowGroupKey(r) === nowKeys.month
+  );
+  const futureLogGroups: { gk: string; rows: ScheduledRow[] }[] = [];
+  scheduledRows.forEach((r) => {
+    const gk = rowGroupKey(r);
+    if (gk === nowKeys.month) return;
+    const g = futureLogGroups.find((x) => x.gk === gk);
+    if (g) g.rows.push(r);
+    else futureLogGroups.push({ gk, rows: [r] });
+  });
+  futureLogGroups.sort((a, b) => (a.gk < b.gk ? -1 : 1));
 
   // Collection currently open, if any
   const activeCol =
@@ -577,6 +624,74 @@ export default function App() {
     </li>
   );
 
+  // When-label for a scheduled row: inside a month group the heading
+  // already names the month, so day rows shrink to weekday + day
+  const whenLabel = (pk: string, grouped: boolean): string => {
+    const sc = keyScope(pk);
+    if (!grouped) return pageLabel(pk);
+    if (sc === "day")
+      return fmt(toDate(pk), { weekday: "short", day: "numeric" });
+    if (sc === "month") return "whole month";
+    if (sc === "year") return "during the year";
+    return pageLabel(pk);
+  };
+
+  const renderScheduledRow = (row: ScheduledRow, grouped: boolean) =>
+    row.kind === "entry" ? (
+      <li key={row.entry.id} className="entry">
+        <span className="bullet" aria-hidden="true">
+          &lt;
+        </span>
+        <span className="etext">
+          {row.entry.priority && <span className="prio">*</span>}
+          {row.entry.text}
+          <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
+            {whenLabel(row.pk, grouped)}
+            {(() => {
+              const rule =
+                row.entry.recurrenceId &&
+                recurrences.find(
+                  (r) => r.id === row.entry.recurrenceId && !r.endedAt
+                );
+              return rule
+                ? ` — repeats ${cadenceLabel(rule.everyN, rule.unit)}`
+                : null;
+            })()}
+          </span>
+        </span>
+        <span className="actions">
+          <button
+            className="miniBtn moreBtn"
+            onClick={() =>
+              setSheet({
+                scope: keyScope(row.pk),
+                pk: row.pk,
+                id: row.entry.id,
+              })
+            }
+            aria-label="Entry actions"
+            aria-haspopup="dialog"
+          >
+            ⋯
+          </button>
+        </span>
+      </li>
+    ) : (
+      <li key={`rule-${row.rule.id}`} className="entry">
+        <span className="bullet" aria-hidden="true">
+          &lt;
+        </span>
+        <span className="etext">
+          {row.rule.priority && <span className="prio">*</span>}
+          {row.rule.text}
+          <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
+            {whenLabel(row.dayKey, grouped)} — repeats{" "}
+            {cadenceLabel(row.rule.everyN, row.rule.unit)}
+          </span>
+        </span>
+      </li>
+    );
+
   return (
     <div style={S.page}>
       <header style={S.header}>
@@ -729,88 +844,48 @@ export default function App() {
                 <ul style={S.list}>
                   {entries.map((e) => renderEntry(e, pk, sc))}
                 </ul>
+                {sc === "month" && isCurrent && laterThisMonth.length > 0 && (
+                  <>
+                    <div style={S.subGroupLabel}>Later this month</div>
+                    <ul style={S.list}>
+                      {laterThisMonth.map((row) =>
+                        renderScheduledRow(row, true)
+                      )}
+                    </ul>
+                  </>
+                )}
               </section>
             );
           })}
-        {loaded && view === "spread" && scheduledRows.length > 0 && (
+        {loaded && view === "spread" && futureLogGroups.length > 0 && (
           <section style={S.section}>
             <div style={S.sectionHead}>
-              <h2 style={S.sectionTitle}>Scheduled ahead</h2>
+              <h2 style={S.sectionTitle}>Future log</h2>
               <span style={S.sectionSub}>
-                appears on its page when the time comes
+                from next month on — items surface on their page when the
+                period arrives
               </span>
             </div>
-            <ul style={S.list}>
-              {scheduledRows.map((row) =>
-                row.kind === "entry" ? (
-                  <li key={row.entry.id} className="entry">
-                    <span className="bullet" aria-hidden="true">
-                      &lt;
-                    </span>
-                    <span className="etext">
-                      {row.entry.priority && <span className="prio">*</span>}
-                      {row.entry.text}
-                      <span
-                        style={{
-                          fontSize: 11.5,
-                          color: "#6B7683",
-                          marginLeft: 8,
-                        }}
-                      >
-                        {pageLabel(row.pk)}
-                        {(() => {
-                          const rule =
-                            row.entry.recurrenceId &&
-                            recurrences.find(
-                              (r) =>
-                                r.id === row.entry.recurrenceId && !r.endedAt
-                            );
-                          return rule
-                            ? ` — repeats ${cadenceLabel(rule.everyN, rule.unit)}`
-                            : null;
-                        })()}
-                      </span>
-                    </span>
-                    <span className="actions">
-                      <button
-                        className="miniBtn moreBtn"
-                        onClick={() =>
-                          setSheet({
-                            scope: keyScope(row.pk),
-                            pk: row.pk,
-                            id: row.entry.id,
-                          })
-                        }
-                        aria-label="Entry actions"
-                        aria-haspopup="dialog"
-                      >
-                        ⋯
-                      </button>
-                    </span>
-                  </li>
-                ) : (
-                  <li key={`rule-${row.rule.id}`} className="entry">
-                    <span className="bullet" aria-hidden="true">
-                      &lt;
-                    </span>
-                    <span className="etext">
-                      {row.rule.priority && <span className="prio">*</span>}
-                      {row.rule.text}
-                      <span
-                        style={{
-                          fontSize: 11.5,
-                          color: "#6B7683",
-                          marginLeft: 8,
-                        }}
-                      >
-                        {pageLabel(row.dayKey)} — repeats{" "}
-                        {cadenceLabel(row.rule.everyN, row.rule.unit)}
-                      </span>
-                    </span>
-                  </li>
-                )
-              )}
-            </ul>
+            {futureLogGroups.map(({ gk, rows }) => (
+              <div key={gk}>
+                <div style={S.flGroupHead}>
+                  <span style={S.subGroupLabel}>{pageLabel(gk)}</span>
+                  <button
+                    className="miniBtn"
+                    onClick={() => toggleFold(gk)}
+                    aria-expanded={!folds[gk]}
+                  >
+                    {rows.length} item{rows.length === 1 ? "" : "s"} ·{" "}
+                    {folds[gk] ? "show" : "hide"}
+                  </button>
+                </div>
+                {!folds[gk] && (
+                  <ul style={S.list}>
+                    {rows.map((row) => renderScheduledRow(row, true))}
+                  </ul>
+                )}
+              </div>
+            ))}
           </section>
         )}
       </main>
@@ -1521,6 +1596,21 @@ const S: Record<string, CSSProperties> = {
     fontSize: 12.5,
     fontStyle: "italic",
     padding: "6px 4px 2px",
+  },
+  subGroupLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: INK_SOFT,
+    margin: "8px 4px 2px",
+  },
+  flGroupHead: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 8,
+    borderBottom: "1px solid #E8E6DE",
+    paddingBottom: 2,
   },
   list: { listStyle: "none", margin: 0, padding: 0 },
   empty: { color: INK_SOFT, fontSize: 14, padding: "26px 4px", fontStyle: "italic" },
