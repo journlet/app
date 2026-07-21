@@ -401,6 +401,72 @@ table.habits {
   padding: 0;
   font-family: inherit;
 }
+/* Capture launcher (remediation item 4): slim resting bar whose two
+   targets — input-shaped field and solid + Log button — both open the
+   full-screen capture form */
+.launcherField {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  font-size: 15px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  min-width: 0;
+}
+.launcherGo {
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.launcherField:focus-visible,
+.launcherGo:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -3px;
+}
+
+/* Labelled choice pills in the capture form (type and signifiers) */
+.capChoice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+}
+.capChoice.isOn {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+  font-weight: 600;
+}
+.capChoice.isLit {
+  background: var(--hilite);
+  border-color: var(--ink);
+}
+.capChoice:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .actions {
     transition: none;

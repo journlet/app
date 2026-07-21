@@ -43,10 +43,16 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 ## P2 — Mobile UX
 
 ### 4. Capture bar too large on iPhone
+**Status: implemented** — awaiting on-device verification. Follow-up once verified: the visualViewport keyboard-pinning effect in `App.tsx` should be removable (the form owns the viewport; no other footer input remains).
 **Feedback:** Bottom entry area takes too much space; should collapse to an icon.
 **Assessment:** The footer stacks the scope tab row (day/week/month/year/date), an optional date input, and the capture bar (type glyph, priority, inspiration, text input, add) — three rows worst case.
 **Fix:** Collapsed-by-default capture: a single compact bar (or icon button) that expands to the full control set on focus/tap. All controls remain plainly labelled when expanded, per the labelling constraint. Sticky scope/type prefs already persist (`sticky.ts`) so the collapsed state loses nothing.
 **Alternative (pinned 21 Jul):** on small screens, open capture as a full-screen form instead of an expanding bottom bar. Sidesteps iOS keyboard-pinning fragility entirely (the form owns the whole viewport), gives room for plainly labelled controls, and is a common mobile pattern. Decide between the two when picking this up.
+**Decision (21 Jul, Gary, prototyped in chat):** hybrid design, one-destination model.
+- Resting state: single slim bar — white input area ("Log an entry…", showing sticky prefs e.g. "day · task") with a solid ink "+ Log" button attached to its right end, one continuous ink-bordered pill. Chosen over a plain collapsed bar (no obvious CTA — feedback from field testing) and over a floating action button (least notebook-like).
+- On tap: both targets (input area and "+ Log") open a full-screen capture form — entry input autofocused at the top with Log button beside it, then plainly labelled sections below: Log into (day/week/month/year/date…), Type (task/event/note), Signifiers (* priority, ! inspiration), prefilled from sticky prefs. Fast path stays tap, type, Log.
+- Rejected: split behaviour (text area types in place, button opens form) — two behaviours to learn; rejected expanding-in-place — cramped and depends on keyboard pinning.
+- Consequence: the visualViewport keyboard-pinning code (item 5) becomes removable once this ships, since the form owns the whole viewport.
 **Effort:** Medium.
 
 ### 5. Keyboard pushes content up; capture bar should pin to keyboard
