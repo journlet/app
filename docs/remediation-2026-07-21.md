@@ -102,6 +102,26 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 - Update the "Lost a device?" copy if needed — its "no one can remotely erase it" claim stays true; wiping is local and voluntary only.
 **Effort:** Medium; touches sync/keystore teardown and needs careful messaging.
 
+### 12. User preferences
+**Feedback (21 Jul):** A preferences section, e.g. persisting filters; is a Supabase table needed?
+**Assessment:** No new table — and one would violate ciphertext-only. Device-local prefs (filters, view choices) belong in localStorage alongside the existing sticky capture prefs; cross-device prefs belong in an encrypted prefs map inside the Yjs doc, syncing through the existing relay.
+**Effort:** Small once a settings surface (item 13) exists.
+
+### 13. Central menu / settings area
+**Feedback (21 Jul):** Export's location on the Index doesn't make sense; a central menu or settings area is needed.
+**Assessment:** Agreed — sync, export, notification permission and future preferences are scattered. One plainly labelled menu page; prerequisite for items 7 and 12.
+**Effort:** Small–medium.
+
+### 14. Shared journals
+**Feedback (21 Jul):** e.g. a journal shared with a partner.
+**Assessment:** Feasible within constraints. Schema currently keys journals and updates to a single user_id; sharing needs journal_id plus a membership table with RLS checking membership (still auth + dumb storage, no server code). Key sharing rides the existing QR flow, done in person. Main cost: the client becomes multi-journal, and lost-device key rotation affects all members. Post-MVP; design the schema migration early since it touches every table.
+**Effort:** Large.
+
+### 15. Performance at scale — yearly volumes
+**Feedback (21 Jul):** Will a growing journal hurt the app? Limit a journal to a year like a physical book?
+**Assessment:** No concern at current volumes, but the whole journal is one in-memory CRDT doc with a forever-growing update log. Yearly volumes (one doc per year, old volumes archived read-only, new notebook each January) cap memory, load time and log size, match bullet journal practice, and give shared journals (item 14) a natural unit. Design before the year turns.
+**Effort:** Medium–large; do the design alongside item 14's schema work.
+
 ---
 
 ## Suggested sequence
