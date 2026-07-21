@@ -599,9 +599,11 @@ export default function App() {
                 {SYNC_BADGE[syncStatus]}
               </button>
             )}
-            <span style={S.saveDot}>
-              {saveState === "saving" ? "saving…" : "saved"}
-            </span>
+            {/* Transient cue while the local IndexedDB write is in
+                flight; the sync badge is the persistent status */}
+            {saveState === "saving" && (
+              <span style={S.saveDot}>saving…</span>
+            )}
           </span>
         </div>
       </header>
@@ -1281,15 +1283,27 @@ export default function App() {
                       (r) => r.id === sheetEntry.recurrenceId && !r.endedAt
                     );
                     return rule ? (
-                      <button
-                        className="sheetBtn"
-                        onClick={() => {
-                          endRecurrence(rule.id);
-                          closeSheet();
-                        }}
-                      >
-                        Stop repeating ({cadenceLabel(rule.everyN, rule.unit)})
-                      </button>
+                      <>
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            color: "#6B7683",
+                            padding: "2px 0 4px",
+                          }}
+                        >
+                          repeats {cadenceLabel(rule.everyN, rule.unit)} — next:{" "}
+                          {pageLabel(nextOccurrence(rule, today))}
+                        </div>
+                        <button
+                          className="sheetBtn"
+                          onClick={() => {
+                            endRecurrence(rule.id);
+                            closeSheet();
+                          }}
+                        >
+                          Stop repeating ({cadenceLabel(rule.everyN, rule.unit)})
+                        </button>
+                      </>
                     ) : null;
                   })()}
                 {sheetMigrates ? (
