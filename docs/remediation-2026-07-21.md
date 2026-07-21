@@ -16,6 +16,7 @@ Assessed against the current codebase. Ordered by priority. Statuses updated as 
 **Effort:** Small.
 
 ### 2. Recurring tasks from yesterday not appearing where expected
+**Status: fixed** — root cause was item 1; cadence + next-date line added to the entry sheet. Verify materialisation tomorrow morning.
 **Feedback:** Two recurring tasks completed yesterday haven't reappeared.
 **Assessment:** Two contributing factors. (a) This is largely item 1: on resume the materialiser does run and insert today's instances, but the day section is still rendering yesterday's page, so they're invisible. (b) The "Repeat this entry…" sheet defaults to every 1 week — if the default wasn't changed, the next occurrence is next week, not today. Completion does not trigger the next instance; instances appear when their date arrives.
 **Fix:** Fix item 1 first, then verify. Additionally: show the cadence and next occurrence date on the entry sheet (e.g. "repeats daily — next: Wed 22 Jul") so the behaviour is legible rather than guessed.
@@ -84,6 +85,7 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Effort:** Medium, ongoing.
 
 ### 10. "Saved" indicator unclear
+**Status: fixed** — permanent 'saved' label removed; transient 'saving…' cue only, sync badge is the persistent status.
 **Feedback:** What does "saved" in the top right mean?
 **Assessment:** It reflects local persistence (`useJournal.saveState`) — the IndexedDB write of the Yjs doc on this device. Sync status is the separate badge next to it. Two adjacent indicators with overlapping meaning is confusing.
 **Fix:** Merge into one status ("saved on this device · synced"), or drop the save dot and keep only the sync badge, surfacing local-save failure as an error state. Aligns with "every UI action plainly labelled".
