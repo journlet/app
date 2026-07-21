@@ -9,6 +9,7 @@ Assessed against the current codebase. Ordered by priority. Nothing here has bee
 ## P1 — Correctness
 
 ### 1. Day does not roll over to today on morning open
+**Status: fixed** (c1724de) — confirmed working on-device 21 Jul.
 **Feedback:** App opened this morning still showing yesterday.
 **Root cause (confirmed):** `App.tsx` initialises the per-section anchors (`day`, `week`, `month`, `year`) to `todayKey()` once, in `useState`. Nothing updates them when the date changes, and nothing forces a React re-render on resume, so `nowKeys`, the Due view and the migration banner all render against a stale "today". `recurrence.ts` does have a 60s rollover interval and a `visibilitychange` handler, but those only materialise recurrence instances — they never touch the UI anchors, and iOS suspends timers in backgrounded PWAs anyway.
 **Fix:** Add a `visibilitychange`/`pageshow` handler in `App.tsx` that, on resume, compares a stored `today` state to `todayKey()`; if changed, bump it (forcing re-render of `nowKeys`) and advance any anchor still pointing at the previous today. Keep anchors the user deliberately navigated away from untouched.
@@ -21,6 +22,7 @@ Assessed against the current codebase. Ordered by priority. Nothing here has bee
 **Effort:** Small–medium.
 
 ### 2a. Future recurring occurrences invisible in Scheduled ahead
+**Status: fixed** (be2359a) — display-only preview rows, option (a).
 **Feedback:** If recurring entries only appear on the day they recur, they never show in Scheduled ahead.
 **Root cause (confirmed):** The materialiser (`recurrence.ts`) deliberately stops at today (`if (next > today) break`), so future occurrences don't exist as entries and Scheduled ahead — which only lists real entries on future pages — can't show them.
 **Fix options:**
@@ -47,12 +49,14 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Effort:** Medium.
 
 ### 5. Keyboard pushes content up; capture bar should pin to keyboard
+**Status: in progress** (c1724de, f837c42) — first attempt left a gap; reveal-pan counter shipped, awaiting on-device verification.
 **Feedback:** Opening the entry pushes the whole page up; the bar should stay locked to the bottom and move with the keyboard.
 **Assessment:** A `visualViewport` pin already exists (`App.tsx`, translateY on the footer) but it only repositions the footer — iOS still scrolls the layout viewport to reveal the focused input, shoving the page content up.
 **Fix:** Rework as: footer `position: fixed` driven by `visualViewport` height/offset; suppress the scroll jump (e.g. `interactive-widget=resizes-content` in the viewport meta where supported, plus preventing scroll-into-view on focus); test in standalone PWA mode on iOS specifically, as behaviour differs from Safari tabs.
 **Effort:** Medium; fiddly to test.
 
 ### 6. Section header squashed by nav buttons
+**Status: fixed** (0bc3e57) — short nav labels under 480px.
 **Feedback:** "‹ previous / back to now / next ›" buttons squash the header text on narrow screens.
 **Assessment:** Title, subtitle and three text buttons share one flex row.
 **Fix:** On narrow viewports, either wrap nav onto its own row or compact to chevron buttons with visible-but-shorter labels. Implementation approach is open (plain CSS, a utility framework, whatever is most effective) — the requirement is the outcome: markedly tighter use of space on small screens. A general small-screen audit is item 9.
