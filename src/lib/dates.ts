@@ -126,7 +126,8 @@ export const pageLabel = (pk: string): string => {
   if (sc === "day")
     return fmt(toDate(pk), { weekday: "short", day: "numeric", month: "short" });
   if (sc === "week") return `Week ${pk.slice(6)}`;
+  // Short month ("Sept 2026") — headers must fit one line on a phone
   if (sc === "month")
-    return fmt(toDate(pk + "-01"), { month: "long", year: "numeric" });
+    return fmt(toDate(pk + "-01"), { month: "short", year: "numeric" });
   return pk;
 };
