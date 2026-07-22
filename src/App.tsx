@@ -1811,35 +1811,47 @@ const S: Record<string, CSSProperties> = {
     boxSizing: "border-box",
     backgroundImage: `radial-gradient(${LINE} 1px, transparent 1px)`,
     backgroundSize: "22px 22px",
+    // Anchor the grid to the content column so bullets sit on a dot
+    // column. Each dot is at the centre (11,11) of its 22px tile, and
+    // 50% here resolves to (width - 22px) / 2, so max(50% - 269px, 0px)
+    // is the column's left edge at any viewport width. +24px puts a dot
+    // under the bullet centre (20px pad + 4px entry pad + 11px - 11px).
+    // -11px vertically puts dot rows on the 22px line boundaries, so
+    // text sits between dots rather than through them.
+    backgroundPosition: "calc(max(50% - 269px, 0px) + 24px) -11px",
     // dots scroll with the entries, like marks on a physical page
     backgroundAttachment: "local",
     overflowY: "auto",
   },
+  // Grid rhythm: 22px dot pitch. paperInner's top padding is one full
+  // row, and every block below is sized to a multiple of 22px so text
+  // lines land in the dot rows all the way down the page.
   paperInner: {
     maxWidth: 560,
     margin: "0 auto",
     boxSizing: "border-box",
-    padding: "8px 20px 16px",
+    padding: "22px 20px 22px",
   },
-  section: { marginBottom: 18 },
+  section: { marginBottom: 22 },
+  // head = 22px title line + 4px pad + 1px rule + 17px margin = 44px
   sectionHead: {
     display: "flex",
     alignItems: "baseline",
     flexWrap: "wrap",
-    rowGap: 2,
+    rowGap: 0,
     gap: 10,
     borderBottom: `1px solid ${LINE}`,
     paddingBottom: 4,
-    marginBottom: 4,
+    marginBottom: 17,
   },
   sectionTitle: {
     fontFamily: "'Fraunces', serif",
     fontWeight: 600,
     fontSize: 20,
     margin: 0,
-    lineHeight: 1.15,
+    lineHeight: "22px",
   },
-  sectionSub: { fontSize: 11.5, color: INK_SOFT },
+  sectionSub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "22px" },
   sectionNav: {
     marginLeft: "auto",
     display: "flex",
@@ -1850,25 +1862,30 @@ const S: Record<string, CSSProperties> = {
     color: INK_SOFT,
     fontSize: 12.5,
     fontStyle: "italic",
-    padding: "6px 4px 2px",
+    lineHeight: "22px",
+    padding: "0 4px",
   },
   subGroupLabel: {
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: "0.08em",
     color: INK_SOFT,
-    margin: "8px 4px 2px",
+    lineHeight: "22px",
+    margin: "0 4px",
   },
+  // 11px margin + 10px pad + 1px rule + 22px line = 44px
   futureLogLink: {
     display: "flex",
     alignItems: "baseline",
     justifyContent: "space-between",
     gap: 8,
     width: "100%",
-    marginTop: 10,
-    paddingTop: 8,
+    lineHeight: "22px",
+    marginTop: 11,
+    paddingTop: 10,
     borderTop: "1px solid #DCDAD1",
   },
+  // 22px label + 2px pad + 1px rule - 3px margin = 22px
   flGroupHead: {
     display: "flex",
     alignItems: "baseline",
@@ -1876,9 +1893,16 @@ const S: Record<string, CSSProperties> = {
     gap: 8,
     borderBottom: "1px solid #E8E6DE",
     paddingBottom: 2,
+    marginBottom: -3,
   },
   list: { listStyle: "none", margin: 0, padding: 0 },
-  empty: { color: INK_SOFT, fontSize: 14, padding: "26px 4px", fontStyle: "italic" },
+  empty: {
+    color: INK_SOFT,
+    fontSize: 14,
+    lineHeight: "22px",
+    padding: "22px 4px",
+    fontStyle: "italic",
+  },
   captureWrap: {
     position: "relative",
     zIndex: 30,

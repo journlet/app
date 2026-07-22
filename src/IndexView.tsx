@@ -180,31 +180,39 @@ const INK_SOFT = "#6B7683";
 const LINE = "#DCDAD1";
 
 const ST: Record<string, CSSProperties> = {
+  // 22px grid rhythm — matches the dot pitch of the paper background
   head: {
     display: "flex",
     alignItems: "baseline",
     gap: 10,
     borderBottom: `1px solid ${LINE}`,
     paddingBottom: 4,
-    marginBottom: 8,
+    marginBottom: 17,
   },
   title: {
     fontFamily: "'Fraunces', serif",
     fontWeight: 600,
     fontSize: 20,
     margin: 0,
-    lineHeight: 1.15,
+    lineHeight: "22px",
   },
-  sub: { fontSize: 11.5, color: INK_SOFT },
+  sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "22px" },
   nav: { marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 },
-  empty: { color: INK_SOFT, fontSize: 13, fontStyle: "italic", padding: "10px 4px" },
-  group: { marginBottom: 14 },
+  empty: {
+    color: INK_SOFT,
+    fontSize: 13,
+    fontStyle: "italic",
+    lineHeight: "22px",
+    padding: "0 4px",
+  },
+  group: { marginBottom: 22 },
   groupLabel: {
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: "0.08em",
     color: INK_SOFT,
-    margin: "8px 4px 4px",
+    lineHeight: "22px",
+    margin: "0 4px",
   },
   list: { listStyle: "none", margin: 0, padding: 0 },
   nowTag: { fontSize: 11.5, color: INK_SOFT, fontWeight: 400 },
