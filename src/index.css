@@ -62,6 +62,9 @@ body {
   width: 22px;
   flex-shrink: 0;
   padding: 0;
+  /* buttons centre their glyph, spans (< scheduled rows) don't — centre
+     both so every glyph sits on the dot column */
+  text-align: center;
 }
 .bullet:focus-visible,
 .miniBtn:focus-visible,
