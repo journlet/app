@@ -714,18 +714,14 @@ export default function App() {
       </li>
     ) : (
       // Rule previews are projections — the real entry is created when the
-      // day arrives. Muted ink separates them from real entries, and ⋯
-      // opens the rule's own actions (skip this occurrence, stop
-      // repeating), so the row behaves like everything else
+      // day arrives. Full ink, same as every other row (decision of 22 July
+      // 2026): the "repeats …" note carries the distinction in words, and ⋯
+      // opens the rule's own actions (skip this occurrence, stop repeating)
       <li key={`rule-${row.rule.id}`} className="entry">
-        <span
-          className="bullet"
-          aria-hidden="true"
-          style={{ color: "#6B7683" }}
-        >
+        <span className="bullet" aria-hidden="true">
           &lt;
         </span>
-        <span className="etext" style={{ color: "#6B7683" }}>
+        <span className="etext">
           {row.rule.priority && <span className="prio">*</span>}
           {row.rule.text}
           <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
