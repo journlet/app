@@ -45,7 +45,9 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 0 4px;
+  /* double-spaced: text on one grid row, an empty dot row below — keeps
+     the airiness of the prototype and a 44px tap target for the bullet */
+  padding: 0 4px 22px;
   border-radius: 6px;
 }
 .entry:hover {
@@ -60,7 +62,10 @@ body {
   color: var(--ink);
   width: 22px;
   flex-shrink: 0;
-  padding: 0;
+  /* extend the tap target into the entry's empty dot row below without
+     adding layout height (the row already reserves that 22px) */
+  padding: 0 0 22px;
+  margin-bottom: -22px;
 }
 .bullet:focus-visible,
 .miniBtn:focus-visible,
@@ -317,7 +322,8 @@ body {
   background: none;
   border: none;
   border-radius: 6px;
-  padding: 0 4px;
+  /* double-spaced like .entry: 44px rows, comfortable tap target */
+  padding: 0 4px 22px;
   font-family: inherit;
   font-size: 14.5px;
   line-height: 22px;
