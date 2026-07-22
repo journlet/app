@@ -200,28 +200,30 @@ const LINE = "#DCDAD1";
 const INK = "#26323E";
 
 const ST: Record<string, CSSProperties> = {
+  // 22px grid rhythm — matches the dot pitch of the paper background
   head: {
     display: "flex",
     alignItems: "baseline",
     gap: 10,
     borderBottom: `1px solid ${LINE}`,
     paddingBottom: 4,
-    marginBottom: 4,
+    marginBottom: 17,
   },
   title: {
     fontFamily: "'Fraunces', serif",
     fontWeight: 600,
     fontSize: 20,
     margin: 0,
-    lineHeight: 1.15,
+    lineHeight: "22px",
   },
-  sub: { fontSize: 11.5, color: INK_SOFT },
+  sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
   nav: { marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 },
   empty: {
     color: INK_SOFT,
     fontSize: 12.5,
     fontStyle: "italic",
-    padding: "6px 4px 2px",
+    lineHeight: "22px",
+    padding: "0 4px",
   },
   list: { listStyle: "none", margin: 0, padding: 0 },
   legend: {

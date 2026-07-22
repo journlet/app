@@ -637,12 +637,30 @@ export default function App() {
         {e.inspiration && <span className="insp">!</span>}
         {e.text}
         {e.remindAt && (
-          <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
+          <span
+            // 13px line box: keeps the small meta text from stretching the
+            // entry's 22px grid row via inline baseline alignment
+            style={{
+              fontSize: 11.5,
+              lineHeight: "13px",
+              color: "#6B7683",
+              marginLeft: 8,
+            }}
+          >
             remind {fmtRemind(e.remindAt)}
           </span>
         )}
         {e.recurrenceId && (
-          <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
+          <span
+            // 13px line box: keeps the small meta text from stretching the
+            // entry's 22px grid row via inline baseline alignment
+            style={{
+              fontSize: 11.5,
+              lineHeight: "13px",
+              color: "#6B7683",
+              marginLeft: 8,
+            }}
+          >
             repeats
           </span>
         )}
@@ -681,7 +699,16 @@ export default function App() {
         <span className="etext">
           {row.entry.priority && <span className="prio">*</span>}
           {row.entry.text}
-          <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
+          <span
+            // 13px line box: keeps the small meta text from stretching the
+            // entry's 22px grid row via inline baseline alignment
+            style={{
+              fontSize: 11.5,
+              lineHeight: "13px",
+              color: "#6B7683",
+              marginLeft: 8,
+            }}
+          >
             {whenLabel(row.pk, grouped)}
             {(() => {
               const rule =
@@ -724,7 +751,16 @@ export default function App() {
         <span className="etext">
           {row.rule.priority && <span className="prio">*</span>}
           {row.rule.text}
-          <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
+          <span
+            // 13px line box: keeps the small meta text from stretching the
+            // entry's 22px grid row via inline baseline alignment
+            style={{
+              fontSize: 11.5,
+              lineHeight: "13px",
+              color: "#6B7683",
+              marginLeft: 8,
+            }}
+          >
             {whenLabel(row.dayKey, grouped)} — repeats{" "}
             {cadenceLabel(row.rule.everyN, row.rule.unit)}
           </span>
@@ -822,7 +858,11 @@ export default function App() {
               {pastOpen.length} open task{pastOpen.length === 1 ? "" : "s"} from
               past pages
             </span>
-            <span style={{ fontSize: 12.5 }}>Review and migrate ›</span>
+            {/* 13px line box so the smaller text can't stretch the
+                banner's 22px line and push content off the grid */}
+            <span style={{ fontSize: 12.5, lineHeight: "13px" }}>
+              Review and migrate ›
+            </span>
           </button>
         )}
         {loaded && view === "spread" && dueItems.length > 0 && (
@@ -948,7 +988,9 @@ export default function App() {
             onClick={() => setView("future")}
           >
             <span style={{ fontWeight: 600 }}>Future log</span>
-            <span style={{ fontSize: 11.5, color: "#6B7683" }}>
+            <span
+              style={{ fontSize: 11.5, lineHeight: "13px", color: "#6B7683" }}
+            >
               {futureLogCount} item{futureLogCount === 1 ? "" : "s"} · from
               next month on ›
             </span>
@@ -1833,7 +1875,9 @@ const S: Record<string, CSSProperties> = {
     padding: "22px 20px 22px",
   },
   section: { marginBottom: 22 },
-  // head = 22px title line + 4px pad + 1px rule + 17px margin = 44px
+  // head = 22px title line + 4px pad + 1px rule + 17px margin = 44px.
+  // Small companions get short line boxes (13px) so baseline alignment
+  // can't stretch the 22px flex line and knock everything off the grid.
   sectionHead: {
     display: "flex",
     alignItems: "baseline",
@@ -1851,7 +1895,7 @@ const S: Record<string, CSSProperties> = {
     margin: 0,
     lineHeight: "22px",
   },
-  sectionSub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "22px" },
+  sectionSub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
   sectionNav: {
     marginLeft: "auto",
     display: "flex",

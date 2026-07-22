@@ -196,7 +196,7 @@ const ST: Record<string, CSSProperties> = {
     margin: 0,
     lineHeight: "22px",
   },
-  sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "22px" },
+  sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
   nav: { marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 },
   empty: {
     color: INK_SOFT,
@@ -215,6 +215,18 @@ const ST: Record<string, CSSProperties> = {
     margin: "0 4px",
   },
   list: { listStyle: "none", margin: 0, padding: 0 },
-  nowTag: { fontSize: 11.5, color: INK_SOFT, fontWeight: 400 },
-  count: { fontSize: 11.5, color: INK_SOFT, flexShrink: 0, marginLeft: 10 },
+  // 13px line boxes: small text must not stretch the 22px grid rows
+  nowTag: {
+    fontSize: 11.5,
+    lineHeight: "13px",
+    color: INK_SOFT,
+    fontWeight: 400,
+  },
+  count: {
+    fontSize: 11.5,
+    lineHeight: "13px",
+    color: INK_SOFT,
+    flexShrink: 0,
+    marginLeft: 10,
+  },
 };
