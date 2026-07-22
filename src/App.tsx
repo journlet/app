@@ -779,6 +779,7 @@ export default function App() {
       </header>
 
       <main style={S.paper}>
+        <div style={S.paperInner}>
         {!loaded && <div style={S.empty}>opening journal…</div>}
         {loaded && view === "index" && (
           <IndexView
@@ -990,6 +991,7 @@ export default function App() {
             ))}
           </section>
         )}
+        </div>
       </main>
 
       {activeCol?.kind !== "habits" && view !== "sync" && (
@@ -1805,14 +1807,19 @@ const S: Record<string, CSSProperties> = {
   saveDot: { fontSize: 11, color: INK_SOFT },
   paper: {
     flex: 1,
-    maxWidth: 560,
     width: "100%",
+    boxSizing: "border-box",
+    backgroundImage: `radial-gradient(${LINE} 1px, transparent 1px)`,
+    backgroundSize: "22px 22px",
+    // dots scroll with the entries, like marks on a physical page
+    backgroundAttachment: "local",
+    overflowY: "auto",
+  },
+  paperInner: {
+    maxWidth: 560,
     margin: "0 auto",
     boxSizing: "border-box",
     padding: "8px 20px 16px",
-    backgroundImage: `radial-gradient(${LINE} 1px, transparent 1px)`,
-    backgroundSize: "22px 22px",
-    overflowY: "auto",
   },
   section: { marginBottom: 18 },
   sectionHead: {
