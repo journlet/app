@@ -32,7 +32,7 @@ import {
   tagEntryRecurrence,
 } from "./store/journal";
 import type { Recurrence, RecurrenceUnit } from "./lib/types";
-import { nextOccurrence } from "./store/recurrence";
+import { nextOccurrence, skipOccurrence } from "./store/recurrence";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -132,6 +132,11 @@ export default function App() {
   // launcher; both its targets open this form — one behaviour, no guessing
   const [captureOpen, setCaptureOpen] = useState(false);
   const [sheet, setSheet] = useState<SheetTarget | null>(null);
+  // Sheet for a recurrence preview row — keyed on the rule, not an entry
+  const [ruleSheet, setRuleSheet] = useState<{
+    ruleId: string;
+    dayKey: string;
+  } | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
   // Date chosen in the sheet's "Schedule to a future date" control
   const [schedDate, setSchedDate] = useState("");
@@ -708,10 +713,10 @@ export default function App() {
         </span>
       </li>
     ) : (
-      // Rule previews are display-only: the real entry is created when the
-      // day arrives, so there are no ⋯ actions. Muted ink plus a plainly
-      // labelled tag keep them from passing as real entries (no-guessing
-      // rule, spec §4.1)
+      // Rule previews are projections — the real entry is created when the
+      // day arrives. Muted ink separates them from real entries, and ⋯
+      // opens the rule's own actions (skip this occurrence, stop
+      // repeating), so the row behaves like everything else
       <li key={`rule-${row.rule.id}`} className="entry">
         <span
           className="bullet"
@@ -723,16 +728,22 @@ export default function App() {
         <span className="etext" style={{ color: "#6B7683" }}>
           {row.rule.priority && <span className="prio">*</span>}
           {row.rule.text}
-          <span
-            className="typeTag"
-            title="Created automatically when the day arrives"
-          >
-            preview
-          </span>
           <span style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}>
             {whenLabel(row.dayKey, grouped)} — repeats{" "}
             {cadenceLabel(row.rule.everyN, row.rule.unit)}
           </span>
+        </span>
+        <span className="actions">
+          <button
+            className="miniBtn moreBtn"
+            onClick={() =>
+              setRuleSheet({ ruleId: row.rule.id, dayKey: row.dayKey })
+            }
+            aria-label="Repeating entry actions"
+            aria-haspopup="dialog"
+          >
+            ⋯
+          </button>
         </span>
       </li>
     );
@@ -1026,6 +1037,70 @@ export default function App() {
         </div>
       </footer>
       )}
+
+      {ruleSheet &&
+        (() => {
+          const rule = recurrences.find((r) => r.id === ruleSheet.ruleId);
+          if (!rule) return null;
+          return (
+            <div style={S.sheetBackdrop} onClick={() => setRuleSheet(null)}>
+              <div
+                style={S.sheet}
+                role="dialog"
+                aria-label="Repeating entry actions"
+                onClick={(ev) => ev.stopPropagation()}
+              >
+                <div style={S.sheetHandle} />
+                <div style={S.sheetGroupLabel}>Repeating entry</div>
+                <div className="entry" style={{ pointerEvents: "none" }}>
+                  <span className="bullet" aria-hidden="true">
+                    {GLYPH[rule.type]}
+                  </span>
+                  <span className="etext">
+                    {rule.priority && <span className="prio">*</span>}
+                    {rule.inspiration && <span className="insp">!</span>}
+                    {rule.text}
+                    <span
+                      style={{
+                        fontSize: 11.5,
+                        color: "#6B7683",
+                        marginLeft: 8,
+                      }}
+                    >
+                      repeats {cadenceLabel(rule.everyN, rule.unit)} — next:{" "}
+                      {pageLabel(ruleSheet.dayKey)}
+                    </span>
+                  </span>
+                </div>
+                <button
+                  className="sheetBtn"
+                  onClick={() => {
+                    skipOccurrence(rule, ruleSheet.dayKey);
+                    setRuleSheet(null);
+                  }}
+                >
+                  Skip this occurrence ({pageLabel(ruleSheet.dayKey)}) — it
+                  stays on its page, struck out
+                </button>
+                <button
+                  className="sheetBtn"
+                  onClick={() => {
+                    endRecurrence(rule.id);
+                    setRuleSheet(null);
+                  }}
+                >
+                  Stop repeating ({cadenceLabel(rule.everyN, rule.unit)})
+                </button>
+                <button
+                  className="sheetBtn isQuiet"
+                  onClick={() => setRuleSheet(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
       {captureOpen && (
         <div style={S.captureForm} role="dialog" aria-label="New entry">

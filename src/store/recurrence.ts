@@ -38,6 +38,24 @@ export const nextOccurrence = (r: Recurrence, after: string): string => {
   return k;
 };
 
+// Skip a single upcoming occurrence: materialise it immediately as a
+// struck entry — Carroll's notation for "no longer relevant", honestly
+// recorded on its page. The materialiser never recreates an existing
+// rule+day instance (any state), so the skip holds on every device.
+export const skipOccurrence = (rule: Recurrence, dayKey: string): void => {
+  insertEntry({
+    id: uid(),
+    type: rule.type,
+    text: rule.text,
+    priority: rule.priority,
+    inspiration: rule.inspiration,
+    state: "struck",
+    pageKey: dayKey,
+    createdAt: Date.now(),
+    recurrenceId: rule.id,
+  });
+};
+
 const remindAtFor = (r: Recurrence, dayKey: string): number | undefined => {
   if (!r.remindTime) return undefined;
   const m = r.remindTime.match(/^(\d{2}):(\d{2})$/);
