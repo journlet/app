@@ -109,6 +109,25 @@ export default function App() {
     sticky.current.inspiration
   );
   const [input, setInput] = useState("");
+  // Last entry logged while the capture form has been open (batch cue)
+  const [justLogged, setJustLogged] = useState<string | null>(null);
+
+  // App-icon shortcuts land on /?capture (Android manifest shortcut;
+  // iOS reaches the same URL via a Siri Shortcut or a second home-screen
+  // icon, as it lacks long-press shortcuts for PWAs) — open the entry
+  // form directly, then tidy the URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("capture")) return;
+    setCaptureOpen(true);
+    params.delete("capture");
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + (qs ? `?${qs}` : "")
+    );
+  }, []);
   // Full-screen capture form (remediation item 4): the footer is a slim
   // launcher; both its targets open this form — one behaviour, no guessing
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -394,9 +413,13 @@ export default function App() {
         : nowKeys[captureScope];
     addEntry(pk, captureType, text, capturePriority, captureInspiration);
     setInput("");
-    // Close the form so the new entry is visible on the page — tap,
-    // type, Log, done. Sticky state intentionally retained (spec §4.1).
-    setCaptureOpen(false);
+    // The form stays open for a run of entries (decision of 22 July 2026,
+    // restoring §4.1's batch-logging intent); a confirmation line shows
+    // each entry landed. "Done" closes.
+    setJustLogged(
+      text.length > 40 ? text.slice(0, 39) + "…" : text
+    );
+    inputRef.current?.focus();
   }, [input, activeCol, captureScope, captureType, capturePriority, captureInspiration, customDate, customGran, nowKeys]);
 
   const showToast = (t: DeletedToast) => {
@@ -417,6 +440,11 @@ export default function App() {
     if (toast.colSnap) restoreCollection(toast.colSnap);
     setToast(null);
     if (toastTimer.current) clearTimeout(toastTimer.current);
+  };
+
+  const closeCapture = () => {
+    setCaptureOpen(false);
+    setJustLogged(null);
   };
 
   const closeSheet = () => {
@@ -929,8 +957,8 @@ export default function App() {
             </div>
             {futureLogCount === 0 && (
               <div style={S.empty}>
-                Nothing scheduled ahead — use "date…" on the capture bar to
-                log an entry to a future page.
+                Nothing scheduled ahead — choose "date…" in the entry form
+                to log an entry to a future page.
               </div>
             )}
             {futureLogGroups.map(({ gk, rows }) => (
@@ -1006,9 +1034,9 @@ export default function App() {
             <button
               className="sheetBtn isCompact"
               style={{ flex: "none", margin: 0 }}
-              onClick={() => setCaptureOpen(false)}
+              onClick={closeCapture}
             >
-              Cancel
+              {justLogged ? "Done" : "Cancel"}
             </button>
           </div>
           <div style={S.captureFormBody}>
@@ -1023,7 +1051,7 @@ export default function App() {
                 onChange={(ev) => setInput(ev.target.value)}
                 onKeyDown={(ev) => {
                   if (ev.key === "Enter") submitEntry();
-                  if (ev.key === "Escape") setCaptureOpen(false);
+                  if (ev.key === "Escape") closeCapture();
                 }}
                 placeholder={
                   activeCol
@@ -1044,6 +1072,11 @@ export default function App() {
                 Log
               </button>
             </div>
+            {justLogged && (
+              <div style={S.formNote} role="status">
+                Logged “{justLogged}” — keep typing for another, or Done
+              </div>
+            )}
             {activeCol ? (
               <div style={S.formNote}>
                 Logging into the “{activeCol.name}” collection

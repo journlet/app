@@ -37,6 +37,19 @@ export default defineConfig({
             purpose: "maskable",
           },
         ],
+        // Android long-press app-icon shortcut (spec §4.1); iOS has no
+        // PWA equivalent — the same URL works via Siri Shortcuts
+        shortcuts: [
+          {
+            name: "New entry",
+            short_name: "New entry",
+            description: "Open straight into the entry form",
+            url: "/?capture",
+            icons: [
+              { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+            ],
+          },
+        ],
       },
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
