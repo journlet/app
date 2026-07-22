@@ -41,6 +41,7 @@ import type { CollectionSnapshot } from "./store/journal";
 import type { Scope } from "./lib/dates";
 import { GLYPH, STATE_GLYPH } from "./lib/types";
 import type { Entry } from "./lib/types";
+import { GRID, GRID_BG_POSITION } from "./lib/grid";
 import { loadSticky, saveSticky } from "./lib/sticky";
 import type { CaptureScope } from "./lib/sticky";
 import {
@@ -781,7 +782,7 @@ export default function App() {
     );
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <header style={S.header}>
         <div style={S.brandRow}>
           <span style={S.brand}>Journlet</span>
@@ -1852,32 +1853,27 @@ const S: Record<string, CSSProperties> = {
     width: "100%",
     boxSizing: "border-box",
     backgroundImage: `radial-gradient(${LINE} 1px, transparent 1px)`,
-    backgroundSize: "22px 22px",
-    // Anchor the grid to the content column so bullets sit on a dot
-    // column. Each dot is at the centre (11,11) of its 22px tile, and
-    // 50% here resolves to (width - 22px) / 2, so max(50% - 269px, 0px)
-    // is the column's left edge at any viewport width. +24px puts a dot
-    // under the bullet centre (20px pad + 4px entry pad + 11px - 11px).
-    // -11px vertically puts dot rows on the 22px line boundaries, so
-    // text sits between dots rather than through them.
-    backgroundPosition: "calc(max(50% - 269px, 0px) + 24px) -11px",
+    backgroundSize: `${GRID}px ${GRID}px`,
+    // Anchored so a dot column runs under the bullets and dot rows sit
+    // on the text line boundaries — see src/lib/grid.ts for the maths.
+    backgroundPosition: GRID_BG_POSITION,
     // dots scroll with the entries, like marks on a physical page
     backgroundAttachment: "local",
     overflowY: "auto",
   },
-  // Grid rhythm: 22px dot pitch. paperInner's top padding is one full
-  // row, and every block below is sized to a multiple of 22px so text
+  // Grid rhythm: GRID px dot pitch. paperInner's top padding is one full
+  // row, and every block below is sized to a multiple of GRID so text
   // lines land in the dot rows all the way down the page.
   paperInner: {
     maxWidth: 560,
     margin: "0 auto",
     boxSizing: "border-box",
-    padding: "22px 20px 22px",
+    padding: `${GRID}px 20px`,
   },
-  section: { marginBottom: 22 },
-  // head = 22px title line + 4px pad + 1px rule + 17px margin = 44px.
+  section: { marginBottom: GRID },
+  // head = one GRID title line + 4px pad + 1px rule + margin = 2 rows.
   // Small companions get short line boxes (13px) so baseline alignment
-  // can't stretch the 22px flex line and knock everything off the grid.
+  // can't stretch the title's flex line and knock everything off grid.
   sectionHead: {
     display: "flex",
     alignItems: "baseline",
@@ -1886,14 +1882,14 @@ const S: Record<string, CSSProperties> = {
     gap: 10,
     borderBottom: `1px solid ${LINE}`,
     paddingBottom: 4,
-    marginBottom: 17,
+    marginBottom: GRID - 5,
   },
   sectionTitle: {
     fontFamily: "'Fraunces', serif",
     fontWeight: 600,
     fontSize: 20,
     margin: 0,
-    lineHeight: "22px",
+    lineHeight: `${GRID}px`,
   },
   sectionSub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
   sectionNav: {
@@ -1906,7 +1902,7 @@ const S: Record<string, CSSProperties> = {
     color: INK_SOFT,
     fontSize: 12.5,
     fontStyle: "italic",
-    lineHeight: "22px",
+    lineHeight: `${GRID}px`,
     padding: "0 4px",
   },
   subGroupLabel: {
@@ -1914,22 +1910,22 @@ const S: Record<string, CSSProperties> = {
     textTransform: "uppercase",
     letterSpacing: "0.08em",
     color: INK_SOFT,
-    lineHeight: "22px",
+    lineHeight: `${GRID}px`,
     margin: "0 4px",
   },
-  // 11px margin + 10px pad + 1px rule + 22px line = 44px
+  // margin + 10px pad + 1px rule + one GRID line = 2 rows
   futureLogLink: {
     display: "flex",
     alignItems: "baseline",
     justifyContent: "space-between",
     gap: 8,
     width: "100%",
-    lineHeight: "22px",
-    marginTop: 11,
+    lineHeight: `${GRID}px`,
+    marginTop: GRID - 11,
     paddingTop: 10,
     borderTop: "1px solid #DCDAD1",
   },
-  // 22px label + 2px pad + 1px rule - 3px margin = 22px
+  // one GRID label + 2px pad + 1px rule - 3px margin = one row
   flGroupHead: {
     display: "flex",
     alignItems: "baseline",
@@ -1943,8 +1939,8 @@ const S: Record<string, CSSProperties> = {
   empty: {
     color: INK_SOFT,
     fontSize: 14,
-    lineHeight: "22px",
-    padding: "22px 4px",
+    lineHeight: `${GRID}px`,
+    padding: `${GRID}px 4px`,
     fontStyle: "italic",
   },
   captureWrap: {

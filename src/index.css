@@ -38,16 +38,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Grid rhythm: the paper's dot grid is 22px. Every line of journal text
-   is a 22px line box and every stacked block is a multiple of 22px, so
-   entries sit in the dot rows like handwriting in a physical book. */
+/* Grid rhythm: the paper's dot pitch is --grid (set from src/lib/grid.ts
+   on the app root). Every line of journal text is a --grid line box and
+   every stacked block is a multiple of it, so entries sit in the dot
+   rows like handwriting in a physical book. */
 .entry {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  /* double-spaced: text on one grid row, an empty dot row below — keeps
-     the airiness of the prototype and a 44px tap target for the bullet */
-  padding: 0 4px 22px;
+  padding: 0 4px;
   border-radius: 6px;
 }
 .entry:hover {
@@ -58,14 +57,11 @@ body {
   border: none;
   cursor: pointer;
   font-size: 17px;
-  line-height: 22px;
+  line-height: var(--grid);
   color: var(--ink);
   width: 22px;
   flex-shrink: 0;
-  /* extend the tap target into the entry's empty dot row below without
-     adding layout height (the row already reserves that 22px) */
-  padding: 0 0 22px;
-  margin-bottom: -22px;
+  padding: 0;
 }
 .bullet:focus-visible,
 .miniBtn:focus-visible,
@@ -80,7 +76,7 @@ body {
 .etext {
   flex: 1;
   font-size: 15.5px;
-  line-height: 22px;
+  line-height: var(--grid);
   word-break: break-word;
 }
 .etext.isDone {
@@ -117,7 +113,7 @@ body {
 }
 .entry.isSub {
   /* one dot column of indent, so sub-bullets land on the next dot */
-  margin-left: 22px;
+  margin-left: var(--grid);
 }
 .actions {
   display: flex;
@@ -254,14 +250,14 @@ body {
   background: #fff8dc;
   border: 1px solid #e8d48a;
   border-radius: 10px;
-  /* 1px border + 10px padding + 22px line = 44px box; 22px margin below
-     keeps everything after it on the grid */
-  padding: 10px 14px;
-  margin: 0 0 22px;
+  /* 1px border + padding + one --grid line = two grid rows; a --grid
+     margin below keeps everything after it on the grid */
+  padding: calc(var(--grid) / 2 - 1px) 14px;
+  margin: 0 0 var(--grid);
   cursor: pointer;
   font-family: inherit;
   font-size: 14px;
-  line-height: 22px;
+  line-height: var(--grid);
   color: var(--ink);
   text-align: left;
 }
@@ -322,11 +318,10 @@ body {
   background: none;
   border: none;
   border-radius: 6px;
-  /* double-spaced like .entry: 44px rows, comfortable tap target */
-  padding: 0 4px 22px;
+  padding: 0 4px;
   font-family: inherit;
   font-size: 14.5px;
-  line-height: 22px;
+  line-height: var(--grid);
   color: var(--ink);
   cursor: pointer;
   text-align: left;

@@ -8,6 +8,7 @@ import type { Scope } from "./lib/dates";
 import { colPageKey } from "./lib/types";
 import type { Collection, Entry, Habit } from "./lib/types";
 import { buildMarkdown } from "./lib/exportMd";
+import { GRID } from "./lib/grid";
 
 const GROUP_LABEL: Record<Scope, string> = {
   day: "Days",
@@ -180,21 +181,21 @@ const INK_SOFT = "#6B7683";
 const LINE = "#DCDAD1";
 
 const ST: Record<string, CSSProperties> = {
-  // 22px grid rhythm — matches the dot pitch of the paper background
+  // GRID rhythm — matches the dot pitch of the paper background
   head: {
     display: "flex",
     alignItems: "baseline",
     gap: 10,
     borderBottom: `1px solid ${LINE}`,
     paddingBottom: 4,
-    marginBottom: 17,
+    marginBottom: GRID - 5,
   },
   title: {
     fontFamily: "'Fraunces', serif",
     fontWeight: 600,
     fontSize: 20,
     margin: 0,
-    lineHeight: "22px",
+    lineHeight: `${GRID}px`,
   },
   sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
   nav: { marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 },
@@ -202,16 +203,16 @@ const ST: Record<string, CSSProperties> = {
     color: INK_SOFT,
     fontSize: 13,
     fontStyle: "italic",
-    lineHeight: "22px",
+    lineHeight: `${GRID}px`,
     padding: "0 4px",
   },
-  group: { marginBottom: 22 },
+  group: { marginBottom: GRID },
   groupLabel: {
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: "0.08em",
     color: INK_SOFT,
-    lineHeight: "22px",
+    lineHeight: `${GRID}px`,
     margin: "0 4px",
   },
   list: { listStyle: "none", margin: 0, padding: 0 },
