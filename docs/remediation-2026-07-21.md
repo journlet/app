@@ -16,7 +16,7 @@ Assessed against the current codebase. Ordered by priority. Statuses updated as 
 **Effort:** Small.
 
 ### 2. Recurring tasks from yesterday not appearing where expected
-**Status: fixed** — root cause was item 1; cadence + next-date line added to the entry sheet. Verify materialisation tomorrow morning.
+**Status: fixed and verified** — root cause was item 1; cadence + next-date line added to the entry sheet. Materialisation and scheduled-entry surfacing confirmed on-device 22 Jul.
 **Feedback:** Two recurring tasks completed yesterday haven't reappeared.
 **Assessment:** Two contributing factors. (a) This is largely item 1: on resume the materialiser does run and insert today's instances, but the day section is still rendering yesterday's page, so they're invisible. (b) The "Repeat this entry…" sheet defaults to every 1 week — if the default wasn't changed, the next occurrence is next week, not today. Completion does not trigger the next instance; instances appear when their date arrives.
 **Fix:** Fix item 1 first, then verify. Additionally: show the cadence and next occurrence date on the entry sheet (e.g. "repeats daily — next: Wed 22 Jul") so the behaviour is legible rather than guessed.
@@ -33,6 +33,7 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Effort:** Small–medium.
 
 ### 3. Open tasks from previous day/week — migration
+**Status: verification in progress** — a deliberate open test task was logged to today's page on 22 Jul; the review banner should appear on the morning of 23 Jul.
 **Feedback:** What happens to leftover open tasks? Is there a migration process?
 **Assessment:** Yes — spec §4.3 is implemented. Open tasks on expired pages surface via the "N open tasks from past pages — Review and migrate" banner and a review sheet (explicit migrate, never a silent move). It didn't appear this morning because of item 1: `nowKeys` was stale, so yesterday didn't count as a past page.
 **Fix:** No new feature needed; verify the banner appears correctly once item 1 is fixed. Consider a brief note in the review sheet explaining Ryder Carroll migration for first-time users.
