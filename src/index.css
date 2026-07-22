@@ -23,6 +23,13 @@ body,
   height: 100%;
   overflow: hidden;
 }
+html {
+  /* iOS Safari font boosting inflates text (~16%) without touching px
+     line-heights or the dot background, pushing text off the 22px grid.
+     Pin text to authored sizes. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
 
 body {
   background: var(--paper);
