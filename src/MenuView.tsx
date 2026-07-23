@@ -15,6 +15,7 @@ import { GRID } from "./lib/grid";
 import type { ThemePref } from "./lib/theme";
 import { checkForUpdate } from "./store/appUpdate";
 import type { UpdateCheckResult } from "./store/appUpdate";
+import type { InstallMode } from "./lib/install";
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
   { value: "system", label: "System" },
@@ -36,6 +37,9 @@ interface Props {
   syncStatus: SyncStatus;
   theme: ThemePref;
   onSetTheme: (t: ThemePref) => void;
+  installMode: InstallMode;
+  canPromptInstall: boolean;
+  onInstall: () => void;
   onOpenIndex: () => void;
   onOpenSync: () => void;
   onExport: () => void;
@@ -45,6 +49,9 @@ export default function MenuView({
   syncStatus,
   theme,
   onSetTheme,
+  installMode,
+  canPromptInstall,
+  onInstall,
   onOpenIndex,
   onOpenSync,
   onExport,
@@ -89,6 +96,15 @@ export default function MenuView({
         : perm === "denied"
           ? "blocked in your browser settings"
           : "off";
+
+  // Install-to-home-screen row (spec §3, §12 step 9). Always available while
+  // running in a browser; hidden once installed (mode "hidden").
+  const installDesc =
+    installMode === "prompt"
+      ? "Add Journlet to your home screen for instant, full-screen access."
+      : installMode === "ios-safari"
+        ? "Tap the Share button below, then “Add to Home Screen”."
+        : "Open journlet.com in Safari, then Share → “Add to Home Screen”.";
 
   return (
     <div>
@@ -167,6 +183,25 @@ export default function MenuView({
           )}
         </div>
       </section>
+
+      {installMode !== "hidden" && (
+        <section style={ST.group}>
+          <div style={ST.groupLabel}>Install</div>
+          <div style={ST.row}>
+            <div style={ST.rowText}>
+              <div style={ST.rowLabel}>Install app</div>
+              <div style={ST.rowDesc}>{installDesc}</div>
+            </div>
+            {canPromptInstall && (
+              <div style={ST.rowBtn}>
+                <button className="miniBtn" onClick={onInstall}>
+                  install
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <section style={ST.group}>
         <div style={ST.groupLabel}>Updates</div>

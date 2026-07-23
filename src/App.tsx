@@ -19,6 +19,7 @@ import CollectionView from "./CollectionView";
 import SyncView from "./SyncView";
 import MenuView from "./MenuView";
 import { buildMarkdown } from "./lib/exportMd";
+import { useInstallState, markCaptured } from "./lib/install";
 import {
   applyTheme,
   loadTheme,
@@ -416,6 +417,9 @@ export default function App() {
         ? periodKey(customGran, customDate)
         : nowKeys[captureScope];
     addEntry(pk, captureType, text, capturePriority, captureInspiration);
+    // First entry logged on this device unlocks the install nudge (see
+    // lib/install): let people feel capture work once, then offer to install.
+    markCaptured();
     setInput("");
     // The form stays open for a run of entries (decision of 22 July 2026,
     // restoring §4.1's batch-logging intent); a confirmation line shows
@@ -514,6 +518,11 @@ export default function App() {
   // the user can reload in place (no app restart) whenever it suits them.
   const [updateReady, setUpdateReady] = useState(getUpdateReady());
   useEffect(() => onUpdateReady(() => setUpdateReady(true)), []);
+
+  // Install-to-home-screen nudge (spec §3, §12 step 9). The banner appears
+  // after the first capture (see submitEntry); the menu keeps a permanent
+  // "Install app" row as a fallback.
+  const install = useInstallState();
 
   // Re-render every 30s so due/overdue states stay current
   const [, setTick] = useState(0);
@@ -867,6 +876,9 @@ export default function App() {
             syncStatus={syncStatus}
             theme={themePref}
             onSetTheme={changeTheme}
+            installMode={install.mode}
+            canPromptInstall={install.canPrompt}
+            onInstall={() => void install.promptInstall()}
             onOpenIndex={() => setView("index")}
             onOpenSync={() => setView("sync")}
             onExport={() => {
@@ -1351,6 +1363,68 @@ export default function App() {
           <button className="toastBtn" onClick={() => void applyUpdate()}>
             Reload
           </button>
+        </div>
+      )}
+
+      {install.showBanner && (
+        // Docked above the capture bar. Stacks above the update snackbar when
+        // both are showing so they never overlap.
+        <div
+          style={{ ...S.installBar, bottom: updateReady ? 214 : 150 }}
+          role="status"
+        >
+          {install.mode === "prompt" ? (
+            <>
+              <span style={S.installText}>Install Journlet for instant access</span>
+              <div style={S.installActions}>
+                <button
+                  className="toastBtn"
+                  onClick={() => void install.promptInstall()}
+                >
+                  Install
+                </button>
+                <button
+                  className="toastBtn"
+                  style={S.installDismiss}
+                  aria-label="Dismiss install prompt"
+                  onClick={install.dismissBanner}
+                >
+                  Not now
+                </button>
+              </div>
+            </>
+          ) : install.mode === "ios-safari" ? (
+            <>
+              <span style={S.installText}>
+                Add Journlet to your Home Screen: tap Share, then “Add to Home
+                Screen”.
+              </span>
+              <button
+                className="toastBtn"
+                style={S.installDismiss}
+                aria-label="Dismiss install prompt"
+                onClick={install.dismissBanner}
+              >
+                Got it
+              </button>
+            </>
+          ) : (
+            // ios-other: no Add to Home Screen here; steer to Safari.
+            <>
+              <span style={S.installText}>
+                To install, open journlet.com in Safari, then Share → “Add to
+                Home Screen”.
+              </span>
+              <button
+                className="toastBtn"
+                style={S.installDismiss}
+                aria-label="Dismiss install prompt"
+                onClick={install.dismissBanner}
+              >
+                Got it
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -2188,6 +2262,43 @@ const S: Record<string, CSSProperties> = {
     whiteSpace: "nowrap",
     boxShadow: "0 6px 20px rgba(38,50,62,.32)",
     zIndex: 41,
+  },
+  // Install nudge. Same snackbar family as updateBar, but the iOS variants
+  // carry a sentence of instructions, so it wraps rather than staying one line.
+  installBar: {
+    position: "fixed",
+    left: 12,
+    right: 12,
+    margin: "0 auto",
+    maxWidth: 536,
+    boxSizing: "border-box",
+    background: INK,
+    color: PAPER,
+    borderRadius: 12,
+    padding: "12px 16px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    fontSize: 15,
+    fontWeight: 600,
+    boxShadow: "0 6px 20px rgba(38,50,62,.32)",
+    zIndex: 41,
+  },
+  installText: {
+    lineHeight: 1.35,
+  },
+  installActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    flexShrink: 0,
+  },
+  installDismiss: {
+    color: PAPER,
+    opacity: 0.72,
+    fontWeight: 600,
+    flexShrink: 0,
   },
   sheetBackdrop: {
     position: "fixed",
