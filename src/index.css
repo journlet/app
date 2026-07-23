@@ -125,6 +125,10 @@ body {
   transition: opacity 0.12s;
   flex-wrap: wrap;
   justify-content: flex-end;
+  /* match the text line box so the ⋯ button centres on the line of text
+     rather than top-aligning above it (entry is align-items: flex-start) */
+  min-height: var(--grid);
+  align-items: center;
 }
 .moreBtn {
   min-width: 28px;
