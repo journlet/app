@@ -4,8 +4,58 @@
   --ink: #26323e;
   --ink-soft: #6b7683;
   --paper: #f5f4ef;
+  --surface: #ffffff; /* raised: cards, inputs, active pills */
   --line: #dcdad1;
   --hilite: #ffe066;
+  --on-hilite: #26323e; /* text sitting on a highlight — stays dark in both themes */
+  --hover: rgba(255, 255, 255, 0.65);
+  --track: #eceae2; /* segmented-control track */
+  --banner-bg: #fff8dc;
+  --banner-line: #e8d48a;
+  --danger: #a33;
+  --danger-line: #e4c9c9;
+  --shadow: rgba(38, 50, 62, 0.12);
+}
+
+/* Dark palette. Warm dark slate to echo the paper's warmth; the highlight
+   yellow is kept (with dark text on it via --on-hilite) so priority marks
+   still read as themselves — visibility by weight and contrast, never by
+   swapping the notation. Defined once for an explicit choice and again as a
+   prefers-color-scheme fallback so "system" mode paints correctly before JS
+   runs (CSP forbids an inline no-flash script). */
+:root[data-theme="dark"] {
+  --ink: #e7e4dc;
+  --ink-soft: #9aa4b0;
+  --paper: #191d23;
+  --surface: #232a31;
+  --line: #333b44;
+  --hilite: #ffe066;
+  --on-hilite: #26323e;
+  --hover: rgba(255, 255, 255, 0.05);
+  --track: #2a313a;
+  --banner-bg: #35301c;
+  --banner-line: #5f5426;
+  --danger: #e79a9a;
+  --danger-line: #5e3838;
+  --shadow: rgba(0, 0, 0, 0.45);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #e7e4dc;
+    --ink-soft: #9aa4b0;
+    --paper: #191d23;
+    --surface: #232a31;
+    --line: #333b44;
+    --hilite: #ffe066;
+    --on-hilite: #26323e;
+    --hover: rgba(255, 255, 255, 0.05);
+    --track: #2a313a;
+    --banner-bg: #35301c;
+    --banner-line: #5f5426;
+    --danger: #e79a9a;
+    --danger-line: #5e3838;
+    --shadow: rgba(0, 0, 0, 0.45);
+  }
 }
 
 * {
@@ -49,7 +99,7 @@ body {
   border-radius: 6px;
 }
 .entry:hover {
-  background: rgba(255, 255, 255, 0.65);
+  background: var(--hover);
 }
 .bullet {
   background: none;
@@ -104,6 +154,7 @@ body {
 }
 .prio {
   background: var(--hilite);
+  color: var(--on-hilite);
   padding: 0 4px;
   margin-right: 6px;
   border-radius: 3px;
@@ -185,9 +236,9 @@ body {
   font-weight: 500;
 }
 .scopeBtn.isActive {
-  background: #ffffff;
+  background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 1px 2px rgba(38, 50, 62, 0.12);
+  box-shadow: 0 1px 2px var(--shadow);
   font-weight: 600;
 }
 .typeBtn {
@@ -229,7 +280,7 @@ body {
 .prioBtn.isOn {
   background: var(--hilite);
   border: 1px solid var(--ink);
-  color: var(--ink);
+  color: var(--on-hilite);
 }
 .addBtn {
   background: var(--ink);
@@ -253,8 +304,8 @@ body {
   gap: 10px;
   width: 100%;
   box-sizing: border-box;
-  background: #fff8dc;
-  border: 1px solid #e8d48a;
+  background: var(--banner-bg);
+  border: 1px solid var(--banner-line);
   border-radius: 10px;
   /* 1px border + padding + one --grid line = two grid rows; a --grid
      margin below keeps everything after it on the grid */
@@ -278,7 +329,7 @@ body {
   display: block;
   width: 100%;
   text-align: left;
-  background: #ffffff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 12px 14px;
@@ -304,11 +355,11 @@ body {
   margin-bottom: 8px;
 }
 .sheetBtn.isDanger {
-  color: #a33;
-  border-color: #e4c9c9;
+  color: var(--danger);
+  border-color: var(--danger-line);
 }
 .sheetBtn.isDanger:hover {
-  border-color: #a33;
+  border-color: var(--danger);
 }
 .sheetBtn.isQuiet {
   background: none;
@@ -333,7 +384,7 @@ body {
   text-align: left;
 }
 .indexRow:hover {
-  background: rgba(255, 255, 255, 0.65);
+  background: var(--hover);
 }
 .indexRow:focus-visible {
   outline: 2px solid var(--ink);
@@ -468,7 +519,7 @@ table.habits {
   gap: 6px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
   padding: 8px 12px;
   font-size: 13px;
   color: var(--ink);
@@ -483,6 +534,7 @@ table.habits {
 .capChoice.isLit {
   background: var(--hilite);
   border-color: var(--ink);
+  color: var(--on-hilite);
 }
 .capChoice:focus-visible {
   outline: 2px solid var(--ink);

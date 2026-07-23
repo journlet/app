@@ -191,9 +191,9 @@ export default function CollectionView({
   );
 }
 
-const INK_SOFT = "#6B7683";
-const LINE = "#DCDAD1";
-const INK = "#26323E";
+const INK_SOFT = "var(--ink-soft)";
+const LINE = "var(--line)";
+const INK = "var(--ink)";
 
 const ST: Record<string, CSSProperties> = {
   // GRID rhythm — matches the dot pitch of the paper background
@@ -234,7 +234,7 @@ const ST: Record<string, CSSProperties> = {
     padding: "8px 12px",
     border: `1.5px solid ${INK}`,
     borderRadius: 10,
-    background: "#FFFFFF",
+    background: "var(--surface)",
     color: INK,
     fontFamily: "inherit",
     minWidth: 0,

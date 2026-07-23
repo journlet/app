@@ -366,7 +366,7 @@ export default function SyncView() {
                       alt="Journal key as a QR code"
                       style={{ width: 220, height: 220, borderRadius: 8 }}
                     />
-                    <div style={{ fontSize: 12, color: "#6B7683" }}>
+                    <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
                       on your new device: sign in, then Sync → "Scan journal
                       key with the camera" and point it here
                     </div>
@@ -468,16 +468,16 @@ export default function SyncView() {
       {getSyncError() && (
         <p style={ST.error}>Last sync problem: {getSyncError()}</p>
       )}
-      <p style={{ fontSize: 11, color: "#6B7683", marginTop: 16 }}>
+      <p style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 16 }}>
         build {__BUILD_TIME__}
       </p>
     </section>
   );
 }
 
-const INK = "#26323E";
-const INK_SOFT = "#6B7683";
-const LINE = "#DCDAD1";
+const INK = "var(--ink)";
+const INK_SOFT = "var(--ink-soft)";
+const LINE = "var(--line)";
 
 const ST: Record<string, CSSProperties> = {
   head: {
@@ -505,7 +505,7 @@ const ST: Record<string, CSSProperties> = {
     padding: "9px 12px",
     border: `1.5px solid ${INK}`,
     borderRadius: 10,
-    background: "#FFFFFF",
+    background: "var(--surface)",
     color: INK,
     fontFamily: "inherit",
     minWidth: 200,
@@ -529,10 +529,10 @@ const ST: Record<string, CSSProperties> = {
     display: "block",
     fontSize: 13,
     wordBreak: "break-all",
-    background: "#FFFFFF",
+    background: "var(--surface)",
     border: `1px solid ${LINE}`,
     borderRadius: 8,
     padding: "8px 10px",
   },
-  error: { fontSize: 13, color: "#A33" },
+  error: { fontSize: 13, color: "var(--danger)" },
 };

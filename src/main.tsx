@@ -9,6 +9,12 @@ import { startReminderLoop } from "./store/reminders";
 import { startRecurrenceLoop } from "./store/recurrence";
 import { persistence } from "./store/journal";
 import { markUpdateReady, setUpdateSW } from "./store/appUpdate";
+import { applyTheme, loadTheme } from "./lib/theme";
+
+// Apply the saved theme before first render. CSS's prefers-color-scheme
+// fallback already covers "system" pre-JS; this pins an explicit light/dark
+// choice (CSP forbids an inline head script, so this is as early as it gets).
+applyTheme(loadTheme());
 
 // Prompt-mode update flow (vite.config.ts registerType: "prompt"): a new build
 // waits until the user chooses to apply it. onNeedRefresh fires when one is

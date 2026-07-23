@@ -19,6 +19,13 @@ import CollectionView from "./CollectionView";
 import SyncView from "./SyncView";
 import MenuView from "./MenuView";
 import { buildMarkdown } from "./lib/exportMd";
+import {
+  applyTheme,
+  loadTheme,
+  onSystemThemeChange,
+  saveTheme,
+} from "./lib/theme";
+import type { ThemePref } from "./lib/theme";
 import { getSyncStatus, onSyncStatus } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
 import { colPageKey } from "./lib/types";
@@ -170,6 +177,18 @@ export default function App() {
   } | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [themePref, setThemePref] = useState<ThemePref>(loadTheme);
+  const changeTheme = useCallback((t: ThemePref) => {
+    setThemePref(t);
+    saveTheme(t);
+    applyTheme(t);
+  }, []);
+  // While in "system" mode CSS re-themes on its own, but the theme-color meta
+  // (browser/PWA chrome) needs a nudge when the OS scheme flips.
+  useEffect(
+    () => onSystemThemeChange(() => loadTheme() === "system" && applyTheme("system")),
+    []
+  );
   const [view, setViewRaw] = useState<View>("spread");
   // A small navigation stack so the header "back" returns to the screen you
   // came from (e.g. menu → index → back lands on the menu), not always the
@@ -640,7 +659,7 @@ export default function App() {
             style={{
               fontSize: 11.5,
               lineHeight: "13px",
-              color: "#6B7683",
+              color: "var(--ink-soft)",
               marginLeft: 8,
             }}
           >
@@ -654,7 +673,7 @@ export default function App() {
             style={{
               fontSize: 11.5,
               lineHeight: "13px",
-              color: "#6B7683",
+              color: "var(--ink-soft)",
               marginLeft: 8,
             }}
           >
@@ -702,7 +721,7 @@ export default function App() {
             style={{
               fontSize: 11.5,
               lineHeight: "13px",
-              color: "#6B7683",
+              color: "var(--ink-soft)",
               marginLeft: 8,
             }}
           >
@@ -754,7 +773,7 @@ export default function App() {
             style={{
               fontSize: 11.5,
               lineHeight: "13px",
-              color: "#6B7683",
+              color: "var(--ink-soft)",
               marginLeft: 8,
             }}
           >
@@ -806,7 +825,7 @@ export default function App() {
               className="miniBtn"
               style={
                 SYNC_ATTENTION.includes(syncStatus)
-                  ? { color: "#A33", borderColor: "#E4C9C9" }
+                  ? { color: "var(--danger)", borderColor: "var(--danger-line)" }
                   : undefined
               }
               onClick={() => {
@@ -846,6 +865,8 @@ export default function App() {
         {loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
+            theme={themePref}
+            onSetTheme={changeTheme}
             onOpenIndex={() => setView("index")}
             onOpenSync={() => setView("sync")}
             onExport={() => {
@@ -1008,7 +1029,7 @@ export default function App() {
           >
             <span style={{ fontWeight: 600 }}>Future log</span>
             <span
-              style={{ fontSize: 11.5, lineHeight: "13px", color: "#6B7683" }}
+              style={{ fontSize: 11.5, lineHeight: "13px", color: "var(--ink-soft)" }}
             >
               {futureLogCount} item{futureLogCount === 1 ? "" : "s"} · from
               next month on ›
@@ -1122,7 +1143,7 @@ export default function App() {
                     <span
                       style={{
                         fontSize: 11.5,
-                        color: "#6B7683",
+                        color: "var(--ink-soft)",
                         marginLeft: 8,
                       }}
                     >
@@ -1258,7 +1279,7 @@ export default function App() {
                           onClick={() => setCustomGran(g)}
                           style={{
                             background:
-                              customGran === g ? "#FFFFFF" : "none",
+                              customGran === g ? "var(--surface)" : "none",
                           }}
                         >
                           {g}
@@ -1366,7 +1387,7 @@ export default function App() {
                   className="sheetBtn isCompact"
                   style={
                     newCol.kind === k
-                      ? { border: "1.5px solid #26323E", fontWeight: 600 }
+                      ? { border: "1.5px solid var(--ink)", fontWeight: 600 }
                       : undefined
                   }
                   aria-pressed={newCol.kind === k}
@@ -1418,7 +1439,7 @@ export default function App() {
               </>
             ) : (
               <>
-                <p style={{ fontSize: 13, color: "#6B7683", margin: "0 4px 12px" }}>
+                <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "0 4px 12px" }}>
                   Decide what each open task deserves: bring it forward, or
                   strike it out if it no longer matters. Originals stay on
                   their old page marked ›.
@@ -1430,7 +1451,7 @@ export default function App() {
                       {entry.priority && <span className="prio">*</span>}
                       {entry.text}
                       <span
-                        style={{ fontSize: 11.5, color: "#6B7683", marginLeft: 8 }}
+                        style={{ fontSize: 11.5, color: "var(--ink-soft)", marginLeft: 8 }}
                       >
                         from {pageLabel(pk)}
                       </span>
@@ -1503,7 +1524,7 @@ export default function App() {
                             }
                             style={{
                               background:
-                                editRepeat.unit === u ? "#FFFFFF" : "none",
+                                editRepeat.unit === u ? "var(--surface)" : "none",
                             }}
                             onClick={() =>
                               setEditRepeat({ ...editRepeat, unit: u })
@@ -1541,7 +1562,7 @@ export default function App() {
                     />
                   </>
                 )}
-                <p style={{ fontSize: 12.5, color: "#6B7683", margin: "0 4px 10px" }}>
+                <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "0 4px 10px" }}>
                   Starting from this entry's page, a fresh copy appears{" "}
                   {cadenceLabel(
                     Math.max(1, parseInt(editRepeat.n, 10) || 1),
@@ -1570,7 +1591,7 @@ export default function App() {
                   aria-label="Reminder date and time"
                 />
                 {notificationPermission() === "denied" && (
-                  <p style={{ fontSize: 12.5, color: "#6B7683", margin: "0 4px 10px" }}>
+                  <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "0 4px 10px" }}>
                     Notifications are blocked in your browser settings, so
                     nothing will pop up — but anything due still appears in
                     the Due section at the top of the journal.
@@ -1608,7 +1629,7 @@ export default function App() {
                   {sheetEntry.text}
                   {sheetHistory.length > 0 && (
                     <div
-                      style={{ fontSize: 11.5, color: "#6B7683", marginTop: 6 }}
+                      style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}
                     >
                       migration history:{" "}
                       {sheetHistory
@@ -1703,7 +1724,7 @@ export default function App() {
                         <div
                           style={{
                             fontSize: 11.5,
-                            color: "#6B7683",
+                            color: "var(--ink-soft)",
                             padding: "2px 0 4px",
                           }}
                         >
@@ -1860,10 +1881,10 @@ export default function App() {
 
 // ---------- inline styles (ported verbatim from prototype v17) ----------
 
-const INK = "#26323E";
-const INK_SOFT = "#6B7683";
-const PAPER = "#F5F4EF";
-const LINE = "#DCDAD1";
+const INK = "var(--ink)";
+const INK_SOFT = "var(--ink-soft)";
+const PAPER = "var(--paper)";
+const LINE = "var(--line)";
 
 const S: Record<string, CSSProperties> = {
   page: {
@@ -1970,7 +1991,7 @@ const S: Record<string, CSSProperties> = {
     lineHeight: `${GRID}px`,
     marginTop: GRID - 11,
     paddingTop: 10,
-    borderTop: "1px solid #DCDAD1",
+    borderTop: "1px solid var(--line)",
   },
   // one GRID label + 2px pad + 1px rule - 3px margin = one row
   flGroupHead: {
@@ -1978,7 +1999,7 @@ const S: Record<string, CSSProperties> = {
     alignItems: "baseline",
     justifyContent: "space-between",
     gap: 8,
-    borderBottom: "1px solid #E8E6DE",
+    borderBottom: "1px solid var(--line)",
     paddingBottom: 2,
     marginBottom: -3,
   },
@@ -2002,7 +2023,7 @@ const S: Record<string, CSSProperties> = {
     margin: "0 auto 8px",
     display: "flex",
     gap: 4,
-    background: "#ECEAE2",
+    background: "var(--track)",
     borderRadius: 9,
     padding: 3,
   },
@@ -2012,7 +2033,7 @@ const S: Record<string, CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    background: "#FFFFFF",
+    background: "var(--surface)",
     border: `1.5px solid ${INK}`,
     borderRadius: 10,
     padding: "10px 12px",
@@ -2022,7 +2043,7 @@ const S: Record<string, CSSProperties> = {
     margin: "0 auto",
     display: "flex",
     alignItems: "stretch",
-    background: "#FFFFFF",
+    background: "var(--surface)",
     border: `1.5px solid ${INK}`,
     borderRadius: 10,
     overflow: "hidden",
@@ -2124,7 +2145,7 @@ const S: Record<string, CSSProperties> = {
     padding: "7px 10px",
     border: `1px solid ${LINE}`,
     borderRadius: 8,
-    background: "#FFFFFF",
+    background: "var(--surface)",
     color: INK,
     fontFamily: "inherit",
   },
@@ -2209,7 +2230,7 @@ const S: Record<string, CSSProperties> = {
     padding: "10px 12px",
     border: `1.5px solid ${INK}`,
     borderRadius: 10,
-    background: "#FFFFFF",
+    background: "var(--surface)",
     color: INK,
     fontFamily: "inherit",
     marginBottom: 10,

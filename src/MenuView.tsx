@@ -12,6 +12,13 @@ import {
   requestNotificationPermission,
 } from "./store/reminders";
 import { GRID } from "./lib/grid";
+import type { ThemePref } from "./lib/theme";
+
+const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
 
 const SYNC_LABEL: Record<SyncStatus, string> = {
   disabled: "not configured in this build",
@@ -25,6 +32,8 @@ const SYNC_LABEL: Record<SyncStatus, string> = {
 
 interface Props {
   syncStatus: SyncStatus;
+  theme: ThemePref;
+  onSetTheme: (t: ThemePref) => void;
   onOpenIndex: () => void;
   onOpenSync: () => void;
   onExport: () => void;
@@ -32,6 +41,8 @@ interface Props {
 
 export default function MenuView({
   syncStatus,
+  theme,
+  onSetTheme,
   onOpenIndex,
   onOpenSync,
   onExport,
@@ -135,16 +146,42 @@ export default function MenuView({
 
       <section style={ST.group}>
         <div style={ST.groupLabel}>Preferences</div>
-        <div style={ST.empty}>
-          Coming soon — filters and view choices will live here.
+        <div style={ST.row}>
+          <div style={ST.rowText}>
+            <div style={ST.rowLabel}>Theme</div>
+            <div style={ST.rowDesc}>
+              Light, dark, or follow your device.
+            </div>
+          </div>
+          <div style={ST.segmented} role="group" aria-label="Theme">
+            {THEME_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                className="miniBtn"
+                aria-pressed={theme === o.value}
+                onClick={() => onSetTheme(o.value)}
+                style={
+                  theme === o.value
+                    ? {
+                        background: "var(--surface)",
+                        color: "var(--ink)",
+                        borderColor: "var(--ink)",
+                      }
+                    : undefined
+                }
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
     </div>
   );
 }
 
-const INK_SOFT = "#6B7683";
-const LINE = "#DCDAD1";
+const INK_SOFT = "var(--ink-soft)";
+const LINE = "var(--line)";
 
 const ST: Record<string, CSSProperties> = {
   head: {
@@ -179,6 +216,15 @@ const ST: Record<string, CSSProperties> = {
     padding: "4px 4px",
   },
   rowText: { flex: 1, minWidth: 0 },
+  // Height matches the label's line box and buttons centre within it, so the
+  // control lines up with the "Theme" label rather than floating above it
+  segmented: {
+    display: "flex",
+    gap: 4,
+    flexShrink: 0,
+    height: GRID,
+    alignItems: "center",
+  },
   // Match the row label's line box (GRID tall) and centre the pill in it,
   // so the button lines up with the label text and stays put when the
   // description wraps to a second line.
