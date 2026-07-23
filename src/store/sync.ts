@@ -365,9 +365,14 @@ const connect = async (): Promise<void> => {
     if (getSyncStatus() === "needs-key" && pending) {
       try {
         await provideJournalKey(pending);
-        clearPendingKey();
       } catch {
         // wrong or stale key — leave needs-key showing for manual entry
+      } finally {
+        // Always clear it: the pending key is the master keeper key in
+        // plaintext, applied at most once. Whether the link succeeded or
+        // failed, it must never linger in localStorage — manual entry is a
+        // separate path and does not read this value.
+        clearPendingKey();
       }
     }
     return;
