@@ -33,7 +33,7 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Effort:** Small–medium.
 
 ### 3. Open tasks from previous day/week — migration
-**Status: verification in progress** — a deliberate open test task was logged to today's page on 22 Jul; the review banner should appear on the morning of 23 Jul.
+**Status: fixed and verified** (23 Jul) — the `[TEST] Migration` task logged to 22 Jul surfaced on the morning of 23 Jul, was migrated via the review flow, and now shows `>` on its 22 Jul page with a fresh open copy on Today. Migrate logic reviewed against spec §4.3: original never moves, copy is a new entry (`migratedFrom` link), future targets become `<`/scheduled. Honest history confirmed on-device and in code.
 **Feedback:** What happens to leftover open tasks? Is there a migration process?
 **Assessment:** Yes — spec §4.3 is implemented. Open tasks on expired pages surface via the "N open tasks from past pages — Review and migrate" banner and a review sheet (explicit migrate, never a silent move). It didn't appear this morning because of item 1: `nowKeys` was stale, so yesterday didn't count as a past page.
 **Fix:** No new feature needed; verify the banner appears correctly once item 1 is fixed. Consider a brief note in the review sheet explaining Ryder Carroll migration for first-time users.
@@ -44,7 +44,7 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 ## P2 — Mobile UX
 
 ### 4. Capture bar too large on iPhone
-**Status: implemented** — awaiting on-device verification. Follow-up once verified: the visualViewport keyboard-pinning effect in `App.tsx` should be removable (the form owns the viewport; no other footer input remains).
+**Status: fixed and verified** (23 Jul) — hybrid slim launcher + full-screen capture form confirmed on-device. Follow-up done: the redundant visualViewport keyboard-pinning effect removed from `App.tsx` (the full-screen form owns the viewport, no in-flow footer input remains) and the stale keyboard clause trimmed from the `index.css` app-frame comment. Typecheck clean.
 **Feedback:** Bottom entry area takes too much space; should collapse to an icon.
 **Assessment:** The footer stacks the scope tab row (day/week/month/year/date), an optional date input, and the capture bar (type glyph, priority, inspiration, text input, add) — three rows worst case.
 **Fix:** Collapsed-by-default capture: a single compact bar (or icon button) that expands to the full control set on focus/tap. All controls remain plainly labelled when expanded, per the labelling constraint. Sticky scope/type prefs already persist (`sticky.ts`) so the collapsed state loses nothing.

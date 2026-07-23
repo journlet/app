@@ -185,57 +185,10 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Keyboard handling (iOS): the keyboard shrinks the visual viewport but
-  // not the layout viewport, and WebKit scrolls the page to reveal the
-  // focused input — shoving the header and journal content up the screen.
-  // Counter both: shrink the app frame to the visual viewport height so
-  // the capture bar (still in normal flow at the bottom) rests on top of
-  // the keyboard, and pin the layout viewport back to the top. Browsers
-  // that honour interactive-widget=resizes-content (set in index.html)
-  // do this natively and report nothing obscured, so the effect is inert.
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const root = document.getElementById("root");
-    if (!root) return;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const keyboardOpen = () =>
-      window.innerHeight - vv.height - vv.offsetTop > 1;
-    const align = () => {
-      root.style.height = keyboardOpen() ? `${vv.height}px` : "";
-      // WebKit pans the page to reveal the focused input even though the
-      // input now sits above the keyboard; undo the pan wherever it landed
-      if (
-        keyboardOpen() &&
-        (window.scrollY > 0 || vv.offsetTop > 0 || vv.pageTop > 0)
-      ) {
-        window.scrollTo(0, 0);
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-      }
-    };
-    // The reveal-pan happens after iOS's own keyboard animation, later
-    // than the resize event — re-check as things settle
-    const nudge = () => {
-      align();
-      timers.push(setTimeout(align, 100));
-      timers.push(setTimeout(align, 300));
-      timers.push(setTimeout(align, 600));
-    };
-    vv.addEventListener("resize", nudge);
-    vv.addEventListener("scroll", align);
-    window.addEventListener("scroll", align);
-    window.addEventListener("focusin", nudge);
-    window.addEventListener("focusout", nudge);
-    return () => {
-      timers.forEach(clearTimeout);
-      vv.removeEventListener("resize", nudge);
-      vv.removeEventListener("scroll", align);
-      window.removeEventListener("scroll", align);
-      window.removeEventListener("focusin", nudge);
-      window.removeEventListener("focusout", nudge);
-    };
-  }, []);
+  // iOS keyboard-pinning is no longer needed: the full-screen capture form
+  // (remediation item 4) owns the whole viewport and has no in-flow footer
+  // input for the keyboard to shove around. interactive-widget=resizes-content
+  // (index.html) handles the rest natively.
 
   // Day rollover: refresh `today` when the date changes — while the app
   // stays open (interval) and on resume from background (visibilitychange /

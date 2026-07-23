@@ -13,8 +13,7 @@
 }
 
 /* App frame: the document itself never scrolls — only the journal area
-   does. Keeps the capture bar honest against the iOS keyboard, which
-   standalone PWAs cannot detect via visualViewport. */
+   does. */
 html,
 body,
 #root {
