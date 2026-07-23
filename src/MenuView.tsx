@@ -71,9 +71,11 @@ export default function MenuView({
               Every page with entries, plus collections and the future log.
             </div>
           </div>
-          <button className="miniBtn" onClick={onOpenIndex}>
-            open index
-          </button>
+          <div style={ST.rowBtn}>
+            <button className="miniBtn" onClick={onOpenIndex}>
+              open index
+            </button>
+          </div>
         </div>
       </section>
 
@@ -84,9 +86,11 @@ export default function MenuView({
             <div style={ST.rowLabel}>Sync and account</div>
             <div style={ST.rowDesc}>{SYNC_LABEL[syncStatus]}</div>
           </div>
-          <button className="miniBtn" onClick={onOpenSync}>
-            open sync
-          </button>
+          <div style={ST.rowBtn}>
+            <button className="miniBtn" onClick={onOpenSync}>
+              open sync
+            </button>
+          </div>
         </div>
       </section>
 
@@ -100,9 +104,11 @@ export default function MenuView({
               Runs on this device — nothing leaves unencrypted.
             </div>
           </div>
-          <button className="miniBtn" onClick={onExport}>
-            export journal
-          </button>
+          <div style={ST.rowBtn}>
+            <button className="miniBtn" onClick={onExport}>
+              export journal
+            </button>
+          </div>
         </div>
       </section>
 
@@ -118,9 +124,11 @@ export default function MenuView({
             </div>
           </div>
           {supported && perm === "default" && (
-            <button className="miniBtn" onClick={enableNotifications}>
-              turn on
-            </button>
+            <div style={ST.rowBtn}>
+              <button className="miniBtn" onClick={enableNotifications}>
+                turn on
+              </button>
+            </div>
           )}
         </div>
       </section>
@@ -171,6 +179,15 @@ const ST: Record<string, CSSProperties> = {
     padding: "4px 4px",
   },
   rowText: { flex: 1, minWidth: 0 },
+  // Match the row label's line box (GRID tall) and centre the pill in it,
+  // so the button lines up with the label text and stays put when the
+  // description wraps to a second line.
+  rowBtn: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    height: GRID,
+  },
   rowLabel: { fontSize: 14, lineHeight: `${GRID}px` },
   rowDesc: {
     fontSize: 11.5,
