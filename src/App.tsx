@@ -464,7 +464,13 @@ export default function App() {
       pageScope: scope,
       anchor: keyToAnchor(sheet.pk),
       remindTime: time,
-      materialisedThrough: sheet.pk,
+      // Start materialising from the current period, never before it: making
+      // a past (or today's) entry recurring must not retroactively spawn
+      // overdue occurrences on pages gone by (honest history, and it was
+      // wrongly triggering the migration banner). Future-dated pages keep
+      // their own anchor so occurrences still begin after them.
+      materialisedThrough:
+        sheet.pk > nowKeys[scope] ? sheet.pk : nowKeys[scope],
     });
     tagEntryRecurrence(sheet.id, rule.id);
     if (time && !sheetEntry.remindAt) {
