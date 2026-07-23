@@ -21,10 +21,30 @@ applyTheme(loadTheme());
 // ready; App then shows a plainly labelled "Reload" banner (spec §4). The
 // returned updateSW(true) activates the waiting worker and reloads in place —
 // no app restart needed.
+//
+// The browser only looks for a new worker at registration (i.e. on a fresh
+// start), so a long-lived open app would never notice a deploy until it was
+// restarted. onRegisteredSW below makes the running app check the server
+// itself: on a timer while open, and — the moment that matters most for an
+// installed PWA the OS suspends in the background — whenever it regains focus.
+const UPDATE_CHECK_MS = 30 * 60 * 1000; // hourly-ish poll while the app stays open
+
 const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
     markUpdateReady();
+  },
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return;
+    const checkForUpdate = () => {
+      // update() re-fetches sw.js; a waiting worker then triggers onNeedRefresh
+      if (navigator.onLine) void registration.update();
+    };
+    setInterval(checkForUpdate, UPDATE_CHECK_MS);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkForUpdate();
+    });
+    window.addEventListener("focus", checkForUpdate);
   },
 });
 setUpdateSW(updateSW);
