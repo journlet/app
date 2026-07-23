@@ -59,6 +59,7 @@ import {
   toggleStruck,
 } from "./store/journal";
 import { useJournal } from "./store/useJournal";
+import { applyUpdate, getUpdateReady, onUpdateReady } from "./store/appUpdate";
 
 interface SheetTarget {
   scope: Scope | null;
@@ -483,6 +484,11 @@ export default function App() {
 
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatus());
   useEffect(() => onSyncStatus(setSyncStatus), []);
+
+  // A newer build is precached and waiting. Show a plainly labelled banner so
+  // the user can reload in place (no app restart) whenever it suits them.
+  const [updateReady, setUpdateReady] = useState(getUpdateReady());
+  useEffect(() => onUpdateReady(() => setUpdateReady(true)), []);
 
   // Re-render every 30s so due/overdue states stay current
   const [, setTick] = useState(0);
@@ -1312,6 +1318,15 @@ export default function App() {
         </div>
       )}
 
+      {updateReady && (
+        <div style={S.updateBar} role="status">
+          <span>New version ready</span>
+          <button className="toastBtn" onClick={() => void applyUpdate()}>
+            Reload
+          </button>
+        </div>
+      )}
+
       {newCol && (
         <div style={S.sheetBackdrop} onClick={() => setNewCol(null)}>
           <div
@@ -2122,6 +2137,23 @@ const S: Record<string, CSSProperties> = {
     fontSize: 14,
     boxShadow: "0 4px 14px rgba(38,50,62,.3)",
     zIndex: 40,
+  },
+  // Sits above where a delete toast would appear, so the two never overlap
+  updateBar: {
+    position: "fixed",
+    left: "50%",
+    bottom: 148,
+    transform: "translateX(-50%)",
+    background: INK,
+    color: PAPER,
+    borderRadius: 10,
+    padding: "10px 14px",
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    fontSize: 14,
+    boxShadow: "0 4px 14px rgba(38,50,62,.3)",
+    zIndex: 41,
   },
   sheetBackdrop: {
     position: "fixed",

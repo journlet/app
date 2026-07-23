@@ -14,7 +14,9 @@ export default defineConfig({
       strategies: "injectManifest",
       srcDir: "src",
       filename: "sw.ts",
-      registerType: "autoUpdate",
+      // "prompt": a new build waits until the user taps Reload (spec §4 —
+      // labelled actions, no silent behaviour). See src/store/appUpdate.ts.
+      registerType: "prompt",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
         name: "Journlet",
