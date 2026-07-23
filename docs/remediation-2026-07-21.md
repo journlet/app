@@ -116,9 +116,12 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Effort:** Small once a settings surface (item 13) exists.
 
 ### 13. Central menu / settings area
+**Status: implemented** — awaiting on-device verification. New full-page `MenuView`, reached by a plainly labelled "menu" button in the header. Acts as the single hub for everything that isn't the current journal page: a "Go to" section with Index at the top, then Sync (status line + "open sync"), Export ("export journal", moved off the Index page), Notifications (permission state + "turn on"), and a marked Preferences placeholder for item 12. Capture footer suppressed on the menu view; export handler and Markdown build moved from `IndexView` to `App`. Typecheck clean.
+**Header consolidation (23 Jul, Gary):** the old spread↔index toggle read oddly (it relabelled between "index" and "back to journal", and screens showed 2 vs 3 buttons). Resolved by moving Index into the menu (option A). Header is now consistent: sync pinned far right on every screen (a persistent status), including the sync screen itself, where it stays put as a status but doesn't re-navigate. Home (the now-spread) shows "menu · sync"; every sub-screen shows "back … sync" — the "menu" button opens from home only, since once you're navigating "back" is the way around. A plain "back" button appears only when off the now-spread. "back" pops a small navigation history stack (`navHistory` in `App.tsx`), so it returns to the screen you came from — menu → index → back lands on the menu, not the journal — falling back to the spread when the stack is empty. The in-view back buttons on the Sync and Collection views were removed as redundant now that the header "back" is universal (Sync's `onBack` prop and Collection's `onBackToIndex` prop dropped; collection delete still jumps to the index, since the collection you'd return to no longer exists).
 **Feedback (21 Jul):** Export's location on the Index doesn't make sense; a central menu or settings area is needed.
 **Assessment:** Agreed — sync, export, notification permission and future preferences are scattered. One plainly labelled menu page; prerequisite for items 7 and 12.
 **Effort:** Small–medium.
+**Unblocks:** items 7 (filters) and 12 (preferences) now have a home.
 
 ### 14. Shared journals
 **Feedback (21 Jul):** e.g. a journal shared with a partner.

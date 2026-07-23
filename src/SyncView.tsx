@@ -31,11 +31,7 @@ const STATUS_LABEL: Record<SyncStatus, string> = {
   offline: "offline — will sync when back online",
 };
 
-interface Props {
-  onBack: () => void;
-}
-
-export default function SyncView({ onBack }: Props) {
+export default function SyncView() {
   const [status, setStatus] = useState<SyncStatus>(getSyncStatus());
   const [email, setEmail] = useState("");
   const [linkSent, setLinkSent] = useState(false);
@@ -207,11 +203,6 @@ export default function SyncView({ onBack }: Props) {
       <div style={ST.head}>
         <h2 style={ST.title}>Sync</h2>
         <span style={ST.sub}>{STATUS_LABEL[status]}</span>
-        <span style={ST.nav}>
-          <button className="miniBtn" onClick={onBack}>
-            ‹ back to journal
-          </button>
-        </span>
       </div>
 
       {status === "disabled" && (

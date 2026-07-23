@@ -50,7 +50,6 @@ interface Props {
   entries: Entry[];
   habits: Habit[];
   renderEntry: (e: Entry) => ReactNode;
-  onBackToIndex: () => void;
   onDelete: () => void;
 }
 
@@ -59,7 +58,6 @@ export default function CollectionView({
   entries,
   habits,
   renderEntry,
-  onBackToIndex,
   onDelete,
 }: Props) {
   const [habitName, setHabitName] = useState<string | null>(null);
@@ -82,9 +80,6 @@ export default function CollectionView({
           {collection.kind === "habits" ? "habit tracker" : "collection"}
         </span>
         <span style={ST.nav}>
-          <button className="miniBtn" onClick={onBackToIndex}>
-            ‹ index
-          </button>
           <button className="miniBtn" onClick={onDelete}>
             delete collection
           </button>

@@ -17,6 +17,8 @@ import {
 import IndexView from "./IndexView";
 import CollectionView from "./CollectionView";
 import SyncView from "./SyncView";
+import MenuView from "./MenuView";
+import { buildMarkdown } from "./lib/exportMd";
 import { getSyncStatus, onSyncStatus } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
 import { colPageKey } from "./lib/types";
@@ -69,7 +71,7 @@ interface DeletedToast {
   colSnap?: CollectionSnapshot;
 }
 
-type View = "spread" | "index" | "sync" | "future" | { col: string };
+type View = "spread" | "index" | "sync" | "menu" | "future" | { col: string };
 
 // Always-visible sync state on the header button (spec §4.5); plain words,
 // attention colour when something needs the user
@@ -167,7 +169,20 @@ export default function App() {
   } | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
-  const [view, setView] = useState<View>("spread");
+  const [view, setViewRaw] = useState<View>("spread");
+  // A small navigation stack so the header "back" returns to the screen you
+  // came from (e.g. menu → index → back lands on the menu), not always the
+  // journal. setView pushes the current view; goBack pops it.
+  const viewRef = useRef<View>("spread");
+  viewRef.current = view;
+  const navHistory = useRef<View[]>([]);
+  const setView = useCallback((next: View) => {
+    navHistory.current.push(viewRef.current);
+    setViewRaw(next);
+  }, []);
+  const goBack = useCallback(() => {
+    setViewRaw(navHistory.current.pop() ?? "spread");
+  }, []);
   const [newCol, setNewCol] = useState<{ name: string; kind: CollectionKind } | null>(null);
   // The current day key, kept fresh across midnight and app resume; every
   // "what is today" decision in render must use this, not todayKey()
@@ -740,23 +755,15 @@ export default function App() {
         <div style={S.brandRow}>
           <span style={S.brand}>Journlet</span>
           <span style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-            <button
-              className="miniBtn"
-              onClick={() => setView(view === "spread" ? "index" : "spread")}
-            >
-              {view === "spread" ? "index" : "back to journal"}
-            </button>
-            {view !== "sync" && (
-              <button
-                className="miniBtn"
-                style={
-                  SYNC_ATTENTION.includes(syncStatus)
-                    ? { color: "#A33", borderColor: "#E4C9C9" }
-                    : undefined
-                }
-                onClick={() => setView("sync")}
-              >
-                {SYNC_BADGE[syncStatus]}
+            {view !== "spread" && (
+              <button className="miniBtn" onClick={goBack}>
+                back
+              </button>
+            )}
+            {/* Menu opens from home only; every sub-screen uses "back" */}
+            {view === "spread" && (
+              <button className="miniBtn" onClick={() => setView("menu")}>
+                menu
               </button>
             )}
             {/* Transient cue while the local IndexedDB write is in
@@ -764,6 +771,22 @@ export default function App() {
             {saveState === "saving" && (
               <span style={S.saveDot}>saving…</span>
             )}
+            {/* Sync pinned to the far right — a persistent status present
+                on every screen, so it lives in one consistent spot. On the
+                sync screen it stays put as a status but doesn't re-navigate. */}
+            <button
+              className="miniBtn"
+              style={
+                SYNC_ATTENTION.includes(syncStatus)
+                  ? { color: "#A33", borderColor: "#E4C9C9" }
+                  : undefined
+              }
+              onClick={() => {
+                if (view !== "sync") setView("sync");
+              }}
+            >
+              {SYNC_BADGE[syncStatus]}
+            </button>
           </span>
         </div>
       </header>
@@ -790,7 +813,23 @@ export default function App() {
           />
         )}
         {loaded && view === "sync" && (
-          <SyncView onBack={() => setView("spread")} />
+          <SyncView />
+        )}
+        {loaded && view === "menu" && (
+          <MenuView
+            syncStatus={syncStatus}
+            onOpenIndex={() => setView("index")}
+            onOpenSync={() => setView("sync")}
+            onExport={() => {
+              const md = buildMarkdown(days, collections, habits);
+              const blob = new Blob([md], { type: "text/markdown" });
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = `journlet-export-${todayKey()}.md`;
+              a.click();
+              URL.revokeObjectURL(a.href);
+            }}
+          />
         )}
         {loaded && activeCol && (
           <CollectionView
@@ -798,7 +837,6 @@ export default function App() {
             entries={days[colPageKey(activeCol.id)] || []}
             habits={habits.filter((h) => h.collectionId === activeCol.id)}
             renderEntry={(e) => renderEntry(e, colPageKey(activeCol.id), null)}
-            onBackToIndex={() => setView("index")}
             onDelete={() => {
               const snap = removeCollection(activeCol.id);
               setView("index");
@@ -990,7 +1028,7 @@ export default function App() {
         </div>
       </main>
 
-      {activeCol?.kind !== "habits" && view !== "sync" && (
+      {activeCol?.kind !== "habits" && view !== "sync" && view !== "menu" && (
       <footer style={S.captureWrap}>
         <div style={S.launcher}>
           <button
