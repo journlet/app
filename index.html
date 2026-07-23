@@ -2,6 +2,22 @@
 <html lang="en-GB">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Content Security Policy. The entire E2E model rests on the integrity of
+      the JS running here, so lock script-src to self: no inline scripts, no
+      remote script origins, so an injected string can never execute and read
+      the keyring out of IndexedDB. style-src keeps 'unsafe-inline' only
+      because React writes element styles inline; script-src stays strict.
+      connect-src is limited to the Supabase project (REST + realtime wss).
+      Delivered via meta because GitHub Pages cannot set response headers;
+      frame-ancestors is header-only, so clickjacking cover needs a header
+      (nginx path) or is accepted for the Pages deploy.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://hpbdtcoskwmcggiyqtde.supabase.co wss://hpbdtcoskwmcggiyqtde.supabase.co; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'"
+    />
+    <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta
