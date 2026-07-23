@@ -35,8 +35,12 @@ export interface Recurrence {
   priority: boolean;
   inspiration?: boolean;
   everyN: number;
+  /** cadence unit; on non-day pages this always equals pageScope */
   unit: RecurrenceUnit;
-  /** first occurrence day (YYYY-MM-DD) */
+  /** scope of the pages instances land on (day pages unless the rule was
+   *  created on a week/month/year page). Legacy rules default to "day". */
+  pageScope: RecurrenceUnit;
+  /** first occurrence day (YYYY-MM-DD); a day inside the first period */
   anchor: string;
   /** optional reminder time for each occurrence, "HH:MM" */
   remindTime?: string;

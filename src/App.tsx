@@ -328,8 +328,15 @@ export default function App() {
       return recurrences
         .filter((r) => !r.endedAt)
         .map((r) => {
-          const dayKey = nextOccurrence(r, today);
-          return { kind: "rule" as const, sort: dayKey, dayKey, rule: r };
+          const occKey = nextOccurrence(r, periodKey(r.pageScope, today));
+          // sort by the period's first day so week/month/year previews
+          // interleave correctly with dated entries
+          return {
+            kind: "rule" as const,
+            sort: keyToAnchor(occKey),
+            dayKey: occKey,
+            rule: r,
+          };
         })
         .filter((row) => !covered.has(`${row.rule.id}:${row.dayKey}`));
     })(),
@@ -342,8 +349,11 @@ export default function App() {
   // a year bucket until they gain a date. Empty months are skipped — the
   // paper method pre-draws them only because paper must be allocated.
   const rowGroupKey = (r: ScheduledRow): string => {
-    if (r.kind === "entry" && keyScope(r.pk) === "year") return r.pk;
-    return (r.kind === "entry" ? keyToAnchor(r.pk) : r.dayKey).slice(0, 7);
+    const pk = r.kind === "entry" ? r.pk : r.dayKey;
+    if (keyScope(pk) === "year") return pk;
+    // keyToAnchor turns any period key into a day inside it, so week/month
+    // rule previews file under the right month (weeks under their Monday's)
+    return keyToAnchor(pk).slice(0, 7);
   };
   const laterThisMonth = scheduledRows.filter(
     (r) => rowGroupKey(r) === nowKeys.month
@@ -434,18 +444,24 @@ export default function App() {
 
   const saveRepeat = () => {
     if (!sheet || !sheetEntry || !editRepeat) return;
+    const scope = keyScope(sheet.pk);
+    if (!scope) return; // no recurrence on collections (no timeline to walk)
     const n = Math.max(1, parseInt(editRepeat.n, 10) || 1);
-    const time = /^\d{2}:\d{2}$/.test(editRepeat.time)
-      ? editRepeat.time
-      : undefined;
+    // Timed reminders only apply to day-scope recurrences
+    const time =
+      scope === "day" && /^\d{2}:\d{2}$/.test(editRepeat.time)
+        ? editRepeat.time
+        : undefined;
     const rule = addRecurrence({
       text: sheetEntry.text,
       type: sheetEntry.type,
       priority: sheetEntry.priority,
       inspiration: sheetEntry.inspiration,
       everyN: n,
-      unit: editRepeat.unit,
-      anchor: sheet.pk,
+      // On a week/month/year page the cadence is locked to that scope
+      unit: scope === "day" ? editRepeat.unit : scope,
+      pageScope: scope,
+      anchor: keyToAnchor(sheet.pk),
       remindTime: time,
       materialisedThrough: sheet.pk,
     });
@@ -891,8 +907,7 @@ export default function App() {
                 ? scheduledRows.filter((r) => {
                     const rpk = r.kind === "entry" ? r.pk : r.dayKey;
                     if (rpk === pk) return false;
-                    const anchor =
-                      r.kind === "entry" ? keyToAnchor(r.pk) : r.dayKey;
+                    const anchor = keyToAnchor(rpk);
                     return periodKey(sc, anchor) === pk;
                   })
                 : [];
@@ -1456,39 +1471,55 @@ export default function App() {
                     aria-label="Repeat interval"
                   />
                   <div style={{ display: "flex", gap: 4, flex: 1 }}>
-                    {(["day", "week", "month", "year"] as RecurrenceUnit[]).map(
-                      (u) => (
-                        <button
-                          key={u}
-                          className={
-                            "scopeBtn" + (editRepeat.unit === u ? " isActive" : "")
-                          }
-                          style={{
-                            background:
-                              editRepeat.unit === u ? "#FFFFFF" : "none",
-                          }}
-                          onClick={() =>
-                            setEditRepeat({ ...editRepeat, unit: u })
-                          }
-                        >
-                          {u}s
-                        </button>
+                    {keyScope(sheet.pk) === "day" ? (
+                      (["day", "week", "month", "year"] as RecurrenceUnit[]).map(
+                        (u) => (
+                          <button
+                            key={u}
+                            className={
+                              "scopeBtn" +
+                              (editRepeat.unit === u ? " isActive" : "")
+                            }
+                            style={{
+                              background:
+                                editRepeat.unit === u ? "#FFFFFF" : "none",
+                            }}
+                            onClick={() =>
+                              setEditRepeat({ ...editRepeat, unit: u })
+                            }
+                          >
+                            {u}s
+                          </button>
+                        )
                       )
+                    ) : (
+                      // Non-day pages recur in their own unit — fixed, not chosen
+                      <span style={{ fontSize: 14, alignSelf: "center" }}>
+                        {editRepeat.unit}
+                        {Math.max(1, parseInt(editRepeat.n, 10) || 1) > 1
+                          ? "s"
+                          : ""}{" "}
+                        (on each {editRepeat.unit} page)
+                      </span>
                     )}
                   </div>
                 </div>
-                <div style={S.sheetGroupLabel}>
-                  Reminder time on each occurrence (optional)
-                </div>
-                <input
-                  type="time"
-                  value={editRepeat.time}
-                  onChange={(ev) =>
-                    setEditRepeat({ ...editRepeat, time: ev.target.value })
-                  }
-                  style={{ ...S.sheetInput, maxWidth: 160 }}
-                  aria-label="Reminder time for each occurrence"
-                />
+                {keyScope(sheet.pk) === "day" && (
+                  <>
+                    <div style={S.sheetGroupLabel}>
+                      Reminder time on each occurrence (optional)
+                    </div>
+                    <input
+                      type="time"
+                      value={editRepeat.time}
+                      onChange={(ev) =>
+                        setEditRepeat({ ...editRepeat, time: ev.target.value })
+                      }
+                      style={{ ...S.sheetInput, maxWidth: 160 }}
+                      aria-label="Reminder time for each occurrence"
+                    />
+                  </>
+                )}
                 <p style={{ fontSize: 12.5, color: "#6B7683", margin: "0 4px 10px" }}>
                   Starting from this entry's page, a fresh copy appears{" "}
                   {cadenceLabel(
@@ -1620,21 +1651,23 @@ export default function App() {
                     Move to top level
                   </button>
                 )}
-                {keyScope(sheet.pk) === "day" &&
+                {keyScope(sheet.pk) &&
                   !sheetEntry.recurrenceId && (
                     <button
                       className="sheetBtn"
-                      onClick={() =>
+                      onClick={() => {
+                        const sc = keyScope(sheet.pk);
                         setEditRepeat({
                           n: "1",
-                          unit: "week",
+                          // Non-day pages lock the cadence to their own scope
+                          unit: sc && sc !== "day" ? sc : "week",
                           time: sheetEntry.remindAt
                             ? new Date(sheetEntry.remindAt)
                                 .toTimeString()
                                 .slice(0, 5)
                             : "",
-                        })
-                      }
+                        });
+                      }}
                     >
                       Repeat this entry…
                     </button>
@@ -1654,7 +1687,9 @@ export default function App() {
                           }}
                         >
                           repeats {cadenceLabel(rule.everyN, rule.unit)} — next:{" "}
-                          {pageLabel(nextOccurrence(rule, today))}
+                          {pageLabel(
+                            nextOccurrence(rule, periodKey(rule.pageScope, today))
+                          )}
                         </div>
                         <button
                           className="sheetBtn"

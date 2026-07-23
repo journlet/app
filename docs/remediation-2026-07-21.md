@@ -81,9 +81,11 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Effort:** Medium.
 
 ### 8. Recurrence on any entry, not just day pages
+**Status: implemented** — awaiting on-device verification. Decisions (23 Jul, Gary): (a) defer collection recurrence — a collection has no natural "next page", and `keyScope` returns null for `col:*` keys so the option simply doesn't appear there; (b) on week/month/year pages the cadence is locked to the page's own scope ("every N months, on each monthly page"), avoiding nonsensical cross-scope combos. Day pages keep the full unit choice unchanged.
+**Implementation:** added `pageScope` to `Recurrence` (legacy rules default to "day", so existing day rules are byte-for-byte unchanged). `nextOccurrence`/`materialiseRecurrences` now step by cadence `unit` but project each landing day onto its `pageScope` period via `periodKey`, comparing and stopping in that period space; instances are written to `periodKey`-shaped pages. Timed reminders are suppressed for non-day scopes (a month has no single clock time). Gating opened to any dated page; the recurrence sheet locks the unit and hides the reminder field off day pages. Scheduled-ahead previews, the future-log month bucketing (`rowGroupKey`) and within-period listing were generalised to handle period keys (weeks file under their Monday's month).
+**Verification:** typecheck clean; occurrence generation traced off-app across monthly/weekly/yearly rules, every-N intervals, month-end anchors (Jan 31 → Feb/Mar/Apr), current-period boundaries, and legacy day/week + day/month rules (unchanged). Grouping traced: day/week/month/year keys bucket correctly.
 **Feedback:** Wants any entry to be recurring.
-**Assessment:** Confirmed limitation: "Repeat this entry…" is gated on `keyScope(sheet.pk) === "day"`. Any entry type on a day page can already recur; week/month/year pages and collections cannot. The materialiser (`recurrence.ts`) only walks day keys.
-**Fix:** Extend `Recurrence` to carry a page granularity; materialiser emits `periodKey`-scoped instances (e.g. "every month on the monthly log"). Collections are a separate question — recurrence into a collection has no natural "next page", so propose deferring that half and confirming desired behaviour first.
+**Assessment:** Confirmed limitation: "Repeat this entry…" was gated on `keyScope(sheet.pk) === "day"`. Any entry type on a day page could already recur; week/month/year pages and collections could not. The materialiser (`recurrence.ts`) only walked day keys.
 **Effort:** Medium.
 
 ### 9. General responsive/uncluttered pass

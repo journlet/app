@@ -4,7 +4,7 @@
 // normal entries tagged with recurrenceId; two devices racing offline can
 // double-create, so a deterministic dedupe pass keeps the earliest twin.
 
-import { dkey, todayKey, toDate } from "../lib/dates";
+import { dkey, periodKey, todayKey, toDate } from "../lib/dates";
 import type { Recurrence } from "../lib/types";
 import { uid } from "../lib/types";
 import {
@@ -19,10 +19,15 @@ import {
 
 const MAX_CATCHUP = 100; // occurrences per rule per pass — safety valve
 
+// The next occurrence key strictly after `after`, expressed in the rule's
+// pageScope (a day key for day-scope rules, else an ISO week / month / year
+// key). We walk forward from the anchor in cadence-sized (`unit`) steps and
+// project each landing day onto its pageScope period; `after` is compared in
+// that same period space. For day-scope rules periodKey is the identity, so
+// this is exactly the original day-key behaviour.
 export const nextOccurrence = (r: Recurrence, after: string): string => {
-  // Walk forward from the anchor in rule-sized steps until past `after`
   const d = toDate(r.anchor);
-  let k = r.anchor;
+  let k = periodKey(r.pageScope, r.anchor);
   for (let i = 0; k <= after && i < 10000; i++) {
     if (r.unit === "day") d.setDate(d.getDate() + r.everyN);
     else if (r.unit === "week") d.setDate(d.getDate() + 7 * r.everyN);
@@ -33,7 +38,7 @@ export const nextOccurrence = (r: Recurrence, after: string): string => {
       const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
       d.setDate(Math.min(dom, last));
     } else d.setFullYear(d.getFullYear() + r.everyN);
-    k = dkey(d);
+    k = periodKey(r.pageScope, dkey(d));
   }
   return k;
 };
@@ -42,7 +47,7 @@ export const nextOccurrence = (r: Recurrence, after: string): string => {
 // struck entry — Carroll's notation for "no longer relevant", honestly
 // recorded on its page. The materialiser never recreates an existing
 // rule+day instance (any state), so the skip holds on every device.
-export const skipOccurrence = (rule: Recurrence, dayKey: string): void => {
+export const skipOccurrence = (rule: Recurrence, occKey: string): void => {
   insertEntry({
     id: uid(),
     type: rule.type,
@@ -50,7 +55,7 @@ export const skipOccurrence = (rule: Recurrence, dayKey: string): void => {
     priority: rule.priority,
     inspiration: rule.inspiration,
     state: "struck",
-    pageKey: dayKey,
+    pageKey: occKey,
     createdAt: Date.now(),
     recurrenceId: rule.id,
   });
@@ -84,10 +89,13 @@ export const materialiseRecurrences = (): void => {
 
     for (const rule of readRecurrences()) {
       if (rule.endedAt) continue;
+      // Stop at the current period of the rule's own scope (this month for a
+      // monthly-page rule, today for a day rule) — never materialise ahead.
+      const todayPeriod = periodKey(rule.pageScope, today);
       let through = rule.materialisedThrough;
       for (let i = 0; i < MAX_CATCHUP; i++) {
         const next = nextOccurrence(rule, through);
-        if (next > today) break;
+        if (next > todayPeriod) break;
         if (!existing.has(`${rule.id}:${next}`)) {
           insertEntry({
             id: uid(),
@@ -98,7 +106,10 @@ export const materialiseRecurrences = (): void => {
             state: "open",
             pageKey: next,
             createdAt: Date.now(),
-            remindAt: remindAtFor(rule, next),
+            // Timed reminders only make sense on day pages; a week/month/year
+            // occurrence has no single clock time.
+            remindAt:
+              rule.pageScope === "day" ? remindAtFor(rule, next) : undefined,
             recurrenceId: rule.id,
           });
           existing.add(`${rule.id}:${next}`);

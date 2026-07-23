@@ -341,6 +341,7 @@ const toRecurrence = (m: Y.Map<unknown>): Recurrence => ({
   inspiration: Boolean(m.get("inspiration")) || undefined,
   everyN: m.get("everyN") as number,
   unit: m.get("unit") as RecurrenceUnit,
+  pageScope: (m.get("pageScope") as RecurrenceUnit | undefined) ?? "day",
   anchor: m.get("anchor") as string,
   remindTime: (m.get("remindTime") as string | undefined) ?? undefined,
   materialisedThrough: m.get("materialisedThrough") as string,
@@ -370,6 +371,7 @@ export const addRecurrence = (
   if (rule.inspiration) m.set("inspiration", true);
   m.set("everyN", rule.everyN);
   m.set("unit", rule.unit);
+  m.set("pageScope", rule.pageScope);
   m.set("anchor", rule.anchor);
   if (rule.remindTime) m.set("remindTime", rule.remindTime);
   m.set("materialisedThrough", rule.materialisedThrough);
