@@ -13,6 +13,8 @@ import {
 } from "./store/reminders";
 import { GRID } from "./lib/grid";
 import type { ThemePref } from "./lib/theme";
+import { checkForUpdate } from "./store/appUpdate";
+import type { UpdateCheckResult } from "./store/appUpdate";
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
   { value: "system", label: "System" },
@@ -51,6 +53,28 @@ export default function MenuView({
     notificationPermission()
   );
   const supported = notificationsSupported();
+
+  // Manual update check. The app already checks in the background, but this
+  // lets you look straight away; a new build raises the Reload banner.
+  const [checkState, setCheckState] = useState<"idle" | "checking" | UpdateCheckResult>(
+    "idle"
+  );
+  const runUpdateCheck = async () => {
+    setCheckState("checking");
+    setCheckState(await checkForUpdate());
+  };
+  const updateDesc =
+    checkState === "checking"
+      ? "Checking…"
+      : checkState === "found"
+        ? "New version ready — tap Reload on the banner to apply it."
+        : checkState === "current"
+          ? "You’re on the latest version."
+          : checkState === "offline"
+            ? "You’re offline — reconnect to check for updates."
+            : checkState === "unavailable"
+              ? "Update checks aren’t available in this build."
+              : `Journlet updates itself in the background. Current build ${__BUILD_TIME__}.`;
 
   const enableNotifications = async () => {
     const result = await requestNotificationPermission();
@@ -141,6 +165,25 @@ export default function MenuView({
               </button>
             </div>
           )}
+        </div>
+      </section>
+
+      <section style={ST.group}>
+        <div style={ST.groupLabel}>Updates</div>
+        <div style={ST.row}>
+          <div style={ST.rowText}>
+            <div style={ST.rowLabel}>Check for updates</div>
+            <div style={ST.rowDesc}>{updateDesc}</div>
+          </div>
+          <div style={ST.rowBtn}>
+            <button
+              className="miniBtn"
+              onClick={() => void runUpdateCheck()}
+              disabled={checkState === "checking"}
+            >
+              {checkState === "checking" ? "checking…" : "check now"}
+            </button>
+          </div>
         </div>
       </section>
 

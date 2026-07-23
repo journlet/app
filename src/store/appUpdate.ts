@@ -6,12 +6,21 @@
 
 type Listener = () => void;
 
+// Result of a manual "check for updates" (Menu). "found" — a new build is
+// waiting (the Reload banner will show); "current" — already up to date;
+// "offline" — no connection to check; "unavailable" — no service worker in
+// this context (e.g. the dev server).
+export type UpdateCheckResult = "found" | "current" | "offline" | "unavailable";
+
 const listeners = new Set<Listener>();
 let needRefresh = false;
 // The reload function returned by vite-plugin-pwa's registerSW. Calling it
 // with `true` tells the waiting worker to activate and reloads once it takes
 // control (via the SKIP_WAITING message handled in sw.ts).
 let updateSW: ((reloadPage?: boolean) => Promise<void>) | null = null;
+// Manual update check, wired to the live service worker registration in
+// main.tsx. Asks the server for a newer worker right now.
+let checker: (() => Promise<UpdateCheckResult>) | null = null;
 
 function emit() {
   listeners.forEach((l) => l());
@@ -19,6 +28,18 @@ function emit() {
 
 export function setUpdateSW(fn: (reloadPage?: boolean) => Promise<void>) {
   updateSW = fn;
+}
+
+export function setUpdateChecker(fn: () => Promise<UpdateCheckResult>) {
+  checker = fn;
+}
+
+// Trigger a manual check. If a new build is already flagged, the banner is
+// showing — report that straight away.
+export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  if (needRefresh) return "found";
+  if (!checker) return "unavailable";
+  return checker();
 }
 
 export function markUpdateReady() {

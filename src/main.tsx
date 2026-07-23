@@ -8,7 +8,11 @@ import { startSync } from "./store/sync";
 import { startReminderLoop } from "./store/reminders";
 import { startRecurrenceLoop } from "./store/recurrence";
 import { persistence } from "./store/journal";
-import { markUpdateReady, setUpdateSW } from "./store/appUpdate";
+import {
+  markUpdateReady,
+  setUpdateChecker,
+  setUpdateSW,
+} from "./store/appUpdate";
 import { applyTheme, loadTheme } from "./lib/theme";
 
 // Apply the saved theme before first render. CSS's prefers-color-scheme
@@ -36,15 +40,30 @@ const updateSW = registerSW({
   },
   onRegisteredSW(_swUrl, registration) {
     if (!registration) return;
-    const checkForUpdate = () => {
+    const poll = () => {
       // update() re-fetches sw.js; a waiting worker then triggers onNeedRefresh
       if (navigator.onLine) void registration.update();
     };
-    setInterval(checkForUpdate, UPDATE_CHECK_MS);
+    setInterval(poll, UPDATE_CHECK_MS);
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") checkForUpdate();
+      if (document.visibilityState === "visible") poll();
     });
-    window.addEventListener("focus", checkForUpdate);
+    window.addEventListener("focus", poll);
+
+    // Menu → "Check now": ask the server immediately and report what happened.
+    // A waiting/installing worker means a new build exists; onNeedRefresh (or
+    // the explicit markUpdateReady here) raises the Reload banner.
+    setUpdateChecker(async () => {
+      if (!navigator.onLine) return "offline";
+      await registration.update();
+      if (registration.waiting) {
+        markUpdateReady();
+        return "found";
+      }
+      // Still downloading — the banner appears via onNeedRefresh once ready
+      if (registration.installing) return "found";
+      return "current";
+    });
   },
 });
 setUpdateSW(updateSW);
