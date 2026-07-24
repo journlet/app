@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import {
   SCOPES,
   SCOPE_LABEL,
@@ -41,7 +40,7 @@ import {
   setReminder,
   tagEntryRecurrence,
 } from "./store/journal";
-import type { Recurrence, RecurrenceUnit } from "./lib/types";
+import type { RecurrenceUnit } from "./lib/types";
 import { nextOccurrence, skipOccurrence } from "./store/recurrence";
 import {
   notificationPermission,
@@ -51,7 +50,7 @@ import type { CollectionSnapshot } from "./store/journal";
 import type { Scope } from "./lib/dates";
 import { GLYPH, STATE_GLYPH } from "./lib/types";
 import type { Entry } from "./lib/types";
-import { GRID, GRID_BG_POSITION } from "./lib/grid";
+import { GRID } from "./lib/grid";
 import { loadSticky, saveSticky } from "./lib/sticky";
 import type { CaptureScope } from "./lib/sticky";
 import {
@@ -68,6 +67,9 @@ import {
 } from "./store/journal";
 import { useJournal } from "./store/useJournal";
 import { applyUpdate, getUpdateReady, onUpdateReady } from "./store/appUpdate";
+import { S } from "./ui/styles";
+import FutureLogView from "./ui/FutureLogView";
+import type { ScheduledRow } from "./ui/types";
 
 interface SheetTarget {
   scope: Scope | null;
@@ -325,9 +327,7 @@ export default function App() {
   // Scheduled ahead also previews each active recurrence rule's next
   // occurrence. Display-only rows — the real entry is materialised when
   // its day arrives (remediation item 2a), so nothing is written here.
-  type ScheduledRow =
-    | { kind: "entry"; sort: string; pk: string; entry: Entry }
-    | { kind: "rule"; sort: string; dayKey: string; rule: Recurrence };
+  // ScheduledRow type lives in ./ui/types so FutureLogView shares it.
   const scheduledRows: ScheduledRow[] = [
     ...futureItems.map(
       ({ pk, entry }): ScheduledRow => ({
@@ -1049,41 +1049,13 @@ export default function App() {
           </button>
         )}
         {loaded && view === "future" && (
-          <section style={S.section}>
-            <div style={S.sectionHead}>
-              <h2 style={S.sectionTitle}>Future log</h2>
-              <span style={S.sectionSub}>
-                from next month on — items surface on their page when the
-                period arrives
-              </span>
-            </div>
-            {futureLogCount === 0 && (
-              <div style={S.empty}>
-                Nothing scheduled ahead — choose "date…" in the entry form
-                to log an entry to a future page.
-              </div>
-            )}
-            {futureLogGroups.map(({ gk, rows }) => (
-              <div key={gk}>
-                <div style={S.flGroupHead}>
-                  <span style={S.subGroupLabel}>{pageLabel(gk)}</span>
-                  <button
-                    className="miniBtn"
-                    onClick={() => toggleFold(gk)}
-                    aria-expanded={!folds[gk]}
-                  >
-                    {rows.length} item{rows.length === 1 ? "" : "s"} ·{" "}
-                    {folds[gk] ? "show" : "hide"}
-                  </button>
-                </div>
-                {!folds[gk] && (
-                  <ul style={S.list}>
-                    {rows.map((row) => renderScheduledRow(row, true))}
-                  </ul>
-                )}
-              </div>
-            ))}
-          </section>
+          <FutureLogView
+            count={futureLogCount}
+            groups={futureLogGroups}
+            folds={folds}
+            onToggleFold={toggleFold}
+            renderRow={renderScheduledRow}
+          />
         )}
         </div>
       </main>
@@ -1952,405 +1924,3 @@ export default function App() {
     </div>
   );
 }
-
-// ---------- inline styles (ported verbatim from prototype v17) ----------
-
-const INK = "var(--ink)";
-const INK_SOFT = "var(--ink-soft)";
-const PAPER = "var(--paper)";
-const LINE = "var(--line)";
-
-const S: Record<string, CSSProperties> = {
-  page: {
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-    background: PAPER,
-    color: INK,
-    fontFamily: "'Public Sans', system-ui, sans-serif",
-  },
-  header: {
-    padding: "calc(12px + env(safe-area-inset-top)) 20px 6px",
-    maxWidth: 560,
-    width: "100%",
-    margin: "0 auto",
-    boxSizing: "border-box",
-  },
-  brandRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "baseline",
-  },
-  brand: {
-    fontFamily: "'Fraunces', serif",
-    fontSize: 14,
-    letterSpacing: "0.14em",
-    textTransform: "uppercase",
-    color: INK_SOFT,
-  },
-  saveDot: { fontSize: 11, color: INK_SOFT },
-  paper: {
-    flex: 1,
-    width: "100%",
-    boxSizing: "border-box",
-    backgroundImage: `radial-gradient(${LINE} 1px, transparent 1px)`,
-    backgroundSize: `${GRID}px ${GRID}px`,
-    // Anchored so a dot column runs under the bullets and dot rows sit
-    // on the text line boundaries — see src/lib/grid.ts for the maths.
-    backgroundPosition: GRID_BG_POSITION,
-    // dots scroll with the entries, like marks on a physical page
-    backgroundAttachment: "local",
-    overflowY: "auto",
-  },
-  // Grid rhythm: GRID px dot pitch. paperInner's top padding is one full
-  // row, and every block below is sized to a multiple of GRID so text
-  // lines land in the dot rows all the way down the page.
-  paperInner: {
-    maxWidth: 560,
-    margin: "0 auto",
-    boxSizing: "border-box",
-    padding: `${GRID}px 20px`,
-  },
-  section: { marginBottom: GRID },
-  // head = one GRID title line + 4px pad + 1px rule + margin = 2 rows.
-  // Small companions get short line boxes (13px) so baseline alignment
-  // can't stretch the title's flex line and knock everything off grid.
-  sectionHead: {
-    display: "flex",
-    alignItems: "baseline",
-    flexWrap: "wrap",
-    rowGap: 0,
-    gap: 10,
-    borderBottom: `1px solid ${LINE}`,
-    paddingBottom: 4,
-    marginBottom: GRID - 5,
-  },
-  sectionTitle: {
-    fontFamily: "'Fraunces', serif",
-    fontWeight: 600,
-    fontSize: 20,
-    margin: 0,
-    lineHeight: `${GRID}px`,
-  },
-  sectionSub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
-  sectionNav: {
-    marginLeft: "auto",
-    display: "flex",
-    gap: 4,
-    flexShrink: 0,
-  },
-  sectionEmpty: {
-    color: INK_SOFT,
-    fontSize: 12.5,
-    fontStyle: "italic",
-    lineHeight: `${GRID}px`,
-    padding: "0 4px",
-  },
-  subGroupLabel: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    color: INK_SOFT,
-    lineHeight: `${GRID}px`,
-    margin: "0 4px",
-  },
-  // margin + 10px pad + 1px rule + one GRID line = 2 rows
-  futureLogLink: {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    gap: 8,
-    width: "100%",
-    lineHeight: `${GRID}px`,
-    marginTop: GRID - 11,
-    paddingTop: 10,
-    borderTop: "1px solid var(--line)",
-  },
-  // one GRID label + 2px pad + 1px rule - 3px margin = one row
-  flGroupHead: {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    gap: 8,
-    borderBottom: "1px solid var(--line)",
-    paddingBottom: 2,
-    marginBottom: -3,
-  },
-  list: { listStyle: "none", margin: 0, padding: 0 },
-  empty: {
-    color: INK_SOFT,
-    fontSize: 14,
-    lineHeight: `${GRID}px`,
-    padding: `${GRID}px 4px`,
-    fontStyle: "italic",
-  },
-  captureWrap: {
-    position: "relative",
-    zIndex: 30,
-    background: PAPER,
-    borderTop: `1px solid ${LINE}`,
-    padding: "8px 20px calc(12px + env(safe-area-inset-bottom))",
-  },
-  scopeRow: {
-    maxWidth: 560,
-    margin: "0 auto 8px",
-    display: "flex",
-    gap: 4,
-    background: "var(--track)",
-    borderRadius: 9,
-    padding: 3,
-  },
-  captureBar: {
-    maxWidth: 560,
-    margin: "0 auto",
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    background: "var(--surface)",
-    border: `1.5px solid ${INK}`,
-    borderRadius: 10,
-    padding: "10px 12px",
-  },
-  launcher: {
-    maxWidth: 560,
-    margin: "0 auto",
-    display: "flex",
-    alignItems: "stretch",
-    background: "var(--surface)",
-    border: `1.5px solid ${INK}`,
-    borderRadius: 10,
-    overflow: "hidden",
-  },
-  launcherHint: {
-    flex: 1,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    textAlign: "left",
-  },
-  launcherPrefs: {
-    fontSize: 11,
-    color: INK_SOFT,
-    flexShrink: 0,
-    letterSpacing: "0.02em",
-  },
-  captureForm: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 60,
-    background: PAPER,
-    display: "flex",
-    flexDirection: "column",
-    paddingTop: "calc(12px + env(safe-area-inset-top))",
-    paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
-  },
-  captureFormHead: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    maxWidth: 560,
-    width: "100%",
-    margin: "0 auto",
-    padding: "0 20px 6px",
-    boxSizing: "border-box",
-  },
-  captureFormTitle: {
-    fontFamily: "'Fraunces', serif",
-    fontWeight: 600,
-    fontSize: 20,
-    margin: 0,
-  },
-  captureFormBody: {
-    flex: 1,
-    overflowY: "auto",
-    maxWidth: 560,
-    width: "100%",
-    margin: "0 auto",
-    padding: "0 20px 16px",
-    boxSizing: "border-box",
-  },
-  formLbl: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    color: INK_SOFT,
-    margin: "16px 0 6px",
-  },
-  formNote: {
-    fontSize: 12.5,
-    color: INK_SOFT,
-    fontStyle: "italic",
-    marginTop: 10,
-  },
-  captureGlyph: {
-    fontSize: 18,
-    width: 16,
-    textAlign: "center",
-    color: INK,
-    flexShrink: 0,
-  },
-  captureInput: {
-    flex: 1,
-    border: "none",
-    outline: "none",
-    fontSize: 16,
-    background: "transparent",
-    color: INK,
-    fontFamily: "inherit",
-    minWidth: 0,
-  },
-  legend: {
-    maxWidth: 560,
-    margin: "8px auto 0",
-    fontSize: 11,
-    color: INK_SOFT,
-    letterSpacing: "0.03em",
-  },
-  dateControls: {
-    maxWidth: 560,
-    margin: "0 auto 8px",
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-  },
-  dateInput: {
-    fontSize: 14,
-    padding: "7px 10px",
-    border: `1px solid ${LINE}`,
-    borderRadius: 8,
-    background: "var(--surface)",
-    color: INK,
-    fontFamily: "inherit",
-  },
-  toast: {
-    position: "fixed",
-    left: "50%",
-    bottom: 96,
-    transform: "translateX(-50%)",
-    background: INK,
-    color: PAPER,
-    borderRadius: 10,
-    padding: "10px 14px",
-    display: "flex",
-    alignItems: "center",
-    gap: 14,
-    fontSize: 14,
-    boxShadow: "0 4px 14px rgba(38,50,62,.3)",
-    zIndex: 40,
-  },
-  // Full-width snackbar docked just above the capture bar; message and action
-  // sit on one line. Raised above a delete toast so the two never overlap.
-  updateBar: {
-    position: "fixed",
-    left: 12,
-    right: 12,
-    bottom: 150,
-    margin: "0 auto",
-    maxWidth: 536,
-    boxSizing: "border-box",
-    background: INK,
-    color: PAPER,
-    borderRadius: 12,
-    padding: "12px 16px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-    fontSize: 15,
-    fontWeight: 600,
-    whiteSpace: "nowrap",
-    boxShadow: "0 6px 20px rgba(38,50,62,.32)",
-    zIndex: 41,
-  },
-  // Install nudge. Same snackbar family as updateBar, but the iOS variants
-  // carry a sentence of instructions, so it wraps rather than staying one line.
-  installBar: {
-    position: "fixed",
-    left: 12,
-    right: 12,
-    margin: "0 auto",
-    maxWidth: 536,
-    boxSizing: "border-box",
-    background: INK,
-    color: PAPER,
-    borderRadius: 12,
-    padding: "12px 16px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-    fontSize: 15,
-    fontWeight: 600,
-    boxShadow: "0 6px 20px rgba(38,50,62,.32)",
-    zIndex: 41,
-  },
-  installText: {
-    lineHeight: 1.35,
-  },
-  installActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: 16,
-    flexShrink: 0,
-  },
-  installDismiss: {
-    color: PAPER,
-    opacity: 0.72,
-    fontWeight: 600,
-    flexShrink: 0,
-  },
-  sheetBackdrop: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(38,50,62,.35)",
-    display: "flex",
-    alignItems: "flex-end",
-    justifyContent: "center",
-    zIndex: 50,
-  },
-  sheet: {
-    background: PAPER,
-    borderRadius: "16px 16px 0 0",
-    width: "100%",
-    maxWidth: 560,
-    padding: "8px 16px calc(22px + env(safe-area-inset-bottom))",
-    boxSizing: "border-box",
-    boxShadow: "0 -6px 24px rgba(38,50,62,.25)",
-  },
-  sheetHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    background: LINE,
-    margin: "6px auto 10px",
-  },
-  sheetEntry: {
-    fontSize: 15,
-    padding: "4px 4px 12px",
-    color: INK,
-    borderBottom: `1px solid ${LINE}`,
-    marginBottom: 10,
-    wordBreak: "break-word",
-  },
-  sheetGroupLabel: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    color: INK_SOFT,
-    margin: "10px 4px 6px",
-  },
-  sheetRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 },
-  sheetInput: {
-    width: "100%",
-    boxSizing: "border-box",
-    fontSize: 16,
-    padding: "10px 12px",
-    border: `1.5px solid ${INK}`,
-    borderRadius: 10,
-    background: "var(--surface)",
-    color: INK,
-    fontFamily: "inherit",
-    marginBottom: 10,
-  },
-};
