@@ -106,13 +106,14 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 ### 11. Sign-out should unlink the journal from the device; signed-out state too quiet
 **Feedback (21 Jul):** Shouldn't be able to link a journal until logged in; logging out should remove the journal from that device. Confusion arose when the app quietly stopped auto-updating while signed out.
 **Assessment:** Linking is already gated on sign-in (the key entry field only appears in the post-sign-in `needs-key` state; a QR scanned while signed out is held as pending and applied after sign-in) but this is not obvious. Sign-out deliberately keeps the journal ("Sign out (journal stays on this device)") per the offline-first design, and the signed-out state is only visible as the small header badge — so sync stops silently.
+**Status: partly done (24 Jul).** The "not syncing" banner shipped (2c588a8); the sign-out wipe and copy changes are still to do.
 **Decision (21 Jul, Gary):** wipe on explicit sign-out only.
 **Fix:**
-- Explicit sign-out removes the journal and keys from the device, behind a clear warning that requires confirming the journal key is saved (unsynced changes and the key are otherwise unrecoverable; server holds ciphertext only).
-- Session expiry or other involuntary sign-out must NOT wipe; instead show a prominent "not syncing — signed in needed" banner on the journal spread itself, not just the header badge.
-- Make the existing sign-in gate on linking explicit in the Sync screen copy.
-- Update the "Lost a device?" copy if needed — its "no one can remotely erase it" claim stays true; wiping is local and voluntary only.
-**Effort:** Medium; touches sync/keystore teardown and needs careful messaging.
+- [ ] Explicit sign-out removes the journal and keys from the device, behind a clear warning that requires confirming the journal key is saved (unsynced changes and the key are otherwise unrecoverable; server holds ciphertext only).
+- [x] Session expiry or other involuntary sign-out must NOT wipe; instead show a prominent "not syncing" banner on the journal spread itself, not just the header badge. **Done (2c588a8):** new `ui/NotSyncingBanner`, shown on every non-sync view whenever `syncStatus === "signed-out"` and the device holds local content, gated by a `hasLocalContent` check so a fresh empty install stays quiet. Tappable, routes to the Sync screen; reuses the themed banner styling with the title in danger colour. Does not wipe anything. Component test added; typecheck and full suite (109 tests) green.
+- [ ] Make the existing sign-in gate on linking explicit in the Sync screen copy.
+- [ ] Update the "Lost a device?" copy if needed — its "no one can remotely erase it" claim stays true; wiping is local and voluntary only.
+**Effort:** Medium; the wipe half touches sync/keystore teardown and needs careful messaging.
 
 ### 12. User preferences
 **Status: shipped (47f9283), still awaiting on-device verification (as of 24 Jul).** This is the one completed item not yet confirmed on-device; everything else in the "done" set is verified. First preference is Theme (System / Light / Dark, default System), in the menu's Preferences section. Decision (23 Jul, Gary): include a "System" option that follows the OS. Kept ruthless — one preference, no sub-sections. Stored device-local in `localStorage` (`lib/theme.ts`), matching the sticky-capture pattern; no Supabase table, no synced prefs map (theme is naturally per-device).
