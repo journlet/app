@@ -16,12 +16,15 @@ import type {
 } from "../lib/types";
 import { colPageKey, uid } from "../lib/types";
 import { isFutureKey } from "../lib/dates";
+import { docNameForVolume, getActiveVolume } from "../lib/volume";
 
 // Origin tag for updates applied from the sync layer (shared so other
 // modules can distinguish remote from local changes)
 export const REMOTE_ORIGIN = "journlet-remote";
 
-const DOC_NAME = "journlet-journal-v1";
+// Per-volume IndexedDB name. With the default volume this is still
+// "journlet-journal-v1", so existing local journals load unchanged.
+const DOC_NAME = docNameForVolume(getActiveVolume());
 
 export const doc = new Y.Doc();
 

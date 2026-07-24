@@ -25,6 +25,7 @@ import type { WrappedDataKey } from "../lib/crypto";
 import { ensureKeys, replaceKeyRing } from "../lib/keystore";
 import type { KeyRing } from "../lib/keystore";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
+import { getActiveVolume } from "../lib/volume";
 
 export type SyncStatus =
   | "disabled" // no Supabase config in the build
@@ -173,7 +174,7 @@ const pushPayload = async (update: Uint8Array): Promise<boolean> => {
     const payload = b64encode(await encryptUpdate(ring.dataKey, update));
     const { error } = await supabase
       .from("journal_updates")
-      .insert({ payload });
+      .insert({ payload, volume: getActiveVolume() });
     if (error) throw new Error(error.message);
     // the server now has it — reflect that in the shadow immediately
     Y.applyUpdate(ensureShadow(), update);
@@ -286,6 +287,7 @@ const reconcile = async (): Promise<boolean> => {
       const { data, error } = await supabase
         .from("journal_updates")
         .select("id,payload")
+        .eq("volume", getActiveVolume())
         .gt("id", lastMaxId)
         .order("id", { ascending: true })
         .limit(PAGE);
@@ -334,10 +336,13 @@ const subscribe = () => {
         event: "INSERT",
         schema: "public",
         table: "journal_updates",
+        // Realtime filters on a single column; the volume is checked in the
+        // handler so inserts to another volume are ignored by this doc.
         filter: `user_id=eq.${session.user.id}`,
       },
       (msg) => {
-        const row = msg.new as { payload?: string };
+        const row = msg.new as { payload?: string; volume?: string };
+        if (row.volume && row.volume !== getActiveVolume()) return;
         if (row.payload) void applyRemotePayload(row.payload);
       }
     )
