@@ -100,14 +100,18 @@ export const markCaptured = (): void => {
 };
 
 export type InstallMode =
-  // nothing to offer: already installed, or a browser with no install path
+  // already installed / running standalone — nothing to offer
   | "hidden"
   // native beforeinstallprompt available (Android / desktop Chrome & Edge)
   | "prompt"
   // iOS Safari — show Add to Home Screen steps
   | "ios-safari"
   // on iOS but not Safari — steer the user to open in Safari
-  | "ios-other";
+  | "ios-other"
+  // desktop (or any browser) with no native prompt available: Chrome/Edge
+  // before the event fires, or Firefox/Safari which never fire it. We still
+  // give a route via the browser's own install control.
+  | "desktop";
 
 export interface InstallState {
   mode: InstallMode;
@@ -127,9 +131,11 @@ function currentMode(): InstallMode {
   if (deferred) return "prompt";
   if (isIOSSafari()) return "ios-safari";
   if (isIOS()) return "ios-other";
-  // Desktop Safari / Firefox never fire the event and have no scripted install
-  // path — nothing honest to offer, so stay hidden.
-  return "hidden";
+  // Chrome/Edge before beforeinstallprompt has fired, or Firefox / desktop
+  // Safari which never fire it. There's still a manual route via the browser's
+  // own install control, so the menu always offers one; it upgrades to
+  // "prompt" the moment the event arrives.
+  return "desktop";
 }
 
 export function useInstallState(): InstallState {
@@ -150,10 +156,15 @@ export function useInstallState(): InstallState {
   }, []);
 
   const mode = currentMode();
+  // The auto-banner only fires for the clean, actionable cases — a one-tap
+  // native prompt or clear iOS steps. The vague "desktop" case (find your
+  // browser's install control) would be nagging, so it lives in the menu only.
+  const bannerModes: InstallMode[] = ["prompt", "ios-safari", "ios-other"];
   return {
     mode,
     canPrompt: mode === "prompt" && !!deferred,
-    showBanner: mode !== "hidden" && hasCaptured() && !read(DISMISSED_KEY),
+    showBanner:
+      bannerModes.includes(mode) && hasCaptured() && !read(DISMISSED_KEY),
     promptInstall: async () => {
       if (!deferred) return;
       await deferred.prompt();

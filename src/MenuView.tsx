@@ -101,10 +101,14 @@ export default function MenuView({
   // running in a browser; hidden once installed (mode "hidden").
   const installDesc =
     installMode === "prompt"
-      ? "Add Journlet to your home screen for instant, full-screen access."
+      ? "Add Journlet to your device for instant, full-screen access."
       : installMode === "ios-safari"
         ? "Tap the Share button below, then “Add to Home Screen”."
-        : "Open journlet.com in Safari, then Share → “Add to Home Screen”.";
+        : installMode === "ios-other"
+          ? "Open journlet.com in Safari, then Share → “Add to Home Screen”."
+          : // desktop: no scripted prompt, point at the browser's own control
+            "In Chrome or Edge, click the install icon at the right of the " +
+            "address bar. In Safari, choose File → Add to Dock.";
 
   return (
     <div>
