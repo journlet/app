@@ -33,14 +33,13 @@ import type { CollectionKind } from "./lib/types";
 import {
   addCollection,
   addRecurrence,
-  endRecurrence,
   removeCollection,
   restoreCollection,
   setReminder,
   tagEntryRecurrence,
 } from "./store/journal";
 import type { RecurrenceUnit } from "./lib/types";
-import { nextOccurrence, skipOccurrence } from "./store/recurrence";
+import { nextOccurrence } from "./store/recurrence";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -67,6 +66,7 @@ import { S } from "./ui/styles";
 import FutureLogView from "./ui/FutureLogView";
 import CaptureForm from "./ui/CaptureForm";
 import EntryActionsSheet from "./ui/EntryActionsSheet";
+import RuleActionsSheet from "./ui/RuleActionsSheet";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
 interface DeletedToast {
@@ -1095,62 +1095,12 @@ export default function App() {
           const rule = recurrences.find((r) => r.id === ruleSheet.ruleId);
           if (!rule) return null;
           return (
-            <div style={S.sheetBackdrop} onClick={() => setRuleSheet(null)}>
-              <div
-                style={S.sheet}
-                role="dialog"
-                aria-label="Repeating entry actions"
-                onClick={(ev) => ev.stopPropagation()}
-              >
-                <div style={S.sheetHandle} />
-                <div style={S.sheetGroupLabel}>Repeating entry</div>
-                <div className="entry" style={{ pointerEvents: "none" }}>
-                  <span className="bullet" aria-hidden="true">
-                    {GLYPH[rule.type]}
-                  </span>
-                  <span className="etext">
-                    {rule.priority && <span className="prio">*</span>}
-                    {rule.inspiration && <span className="insp">!</span>}
-                    {rule.text}
-                    <span
-                      style={{
-                        fontSize: 11.5,
-                        color: "var(--ink-soft)",
-                        marginLeft: 8,
-                      }}
-                    >
-                      repeats {cadenceLabel(rule.everyN, rule.unit)} — next:{" "}
-                      {pageLabel(ruleSheet.dayKey)}
-                    </span>
-                  </span>
-                </div>
-                <button
-                  className="sheetBtn"
-                  onClick={() => {
-                    skipOccurrence(rule, ruleSheet.dayKey);
-                    setRuleSheet(null);
-                  }}
-                >
-                  Skip this occurrence ({pageLabel(ruleSheet.dayKey)}) — it
-                  stays on its page, struck out
-                </button>
-                <button
-                  className="sheetBtn"
-                  onClick={() => {
-                    endRecurrence(rule.id);
-                    setRuleSheet(null);
-                  }}
-                >
-                  Stop repeating ({cadenceLabel(rule.everyN, rule.unit)})
-                </button>
-                <button
-                  className="sheetBtn isQuiet"
-                  onClick={() => setRuleSheet(null)}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
+            <RuleActionsSheet
+              rule={rule}
+              dayKey={ruleSheet.dayKey}
+              onClose={() => setRuleSheet(null)}
+              cadenceLabel={cadenceLabel}
+            />
           );
         })()}
 
