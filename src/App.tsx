@@ -67,6 +67,7 @@ import EntryActionsSheet from "./ui/EntryActionsSheet";
 import RuleActionsSheet from "./ui/RuleActionsSheet";
 import NewCollectionDialog from "./ui/NewCollectionDialog";
 import ReviewMigrateSheet from "./ui/ReviewMigrateSheet";
+import UndoToast from "./ui/UndoToast";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
 interface DeletedToast {
@@ -1130,12 +1131,7 @@ export default function App() {
       )}
 
       {toast && (
-        <div style={S.toast} role="status">
-          <span>{toast.colSnap ? "Collection deleted" : "Entry deleted"}</span>
-          <button className="toastBtn" onClick={undoDelete}>
-            Undo
-          </button>
-        </div>
+        <UndoToast isCollection={!!toast.colSnap} onUndo={undoDelete} />
       )}
 
       {updateReady && (
