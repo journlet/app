@@ -178,19 +178,28 @@ body {
   /* one dot column of indent, so sub-bullets land on the next dot */
   margin-left: var(--grid);
 }
-.edetails {
-  display: block;
-  margin-top: 2px;
-  font-size: 12.5px;
-  line-height: 1.4;
+/* Inline disclosure sitting in the entry's text line box (11.5px on a 13px
+   line, like the remind/repeats meta) so a closed entry stays one --grid row
+   and the dot background stays aligned. */
+.detailsToggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 8px;
+  font-size: 11.5px;
+  line-height: 13px;
   color: var(--ink-soft);
-  white-space: pre-wrap;
-  word-break: break-word;
+  text-decoration: none;
+  letter-spacing: 0.02em;
 }
-.edetails a {
+.detailsToggle:hover {
   color: var(--ink);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+}
+.detailsToggle:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .actions {
   display: flex;

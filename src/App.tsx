@@ -46,7 +46,7 @@ import type { Scope } from "./lib/dates";
 import { GLYPH, STATE_GLYPH } from "./lib/types";
 import type { Entry } from "./lib/types";
 import { GRID } from "./lib/grid";
-import { splitLinks } from "./lib/linkify";
+import DetailsForm from "./ui/DetailsForm";
 import { loadSticky, saveSticky } from "./lib/sticky";
 import type { CaptureScope } from "./lib/sticky";
 import {
@@ -133,7 +133,8 @@ export default function App() {
   } | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
   // Draft details text while the sheet's "details" sub-form is open (null = closed)
-  const [editDetails, setEditDetails] = useState<string | null>(null);
+  // Entry whose details are open in the full-screen view (null = closed).
+  const [detailsEntry, setDetailsEntry] = useState<Entry | null>(null);
   // Date chosen in the sheet's "Schedule to a future date" control
   const [schedDate, setSchedDate] = useState("");
   // Folded Future log month groups (device preference, see FOLDS_KEY)
@@ -355,10 +356,16 @@ export default function App() {
   const closeSheet = () => {
     setSheet(null);
     setEditText(null);
-    setEditDetails(null);
     setEditRemind(null);
     setEditRepeat(null);
     setSchedDate("");
+  };
+
+  // Open the full-screen details view for an entry (from its row or the ⋯
+  // sheet); closing the sheet first keeps a single dialog on screen.
+  const openDetails = (entry: Entry) => {
+    closeSheet();
+    setDetailsEntry(entry);
   };
 
   const cadenceLabel = (n: number, unit: RecurrenceUnit) =>
@@ -596,26 +603,16 @@ export default function App() {
           </span>
         )}
         {e.details && (
-          // Free-form details shown as a muted block under the entry text;
-          // URLs render as tappable links (read-later). Visible content, not a
-          // hidden action, so the no-guessing rule (spec §4.1) is respected.
-          <span className="edetails">
-            {splitLinks(e.details).map((seg, i) =>
-              seg.kind === "url" ? (
-                <a
-                  key={i}
-                  href={seg.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(ev) => ev.stopPropagation()}
-                >
-                  {seg.value}
-                </a>
-              ) : (
-                <span key={i}>{seg.value}</span>
-              )
-            )}
-          </span>
+          <button
+            className="detailsToggle"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              openDetails(e);
+            }}
+            aria-label="Open details"
+          >
+            ▸ details
+          </button>
         )}
       </span>
       <span className="actions">
@@ -997,8 +994,7 @@ export default function App() {
           setEditRemind={setEditRemind}
           editText={editText}
           setEditText={setEditText}
-          editDetails={editDetails}
-          setEditDetails={setEditDetails}
+          onEditDetails={() => openDetails(sheetEntry)}
           schedDate={schedDate}
           setSchedDate={setSchedDate}
           closeSheet={closeSheet}
@@ -1009,6 +1005,13 @@ export default function App() {
           fmtRemind={fmtRemind}
           toLocalInput={toLocalInput}
           trunc={trunc}
+        />
+      )}
+
+      {detailsEntry && (
+        <DetailsForm
+          entry={detailsEntry}
+          onClose={() => setDetailsEntry(null)}
         />
       )}
     </div>

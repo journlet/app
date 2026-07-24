@@ -21,7 +21,6 @@ import {
   migrateEntry,
   moveTo,
   setParent,
-  setDetails,
   setReminder,
   setText,
   toggleDone,
@@ -47,8 +46,8 @@ interface EntryActionsSheetProps {
   setEditRemind: Dispatch<SetStateAction<string | null>>;
   editText: string | null;
   setEditText: Dispatch<SetStateAction<string | null>>;
-  editDetails: string | null;
-  setEditDetails: Dispatch<SetStateAction<string | null>>;
+  /** open the full-screen details view for this entry */
+  onEditDetails: () => void;
   schedDate: string;
   setSchedDate: Dispatch<SetStateAction<string>>;
   closeSheet: () => void;
@@ -76,8 +75,7 @@ export default function EntryActionsSheet({
   setEditRemind,
   editText,
   setEditText,
-  editDetails,
-  setEditDetails,
+  onEditDetails,
   schedDate,
   setSchedDate,
   closeSheet,
@@ -224,36 +222,6 @@ export default function EntryActionsSheet({
                   Back
                 </button>
               </>
-            ) : editDetails !== null ? (
-              <>
-                <div style={S.sheetGroupLabel}>Details</div>
-                <textarea
-                  style={{ ...S.sheetInput, minHeight: 96, resize: "vertical" }}
-                  value={editDetails}
-                  autoFocus
-                  placeholder="Notes, a link to read later…"
-                  onChange={(ev) => setEditDetails(ev.target.value)}
-                  aria-label="Entry details"
-                />
-                <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "0 4px 10px" }}>
-                  Links become tappable. Leave empty to remove.
-                </p>
-                <button
-                  className="sheetBtn"
-                  onClick={() => {
-                    setDetails(sheet.id, editDetails);
-                    closeSheet();
-                  }}
-                >
-                  Save details
-                </button>
-                <button
-                  className="sheetBtn isQuiet"
-                  onClick={() => setEditDetails(null)}
-                >
-                  Back
-                </button>
-              </>
             ) : editText === null ? (
               <>
                 <div style={S.sheetEntry}>
@@ -280,10 +248,7 @@ export default function EntryActionsSheet({
                 >
                   Edit text
                 </button>
-                <button
-                  className="sheetBtn"
-                  onClick={() => setEditDetails(sheetEntry.details ?? "")}
-                >
+                <button className="sheetBtn" onClick={onEditDetails}>
                   {sheetEntry.details ? "Edit details" : "Add details"}
                 </button>
                 <button
