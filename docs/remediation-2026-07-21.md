@@ -1,8 +1,10 @@
-**Confidentiality: Internal | Status: DRAFT - UNREVIEWED**
+**Confidentiality: Internal | Status: DRAFT - REVIEWED BY AI**
 
 # Remediation list — feedback from first 24 hours (21 July 2026)
 
 Assessed against the current codebase. Ordered by priority. Statuses updated as items ship.
+
+**Re-assessment (24 Jul 2026):** checked every item against the code and git history. 11 of 15 are done and verified (1, 2, 2a, 3, 4, 5, 6, 8, 10, 13). Item 12 has shipped but still needs on-device confirmation. Three items remain as build work (7, 9, 11); two are parked design decisions (14, 15). Work landed on 24 Jul that this list did not previously track is recorded under "Post-list work (24 Jul)" below, and the "Suggested sequence" has been rewritten to drop the now-completed items.
 
 ---
 
@@ -113,7 +115,7 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 **Effort:** Medium; touches sync/keystore teardown and needs careful messaging.
 
 ### 12. User preferences
-**Status: implemented** — awaiting on-device verification. First preference is Theme (System / Light / Dark, default System), in the menu's Preferences section. Decision (23 Jul, Gary): include a "System" option that follows the OS. Kept ruthless — one preference, no sub-sections. Stored device-local in `localStorage` (`lib/theme.ts`), matching the sticky-capture pattern; no Supabase table, no synced prefs map (theme is naturally per-device).
+**Status: shipped (47f9283), still awaiting on-device verification (as of 24 Jul).** This is the one completed item not yet confirmed on-device; everything else in the "done" set is verified. First preference is Theme (System / Light / Dark, default System), in the menu's Preferences section. Decision (23 Jul, Gary): include a "System" option that follows the OS. Kept ruthless — one preference, no sub-sections. Stored device-local in `localStorage` (`lib/theme.ts`), matching the sticky-capture pattern; no Supabase table, no synced prefs map (theme is naturally per-device).
 **Implementation:** the CSS was already variable-driven, so theming was completed by promoting the remaining hardcoded colours (surface/white, row hover, segmented-control track, review-banner amber, danger red, shadow, and an `--on-hilite` so priority marks keep dark text on yellow in both themes) to semantic CSS variables, and pointing every inline-style colour constant/literal at `var(--…)`. A warm dark slate palette lives under `:root[data-theme="dark"]`, with a `prefers-color-scheme` fallback so "System" paints correctly before JS (CSP forbids an inline no-flash script). "System" removes `data-theme` and lets CSS decide; explicit choices set it. `applyTheme` also keeps the `theme-color` meta (browser/PWA chrome) in step. Purist notation untouched — glyphs only re-colour through variables. QR code colours deliberately left fixed so the code stays scannable in both themes.
 **Verification:** typecheck clean; swept src for stray hardcoded colours (only the QR remains, by design); contrast checked across ink/soft-ink/highlight/danger/banner on the dark palette (all comfortably legible); dot-grid background themes via `--line`.
 **Feedback (21 Jul):** A preferences section, e.g. persisting filters; is a Supabase table needed?
@@ -143,11 +145,20 @@ Recommend (a); revisit (b) only if editing a future occurrence before its day be
 
 ---
 
-## Suggested sequence
+## Post-list work (24 Jul)
 
-1. Item 1 (day rollover) — correctness bug, small fix, and currently masking whether migration and recurrence work at all
-2. Item 5 (keyboard pinning) — quick capture is the app's headline principle and this taxes every entry made on mobile
-3. Items 2, 2a and 3 — verify recurrence and migration behave once rollover is fixed; add next-occurrence visibility in the sheet and Scheduled ahead
-4. Items 4, 6 and 9 (compact capture bar, header, density pass) — same code area, best done as one mobile-layout pass
-5. Item 7 (filters) — grows in value with journal volume; not urgent yet
-6. Items 8 and 10 last — 8 needs a design decision on collections first; 10 is cosmetic
+Work that shipped after this list was written and was not tracked as a numbered item. Recorded here so the list reflects actual progress.
+
+- **UI extraction refactor + test suite.** The monolithic `App.tsx` view code was extracted into focused `src/ui/*` components (Header, CaptureLauncher, CaptureForm, SpreadView, FutureLogView, EntryActionsSheet, RuleActionsSheet, ReviewMigrateSheet, NewCollectionDialog, UndoToast) with a derived view-model in `ui/spreadData.ts`. Vitest was added and the deploy is now gated on tests (e8edd71), with store-layer and component tests landed. Reduces regression risk for the remaining items.
+- **Install-to-home-screen prompt (spec §12 step 9).** Added (4bc02ab), with a fallback install route always offered in the menu (3e4f828).
+- **In-app update flow.** New builds now apply without a manual restart: running-app update check (3193aa2, 2c1fba8) and a full-width update banner moved to the top of the page, reworded to "New version available" (48d1399, b045a1f).
+
+## Suggested sequence (rewritten 24 Jul)
+
+Items 1–6, 8, 10 and 13 are done; only three build items and two design decisions remain.
+
+1. **Item 11 (sign-out wipe + not-syncing banner)** — the one open item that is a real data-loss/clarity gap, with a firm decision already taken (21 Jul). Do first.
+2. **Item 7 (filters)** — now unblocked by the menu (item 13) and grows in value with journal volume.
+3. **Item 9 (375px density audit)** — the standalone small-screen pass; items 4–6 covered the acute cases, this catches the rest.
+4. **Confirm item 12 on-device** — quick, closes the last unverified "done" item.
+5. **Items 14 and 15** — design conversation, not build work yet. Settle the yearly-volume model (15) first since it should shape the schema before shared journals (14).

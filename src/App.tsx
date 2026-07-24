@@ -537,7 +537,7 @@ export default function App() {
           (e.state === "scheduled" ? " isScheduled" : "")
         }
       >
-        {e.priority && <span className="prio">*</span>}
+        {e.priority && <span className="prio"><i>*</i></span>}
         {e.inspiration && <span className="insp">!</span>}
         {e.text}
         {e.remindAt && (
@@ -601,7 +601,7 @@ export default function App() {
           &lt;
         </span>
         <span className="etext">
-          {row.entry.priority && <span className="prio">*</span>}
+          {row.entry.priority && <span className="prio"><i>*</i></span>}
           {row.entry.text}
           <span
             // 13px line box: keeps the small meta text from stretching the
@@ -653,7 +653,7 @@ export default function App() {
           &lt;
         </span>
         <span className="etext">
-          {row.rule.priority && <span className="prio">*</span>}
+          {row.rule.priority && <span className="prio"><i>*</i></span>}
           {row.rule.text}
           <span
             // 13px line box: keeps the small meta text from stretching the

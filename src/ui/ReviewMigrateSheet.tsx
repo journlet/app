@@ -54,7 +54,7 @@ export default function ReviewMigrateSheet({
                   <div key={entry.id} style={{ marginBottom: 14 }}>
                     <div style={S.sheetEntry}>
                       <span style={{ marginRight: 8 }}>•</span>
-                      {entry.priority && <span className="prio">*</span>}
+                      {entry.priority && <span className="prio"><i>*</i></span>}
                       {entry.text}
                       <span
                         style={{ fontSize: 11.5, color: "var(--ink-soft)", marginLeft: 8 }}

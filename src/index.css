@@ -153,12 +153,22 @@ body {
   color: var(--ink-soft);
 }
 .prio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: var(--hilite);
   color: var(--on-hilite);
   padding: 0 4px;
   margin-right: 6px;
   border-radius: 3px;
   font-weight: 700;
+  line-height: 1;
+}
+.prio > i {
+  font-style: normal;
+  display: block;
+  /* the asterisk glyph sits high in its line box; nudge it to the optical centre */
+  transform: translateY(0.12em);
 }
 .insp {
   font-weight: 800;

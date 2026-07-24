@@ -38,7 +38,7 @@ export default function RuleActionsSheet({
             {GLYPH[rule.type]}
           </span>
           <span className="etext">
-            {rule.priority && <span className="prio">*</span>}
+            {rule.priority && <span className="prio"><i>*</i></span>}
             {rule.inspiration && <span className="insp">!</span>}
             {rule.text}
             <span
