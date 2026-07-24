@@ -69,6 +69,7 @@ import { useJournal } from "./store/useJournal";
 import { applyUpdate, getUpdateReady, onUpdateReady } from "./store/appUpdate";
 import { S } from "./ui/styles";
 import FutureLogView from "./ui/FutureLogView";
+import CaptureForm from "./ui/CaptureForm";
 import type { ScheduledRow } from "./ui/types";
 
 interface SheetTarget {
@@ -1167,157 +1168,28 @@ export default function App() {
         })()}
 
       {captureOpen && (
-        <div style={S.captureForm} role="dialog" aria-label="New entry">
-          <div style={S.captureFormHead}>
-            <h2 style={S.captureFormTitle}>New entry</h2>
-            <button
-              className="sheetBtn isCompact"
-              style={{ flex: "none", margin: 0 }}
-              onClick={closeCapture}
-            >
-              {justLogged ? "Done" : "Cancel"}
-            </button>
-          </div>
-          <div style={S.captureFormBody}>
-            <div style={S.formLbl}>Entry</div>
-            <div style={S.captureBar}>
-              <span style={S.captureGlyph}>{GLYPH[captureType]}</span>
-              <input
-                ref={inputRef}
-                autoFocus
-                style={S.captureInput}
-                value={input}
-                onChange={(ev) => setInput(ev.target.value)}
-                onKeyDown={(ev) => {
-                  if (ev.key === "Enter") submitEntry();
-                  if (ev.key === "Escape") closeCapture();
-                }}
-                placeholder={
-                  activeCol
-                    ? `Log into ${activeCol.name}…`
-                    : captureScope === "date"
-                      ? "Log for the chosen date…"
-                      : `Log for ${SCOPE_LABEL[captureScope].toLowerCase()}…`
-                }
-                aria-label="New entry"
-                enterKeyHint="done"
-                autoComplete="off"
-              />
-              <button
-                className="addBtn"
-                onClick={submitEntry}
-                disabled={!input.trim()}
-              >
-                Log
-              </button>
-            </div>
-            {justLogged && (
-              <div style={S.formNote} role="status">
-                Logged “{justLogged}” — keep typing for another, or Done
-              </div>
-            )}
-            {activeCol ? (
-              <div style={S.formNote}>
-                Logging into the “{activeCol.name}” collection
-              </div>
-            ) : (
-              <>
-                <div style={S.formLbl}>Log into</div>
-                <div style={S.scopeRow} role="tablist" aria-label="Log into">
-                  {([...SCOPES, "date"] as CaptureScope[]).map((sc) => (
-                    <button
-                      key={sc}
-                      role="tab"
-                      aria-selected={captureScope === sc}
-                      className={
-                        "scopeBtn" + (captureScope === sc ? " isActive" : "")
-                      }
-                      onClick={() => {
-                        setCaptureScope(sc);
-                        inputRef.current?.focus();
-                      }}
-                    >
-                      {sc === "date" ? "date…" : sc}
-                    </button>
-                  ))}
-                </div>
-                {captureScope === "date" && (
-                  <div style={{ ...S.dateControls, marginTop: 8 }}>
-                    <input
-                      type="date"
-                      value={customDate}
-                      min={today}
-                      onChange={(ev) =>
-                        ev.target.value && setCustomDate(ev.target.value)
-                      }
-                      style={S.dateInput}
-                      aria-label="Schedule date"
-                    />
-                    <div style={{ display: "flex", gap: 4, flex: 1 }}>
-                      {SCOPES.map((g) => (
-                        <button
-                          key={g}
-                          className={
-                            "scopeBtn" + (customGran === g ? " isActive" : "")
-                          }
-                          onClick={() => setCustomGran(g)}
-                          style={{
-                            background:
-                              customGran === g ? "var(--surface)" : "none",
-                          }}
-                        >
-                          {g}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-            <div style={S.formLbl}>Type</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {(["task", "event", "note"] as const).map((t) => (
-                <button
-                  key={t}
-                  className={"capChoice" + (captureType === t ? " isOn" : "")}
-                  aria-pressed={captureType === t}
-                  onClick={() => {
-                    setCaptureType(() => t);
-                    inputRef.current?.focus();
-                  }}
-                >
-                  <span style={{ fontSize: 15 }}>{GLYPH[t]}</span>
-                  {t}
-                </button>
-              ))}
-            </div>
-            <div style={S.formLbl}>Signifiers</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                className={"capChoice" + (capturePriority ? " isLit" : "")}
-                aria-pressed={capturePriority}
-                onClick={() => {
-                  setCapturePriority((v) => !v);
-                  inputRef.current?.focus();
-                }}
-              >
-                <span style={{ fontSize: 15, fontWeight: 700 }}>*</span>
-                priority
-              </button>
-              <button
-                className={"capChoice" + (captureInspiration ? " isLit" : "")}
-                aria-pressed={captureInspiration}
-                onClick={() => {
-                  setCaptureInspiration((v) => !v);
-                  inputRef.current?.focus();
-                }}
-              >
-                <span style={{ fontSize: 15, fontWeight: 700 }}>!</span>
-                inspiration
-              </button>
-            </div>
-          </div>
-        </div>
+        <CaptureForm
+          inputRef={inputRef}
+          input={input}
+          setInput={setInput}
+          submitEntry={submitEntry}
+          closeCapture={closeCapture}
+          justLogged={justLogged}
+          activeCol={activeCol}
+          today={today}
+          captureScope={captureScope}
+          setCaptureScope={setCaptureScope}
+          captureType={captureType}
+          setCaptureType={setCaptureType}
+          capturePriority={capturePriority}
+          setCapturePriority={setCapturePriority}
+          captureInspiration={captureInspiration}
+          setCaptureInspiration={setCaptureInspiration}
+          customDate={customDate}
+          setCustomDate={setCustomDate}
+          customGran={customGran}
+          setCustomGran={setCustomGran}
+        />
       )}
 
       {toast && (
