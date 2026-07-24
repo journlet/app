@@ -54,10 +54,8 @@ import type { CaptureScope } from "./lib/sticky";
 import {
   addEntry,
   cycleType,
-  migrateEntry,
   removeEntry,
   restoreEntry,
-  strikeEntry,
   toggleDone,
 } from "./store/journal";
 import { useJournal } from "./store/useJournal";
@@ -68,6 +66,7 @@ import CaptureForm from "./ui/CaptureForm";
 import EntryActionsSheet from "./ui/EntryActionsSheet";
 import RuleActionsSheet from "./ui/RuleActionsSheet";
 import NewCollectionDialog from "./ui/NewCollectionDialog";
+import ReviewMigrateSheet from "./ui/ReviewMigrateSheet";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
 interface DeletedToast {
@@ -1224,75 +1223,11 @@ export default function App() {
       )}
 
       {reviewing && (
-        <div style={S.sheetBackdrop} onClick={() => setReviewing(false)}>
-          <div
-            style={{ ...S.sheet, maxHeight: "80vh", overflowY: "auto" }}
-            role="dialog"
-            aria-label="Migration review"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            <div style={S.sheetHandle} />
-            <div style={S.sheetGroupLabel}>Migration review</div>
-            {pastOpen.length === 0 ? (
-              <>
-                <div style={S.sheetEntry}>
-                  All done — every past task has been dealt with.
-                </div>
-                <button
-                  className="sheetBtn isQuiet"
-                  onClick={() => setReviewing(false)}
-                >
-                  Close
-                </button>
-              </>
-            ) : (
-              <>
-                <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "0 4px 12px" }}>
-                  Decide what each open task deserves: bring it forward, or
-                  strike it out if it no longer matters. Originals stay on
-                  their old page marked ›.
-                </p>
-                {pastOpen.map(({ pk, entry }) => (
-                  <div key={entry.id} style={{ marginBottom: 14 }}>
-                    <div style={S.sheetEntry}>
-                      <span style={{ marginRight: 8 }}>•</span>
-                      {entry.priority && <span className="prio">*</span>}
-                      {entry.text}
-                      <span
-                        style={{ fontSize: 11.5, color: "var(--ink-soft)", marginLeft: 8 }}
-                      >
-                        from {pageLabel(pk)}
-                      </span>
-                    </div>
-                    <div style={S.sheetRow}>
-                      {SCOPES.map((t) => (
-                        <button
-                          key={t}
-                          className="sheetBtn isCompact"
-                          onClick={() => migrateEntry(entry.id, nowKeys[t])}
-                        >
-                          › {SCOPE_LABEL[t]}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      className="sheetBtn isDanger"
-                      onClick={() => strikeEntry(entry.id)}
-                    >
-                      Strike out (no longer relevant)
-                    </button>
-                  </div>
-                ))}
-                <button
-                  className="sheetBtn isQuiet"
-                  onClick={() => setReviewing(false)}
-                >
-                  Finish later
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+        <ReviewMigrateSheet
+          pastOpen={pastOpen}
+          nowKeys={nowKeys}
+          onClose={() => setReviewing(false)}
+        />
       )}
 
       {sheet && sheetEntry && (
