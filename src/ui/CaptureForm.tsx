@@ -14,6 +14,8 @@ interface CaptureFormProps {
   inputRef: RefObject<HTMLInputElement | null>;
   input: string;
   setInput: (value: string) => void;
+  captureDetails: string;
+  setCaptureDetails: (value: string) => void;
   submitEntry: () => void;
   closeCapture: () => void;
   justLogged: string | null;
@@ -37,6 +39,8 @@ export default function CaptureForm({
   inputRef,
   input,
   setInput,
+  captureDetails,
+  setCaptureDetails,
   submitEntry,
   closeCapture,
   justLogged,
@@ -205,6 +209,26 @@ export default function CaptureForm({
                 inspiration
               </button>
             </div>
+            {/* Optional per-entry details (spec §9). Full-screen form has room,
+                so it's offered at capture too — kept last and out of the type-
+                and-Log fast path so thoughtless capture (spec §4.1) still holds.
+                Not sticky: cleared with the text after each log. */}
+            <div style={S.formLbl}>Details (optional)</div>
+            <textarea
+              style={{
+                ...S.sheetInput,
+                minHeight: 60,
+                resize: "vertical",
+                marginBottom: 0,
+              }}
+              value={captureDetails}
+              onChange={(ev) => setCaptureDetails(ev.target.value)}
+              onKeyDown={(ev) => {
+                if (ev.key === "Escape") closeCapture();
+              }}
+              placeholder="Notes, or a link to read later…"
+              aria-label="Entry details (optional)"
+            />
           </div>
         </div>
   );

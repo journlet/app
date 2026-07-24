@@ -54,6 +54,7 @@ const toEntry = (m: Y.Map<unknown>): Entry => ({
   priority: Boolean(m.get("priority")),
   inspiration: Boolean(m.get("inspiration")) || undefined,
   parentId: (m.get("parentId") as string | undefined) ?? undefined,
+  details: (m.get("details") as string | undefined) ?? undefined,
   state: m.get("state") as EntryState,
   pageKey: m.get("pageKey") as string,
   createdAt: m.get("createdAt") as number,
@@ -92,6 +93,7 @@ const makeMap = (e: Entry): Y.Map<unknown> => {
   m.set("createdAt", e.createdAt);
   if (e.inspiration) m.set("inspiration", true);
   if (e.parentId) m.set("parentId", e.parentId);
+  if (e.details) m.set("details", e.details);
   if (e.migratedFrom) m.set("migratedFrom", e.migratedFrom);
   if (e.remindAt) m.set("remindAt", e.remindAt);
   if (e.recurrenceId) m.set("recurrenceId", e.recurrenceId);
@@ -123,14 +125,17 @@ export const addEntry = (
   type: EntryType,
   text: string,
   priority: boolean,
-  inspiration = false
+  inspiration = false,
+  details = ""
 ): Entry => {
+  const trimmedDetails = details.trim();
   const e: Entry = {
     id: uid(),
     type,
     text,
     priority,
     inspiration: inspiration || undefined,
+    details: trimmedDetails || undefined,
     state: "open",
     pageKey,
     createdAt: Date.now(),
@@ -167,6 +172,17 @@ export const setText = (id: string, text: string): void => {
   const m = findMap(id);
   if (!m) return;
   doc.transact(() => m.set("text", text));
+};
+
+/** Set or clear an entry's free-form details (empty/null removes it). */
+export const setDetails = (id: string, details: string | null): void => {
+  const m = findMap(id);
+  if (!m) return;
+  const trimmed = details?.trim() ?? "";
+  doc.transact(() => {
+    if (trimmed === "") m.delete("details");
+    else m.set("details", trimmed);
+  });
 };
 
 export const moveTo = (id: string, targetPageKey: string): void => {

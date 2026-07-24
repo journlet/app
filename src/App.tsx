@@ -46,6 +46,7 @@ import type { Scope } from "./lib/dates";
 import { GLYPH, STATE_GLYPH } from "./lib/types";
 import type { Entry } from "./lib/types";
 import { GRID } from "./lib/grid";
+import { splitLinks } from "./lib/linkify";
 import { loadSticky, saveSticky } from "./lib/sticky";
 import type { CaptureScope } from "./lib/sticky";
 import {
@@ -99,6 +100,9 @@ export default function App() {
     sticky.current.inspiration
   );
   const [input, setInput] = useState("");
+  // Optional details for the entry being captured; per-entry, so not sticky —
+  // cleared after each log alongside the text (spec §9)
+  const [captureDetails, setCaptureDetails] = useState("");
   // Last entry logged while the capture form has been open (batch cue)
   const [justLogged, setJustLogged] = useState<string | null>(null);
 
@@ -128,6 +132,8 @@ export default function App() {
     dayKey: string;
   } | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
+  // Draft details text while the sheet's "details" sub-form is open (null = closed)
+  const [editDetails, setEditDetails] = useState<string | null>(null);
   // Date chosen in the sheet's "Schedule to a future date" control
   const [schedDate, setSchedDate] = useState("");
   // Folded Future log month groups (device preference, see FOLDS_KEY)
@@ -305,11 +311,12 @@ export default function App() {
       : captureScope === "date"
         ? periodKey(customGran, customDate)
         : nowKeys[captureScope];
-    addEntry(pk, captureType, text, capturePriority, captureInspiration);
+    addEntry(pk, captureType, text, capturePriority, captureInspiration, captureDetails);
     // First entry logged on this device unlocks the install nudge (see
     // lib/install): let people feel capture work once, then offer to install.
     markCaptured();
     setInput("");
+    setCaptureDetails("");
     // The form stays open for a run of entries (decision of 22 July 2026,
     // restoring §4.1's batch-logging intent); a confirmation line shows
     // each entry landed. "Done" closes.
@@ -317,7 +324,7 @@ export default function App() {
       text.length > 40 ? text.slice(0, 39) + "…" : text
     );
     inputRef.current?.focus();
-  }, [input, activeCol, captureScope, captureType, capturePriority, captureInspiration, customDate, customGran, nowKeys]);
+  }, [input, captureDetails, activeCol, captureScope, captureType, capturePriority, captureInspiration, customDate, customGran, nowKeys]);
 
   const showToast = (t: DeletedToast) => {
     setToast(t);
@@ -342,11 +349,13 @@ export default function App() {
   const closeCapture = () => {
     setCaptureOpen(false);
     setJustLogged(null);
+    setCaptureDetails("");
   };
 
   const closeSheet = () => {
     setSheet(null);
     setEditText(null);
+    setEditDetails(null);
     setEditRemind(null);
     setEditRepeat(null);
     setSchedDate("");
@@ -584,6 +593,28 @@ export default function App() {
             }}
           >
             repeats
+          </span>
+        )}
+        {e.details && (
+          // Free-form details shown as a muted block under the entry text;
+          // URLs render as tappable links (read-later). Visible content, not a
+          // hidden action, so the no-guessing rule (spec §4.1) is respected.
+          <span className="edetails">
+            {splitLinks(e.details).map((seg, i) =>
+              seg.kind === "url" ? (
+                <a
+                  key={i}
+                  href={seg.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(ev) => ev.stopPropagation()}
+                >
+                  {seg.value}
+                </a>
+              ) : (
+                <span key={i}>{seg.value}</span>
+              )
+            )}
           </span>
         )}
       </span>
@@ -842,6 +873,8 @@ export default function App() {
           inputRef={inputRef}
           input={input}
           setInput={setInput}
+          captureDetails={captureDetails}
+          setCaptureDetails={setCaptureDetails}
           submitEntry={submitEntry}
           closeCapture={closeCapture}
           justLogged={justLogged}
@@ -964,6 +997,8 @@ export default function App() {
           setEditRemind={setEditRemind}
           editText={editText}
           setEditText={setEditText}
+          editDetails={editDetails}
+          setEditDetails={setEditDetails}
           schedDate={schedDate}
           setSchedDate={setSchedDate}
           closeSheet={closeSheet}

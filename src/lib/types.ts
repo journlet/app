@@ -13,6 +13,10 @@ export interface Entry {
   inspiration?: boolean;
   /** parent entry id — sub-bullets one level deep (spec §4.1, §9) */
   parentId?: string;
+  /** free-form details attached to the entry — notes, a read-later link, etc.
+   *  Metadata only; never appears in quick capture, added later via the ⋯
+   *  sheet (spec §9). Orthogonal to the purist glyphs — not a notation change. */
+  details?: string;
   state: EntryState;
   /** Period the entry lives on: YYYY-MM-DD | YYYY-Www | YYYY-MM | YYYY */
   pageKey: string;

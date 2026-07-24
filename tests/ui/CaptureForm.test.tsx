@@ -13,6 +13,8 @@ const setup = (overrides: Partial<Parameters<typeof CaptureForm>[0]> = {}) => {
     inputRef: createRef<HTMLInputElement>(),
     input: "",
     setInput: vi.fn(),
+    captureDetails: "",
+    setCaptureDetails: vi.fn(),
     submitEntry: vi.fn(),
     closeCapture: vi.fn(),
     justLogged: null,
@@ -66,6 +68,15 @@ test("clicking Log submits", () => {
   const props = setup({ input: "x" });
   fireEvent.click(screen.getByRole("button", { name: "Log" }));
   expect(props.submitEntry).toHaveBeenCalledTimes(1);
+});
+
+test("typing in details updates via setCaptureDetails", () => {
+  const props = setup();
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Entry details (optional)" }),
+    { target: { value: "https://example.com" } }
+  );
+  expect(props.setCaptureDetails).toHaveBeenCalledWith("https://example.com");
 });
 
 test("close button reads Cancel with no draft logged, Done after logging", () => {

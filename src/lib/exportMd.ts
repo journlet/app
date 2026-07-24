@@ -38,7 +38,18 @@ const entryLine = (e: Entry): string => {
   let text = `${signifiers}${glyph} ${e.text}`;
   if (e.state === "struck") text = `~~${text}~~`;
   if (e.remindAt) text += ` _(remind ${fmtStamp(e.remindAt)})_`;
-  return `${e.parentId ? "  " : ""}- ${text}`;
+  const indent = e.parentId ? "  " : "";
+  let line = `${indent}- ${text}`;
+  // Free-form details render as an indented sub-line so links survive export
+  if (e.details) {
+    const detailIndent = indent + "  ";
+    const body = e.details
+      .split("\n")
+      .map((l) => `${detailIndent}${l}`)
+      .join("\n");
+    line += `\n${body}`;
+  }
+  return line;
 };
 
 export const buildMarkdown = (

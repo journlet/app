@@ -22,6 +22,7 @@ import {
   removeCollection,
   removeEntry,
   restoreEntry,
+  setDetails,
   setParent,
   setText,
   toggleDone,
@@ -58,6 +59,33 @@ describe("addEntry / readAll", () => {
     const e = addEntry("2026-07-24", "note", "draft", false);
     setText(e.id, "final");
     expect(readAll()[0].text).toBe("final");
+  });
+
+  test("addEntry captures optional details (trimmed, omitted when blank)", () => {
+    const withD = addEntry("2026-07-24", "task", "read", false, false, "  see https://x.com  ");
+    expect(readAll().find((e) => e.id === withD.id)?.details).toBe("see https://x.com");
+    const blank = addEntry("2026-07-24", "task", "plain", false, false, "   ");
+    expect(readAll().find((e) => e.id === blank.id)?.details).toBeUndefined();
+  });
+
+  test("setDetails stores, trims, and clears free-form details", () => {
+    const e = addEntry("2026-07-24", "task", "read paper", false);
+    expect(readAll()[0].details).toBeUndefined();
+    setDetails(e.id, "  https://example.com/paper  ");
+    expect(readAll()[0].details).toBe("https://example.com/paper");
+    setDetails(e.id, "");
+    expect(readAll()[0].details).toBeUndefined();
+    setDetails(e.id, "note");
+    setDetails(e.id, null);
+    expect(readAll()[0].details).toBeUndefined();
+  });
+
+  test("details survive a migrate (copied to the fresh open entry)", () => {
+    const e = addEntry("2026-07-24", "task", "read paper", false);
+    setDetails(e.id, "https://example.com");
+    migrateEntry(e.id, "2026-07-25");
+    const copy = readAll().find((x) => x.migratedFrom === e.id);
+    expect(copy?.details).toBe("https://example.com");
   });
 });
 

@@ -14,6 +14,7 @@ vi.mock("../../src/store/journal", () => ({
   setParent: vi.fn(),
   setReminder: vi.fn(),
   setText: vi.fn(),
+  setDetails: vi.fn(),
   toggleDone: vi.fn(),
   toggleStruck: vi.fn(),
 }));
@@ -27,6 +28,7 @@ vi.mock("../../src/store/reminders", () => ({
 import {
   migrateEntry,
   moveTo,
+  setDetails,
   setText,
   toggleDone,
   toggleStruck,
@@ -72,6 +74,8 @@ const setup = (
     setEditRemind: vi.fn(),
     editText: null,
     setEditText: vi.fn(),
+    editDetails: null,
+    setEditDetails: vi.fn(),
     schedDate: "",
     setSchedDate: vi.fn(),
     closeSheet: vi.fn(),
@@ -121,6 +125,27 @@ describe("actions mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "This week" }));
     expect(moveTo).toHaveBeenCalledWith("e1", "2026-W30");
   });
+
+  test("Add details opens the details sub-form when none set", () => {
+    const props = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Add details" }));
+    expect(props.setEditDetails).toHaveBeenCalledWith("");
+  });
+
+  test("Edit details seeds the sub-form with the current details", () => {
+    const props = setup({
+      sheetEntry: { ...openTask, details: "https://example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    expect(props.setEditDetails).toHaveBeenCalledWith("https://example.com");
+  });
+});
+
+test("details mode saves via setDetails and closes", () => {
+  const props = setup({ editDetails: "read https://example.com" });
+  fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+  expect(setDetails).toHaveBeenCalledWith("e1", "read https://example.com");
+  expect(props.closeSheet).toHaveBeenCalledTimes(1);
 });
 
 test("migration mode migrates instead of moving, keeping the original", () => {

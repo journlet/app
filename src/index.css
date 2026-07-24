@@ -178,6 +178,20 @@ body {
   /* one dot column of indent, so sub-bullets land on the next dot */
   margin-left: var(--grid);
 }
+.edetails {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.edetails a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .actions {
   display: flex;
   gap: 4px;
