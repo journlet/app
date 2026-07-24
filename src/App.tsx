@@ -66,6 +66,8 @@ import NewCollectionDialog from "./ui/NewCollectionDialog";
 import ReviewMigrateSheet from "./ui/ReviewMigrateSheet";
 import UndoToast from "./ui/UndoToast";
 import SpreadView from "./ui/SpreadView";
+import Header from "./ui/Header";
+import CaptureLauncher from "./ui/CaptureLauncher";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
 interface DeletedToast {
@@ -74,25 +76,6 @@ interface DeletedToast {
 }
 
 type View = "spread" | "index" | "sync" | "menu" | "future" | { col: string };
-
-// Always-visible sync state on the header button (spec §4.5); plain words,
-// attention colour when something needs the user
-const SYNC_BADGE: Record<SyncStatus, string> = {
-  disabled: "sync",
-  "signed-out": "sync · signed out",
-  connecting: "sync · connecting…",
-  "needs-key": "sync · key needed",
-  synced: "sync · synced",
-  pending: "sync · waiting",
-  offline: "sync · offline",
-};
-
-const SYNC_ATTENTION: SyncStatus[] = [
-  "signed-out",
-  "needs-key",
-  "pending",
-  "offline",
-];
 
 // Future log fold state is a device preference, not journal content —
 // kept local like sticky capture state, never synced
@@ -794,45 +777,17 @@ export default function App() {
 
   return (
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
-      <header style={S.header}>
-        <div style={S.brandRow}>
-          <span style={S.brand}>Journlet</span>
-          <span style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-            {view !== "spread" && (
-              <button className="miniBtn" onClick={goBack}>
-                back
-              </button>
-            )}
-            {/* Menu opens from home only; every sub-screen uses "back" */}
-            {view === "spread" && (
-              <button className="miniBtn" onClick={() => setView("menu")}>
-                menu
-              </button>
-            )}
-            {/* Transient cue while the local IndexedDB write is in
-                flight; the sync badge is the persistent status */}
-            {saveState === "saving" && (
-              <span style={S.saveDot}>saving…</span>
-            )}
-            {/* Sync pinned to the far right — a persistent status present
-                on every screen, so it lives in one consistent spot. On the
-                sync screen it stays put as a status but doesn't re-navigate. */}
-            <button
-              className="miniBtn"
-              style={
-                SYNC_ATTENTION.includes(syncStatus)
-                  ? { color: "var(--danger)", borderColor: "var(--danger-line)" }
-                  : undefined
-              }
-              onClick={() => {
-                if (view !== "sync") setView("sync");
-              }}
-            >
-              {SYNC_BADGE[syncStatus]}
-            </button>
-          </span>
-        </div>
-      </header>
+      <Header
+        showBack={view !== "spread"}
+        showMenu={view === "spread"}
+        onBack={goBack}
+        onMenu={() => setView("menu")}
+        saving={saveState === "saving"}
+        syncStatus={syncStatus}
+        onSyncClick={() => {
+          if (view !== "sync") setView("sync");
+        }}
+      />
 
       <main style={S.paper}>
         <div style={S.paperInner}>
@@ -922,45 +877,14 @@ export default function App() {
       </main>
 
       {activeCol?.kind !== "habits" && view !== "sync" && view !== "menu" && (
-      <footer style={S.captureWrap}>
-        <div style={S.launcher}>
-          <button
-            className="launcherField"
-            onClick={() => setCaptureOpen(true)}
-            aria-label="Log an entry — opens the entry form"
-          >
-            <span style={S.captureGlyph}>{GLYPH[captureType]}</span>
-            <span style={S.launcherHint}>
-              {activeCol ? `Log into ${activeCol.name}…` : "Log an entry…"}
-            </span>
-            <span style={S.launcherPrefs}>
-              {(activeCol
-                ? [captureType]
-                : [
-                    captureScope === "date" ? "date…" : captureScope,
-                    captureType,
-                  ]
-              )
-                .concat(capturePriority ? ["*"] : [])
-                .concat(captureInspiration ? ["!"] : [])
-                .join(" · ")}
-            </span>
-          </button>
-          <button
-            className="launcherGo"
-            onClick={() => setCaptureOpen(true)}
-            aria-label="Log — opens the entry form"
-          >
-            <span aria-hidden="true" style={{ fontSize: 17, lineHeight: 1 }}>
-              +
-            </span>
-            Log
-          </button>
-        </div>
-        <div style={S.legend}>
-          tap a task's bullet to complete it · ⋯ for entry actions
-        </div>
-      </footer>
+        <CaptureLauncher
+          onOpen={() => setCaptureOpen(true)}
+          activeCol={activeCol}
+          captureType={captureType}
+          captureScope={captureScope}
+          capturePriority={capturePriority}
+          captureInspiration={captureInspiration}
+        />
       )}
 
       {ruleSheet &&
