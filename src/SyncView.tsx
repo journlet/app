@@ -511,7 +511,7 @@ const ST: Record<string, CSSProperties> = {
     minWidth: 200,
   },
   keyBox: {
-    background: "rgba(255,255,255,.65)",
+    background: "var(--surface)",
     border: `1px solid ${LINE}`,
     borderRadius: 10,
     padding: "10px 14px",
