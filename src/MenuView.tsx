@@ -3,9 +3,11 @@
 // plus the future home for preferences (item 12). Kept deliberately lean:
 // a notebook has no settings, so every row here earns its place.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { SyncStatus } from "./store/sync";
+import { countUpdates } from "./store/sync";
+import { measureVolume } from "./store/metrics";
 import {
   notificationsSupported,
   notificationPermission,
@@ -60,6 +62,16 @@ export default function MenuView({
     notificationPermission()
   );
   const supported = notificationsSupported();
+
+  // Volume size (remediation item 15): a plain readout of how full this
+  // notebook is. Doc size is measured on this device; the update-log count
+  // comes from the server (null until it answers, or when signed out).
+  const [vol] = useState(() => measureVolume());
+  const [logRows, setLogRows] = useState<number | null>(null);
+  useEffect(() => {
+    void countUpdates().then(setLogRows);
+  }, []);
+  const docKB = Math.round(vol.docBytes / 102.4) / 10;
 
   // Manual update check. The app already checks in the background, but this
   // lets you look straight away; a new build raises the Reload banner.
@@ -222,6 +234,22 @@ export default function MenuView({
             >
               {checkState === "checking" ? "checking…" : "check now"}
             </button>
+          </div>
+        </div>
+      </section>
+
+      <section style={ST.group}>
+        <div style={ST.groupLabel}>Storage</div>
+        <div style={ST.row}>
+          <div style={ST.rowText}>
+            <div style={ST.rowLabel}>This volume</div>
+            <div style={ST.rowDesc}>
+              {vol.entries} {vol.entries === 1 ? "entry" : "entries"}, {docKB} KB
+              on this device
+              {logRows !== null &&
+                `, ${logRows} sync ${logRows === 1 ? "update" : "updates"}`}
+              . A rough gauge of how full this notebook is.
+            </div>
           </div>
         </div>
       </section>
