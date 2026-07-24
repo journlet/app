@@ -67,6 +67,7 @@ import FutureLogView from "./ui/FutureLogView";
 import CaptureForm from "./ui/CaptureForm";
 import EntryActionsSheet from "./ui/EntryActionsSheet";
 import RuleActionsSheet from "./ui/RuleActionsSheet";
+import NewCollectionDialog from "./ui/NewCollectionDialog";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
 interface DeletedToast {
@@ -1210,64 +1211,16 @@ export default function App() {
       )}
 
       {newCol && (
-        <div style={S.sheetBackdrop} onClick={() => setNewCol(null)}>
-          <div
-            style={S.sheet}
-            role="dialog"
-            aria-label="New collection"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            <div style={S.sheetHandle} />
-            <div style={S.sheetGroupLabel}>New collection</div>
-            <input
-              style={S.sheetInput}
-              value={newCol.name}
-              autoFocus
-              placeholder="Collection name…"
-              onChange={(ev) => setNewCol({ ...newCol, name: ev.target.value })}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter" && newCol.name.trim()) {
-                  const c = addCollection(newCol.kind, newCol.name.trim());
-                  setNewCol(null);
-                  setView({ col: c.id });
-                }
-              }}
-              aria-label="Collection name"
-            />
-            <div style={S.sheetGroupLabel}>Type</div>
-            <div style={S.sheetRow}>
-              {(["list", "habits"] as CollectionKind[]).map((k) => (
-                <button
-                  key={k}
-                  className="sheetBtn isCompact"
-                  style={
-                    newCol.kind === k
-                      ? { border: "1.5px solid var(--ink)", fontWeight: 600 }
-                      : undefined
-                  }
-                  aria-pressed={newCol.kind === k}
-                  onClick={() => setNewCol({ ...newCol, kind: k })}
-                >
-                  {k === "habits" ? "Habit tracker" : "List"}
-                </button>
-              ))}
-            </div>
-            <button
-              className="sheetBtn"
-              disabled={!newCol.name.trim()}
-              onClick={() => {
-                const c = addCollection(newCol.kind, newCol.name.trim());
-                setNewCol(null);
-                setView({ col: c.id });
-              }}
-            >
-              Create collection
-            </button>
-            <button className="sheetBtn isQuiet" onClick={() => setNewCol(null)}>
-              Cancel
-            </button>
-          </div>
-        </div>
+        <NewCollectionDialog
+          value={newCol}
+          onChange={setNewCol}
+          onClose={() => setNewCol(null)}
+          onCreate={(kind, name) => {
+            const c = addCollection(kind, name);
+            setNewCol(null);
+            setView({ col: c.id });
+          }}
+        />
       )}
 
       {reviewing && (
