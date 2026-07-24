@@ -1,6 +1,8 @@
-// Round-trip test for the E2EE primitives.
-// Run: node --experimental-strip-types tests/crypto.test.ts
+// Round-trip and tamper tests for the E2EE primitives (spec §6).
+// The server must only ever hold ciphertext, so these guard that wrapping,
+// unwrapping, authenticated encryption and the journal key code all behave.
 
+import { beforeAll, describe, expect, test } from "vitest";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -12,67 +14,73 @@ import {
   wrapDataKey,
 } from "../src/lib/crypto.ts";
 
-const assert = (cond: boolean, msg: string) => {
-  if (!cond) {
-    console.error(`FAIL: ${msg}`);
-    process.exit(1);
-  }
-  console.log(`ok: ${msg}`);
-};
+// Shared fixtures: a keeper key, a data key, and the data key wrapped by the
+// keeper. Built once so the individual cases stay focused on one behaviour.
+let keeper: CryptoKey;
+let data: CryptoKey;
+let wrapped: Uint8Array;
+let payload: Uint8Array;
+let update: Uint8Array;
 
-const keeper = await generateKeeperKey();
-const data = await generateDataKey();
+beforeAll(async () => {
+  keeper = await generateKeeperKey();
+  data = await generateDataKey();
+  wrapped = await wrapDataKey(data, keeper);
+  update = crypto.getRandomValues(new Uint8Array(1024));
+  payload = await encryptUpdate(data, update);
+});
 
-// wrap → unwrap gives back a working data key
-const wrapped = await wrapDataKey(data, keeper);
-const unwrapped = await unwrapDataKey(wrapped, keeper);
+describe("data key wrapping", () => {
+  test("wrap -> unwrap yields a working data key", async () => {
+    const unwrapped = await unwrapDataKey(wrapped, keeper);
+    const back = await decryptUpdate(unwrapped, payload);
+    expect(back).toEqual(update);
+  });
 
-const update = crypto.getRandomValues(new Uint8Array(1024));
-const payload = await encryptUpdate(data, update);
-assert(payload[0] === 1, "payload carries version byte");
-assert(payload.length > update.length, "payload is iv + ciphertext + tag");
+  test("wrong keeper key cannot unwrap the data key", async () => {
+    const stranger = await generateKeeperKey();
+    await expect(unwrapDataKey(wrapped, stranger)).rejects.toBeTruthy();
+  });
+});
 
-const back = await decryptUpdate(unwrapped, payload);
-assert(
-  back.length === update.length && back.every((b, i) => b === update[i]),
-  "encrypt → decrypt round trip via wrapped/unwrapped key"
-);
+describe("authenticated encryption", () => {
+  test("payload carries the version byte", () => {
+    expect(payload[0]).toBe(1);
+  });
 
-// ciphertext really is opaque: flipping one byte must fail authentication
-const tampered = payload.slice();
-tampered[20] ^= 0xff;
-let failed = false;
-try {
-  await decryptUpdate(data, tampered);
-} catch {
-  failed = true;
-}
-assert(failed, "tampered payload is rejected (GCM auth)");
+  test("payload is longer than the plaintext (iv + ciphertext + tag)", () => {
+    expect(payload.length).toBeGreaterThan(update.length);
+  });
 
-// journal key code round trip
-const code = await exportJournalKeyCode(keeper);
-assert(/^J1(-[0-9A-Z]{1,4})+$/.test(code), `code format looks right (${code})`);
-const reimported = await importJournalKeyCode(code);
-const unwrapped2 = await unwrapDataKey(wrapped, reimported);
-const back2 = await decryptUpdate(unwrapped2, payload);
-assert(
-  back2.every((b, i) => b === update[i]),
-  "journal key code round trip unlocks the same data key"
-);
+  test("encrypt -> decrypt round trip", async () => {
+    const back = await decryptUpdate(data, payload);
+    expect(back).toEqual(update);
+  });
 
-// lowercase + ambiguous characters are forgiven
-const sloppy = code.toLowerCase().replace(/-/g, " ");
-await importJournalKeyCode(sloppy);
-console.log("ok: sloppy code entry (lowercase, spaces) accepted");
+  test("tampered payload is rejected (GCM auth)", async () => {
+    const tampered = payload.slice();
+    tampered[20] ^= 0xff;
+    await expect(decryptUpdate(data, tampered)).rejects.toBeTruthy();
+  });
+});
 
-// wrong key must not unwrap
-const stranger = await generateKeeperKey();
-let rejected = false;
-try {
-  await unwrapDataKey(wrapped, stranger);
-} catch {
-  rejected = true;
-}
-assert(rejected, "wrong journal key cannot unwrap the data key");
+describe("journal key code", () => {
+  test("export produces the expected J1-XXXX format", async () => {
+    const code = await exportJournalKeyCode(keeper);
+    expect(code).toMatch(/^J1(-[0-9A-Z]{1,4})+$/);
+  });
 
-console.log("\nAll crypto tests passed.");
+  test("code round trip unlocks the same data key", async () => {
+    const code = await exportJournalKeyCode(keeper);
+    const reimported = await importJournalKeyCode(code);
+    const unwrapped = await unwrapDataKey(wrapped, reimported);
+    const back = await decryptUpdate(unwrapped, payload);
+    expect(back).toEqual(update);
+  });
+
+  test("lowercase and spaced entry is forgiven", async () => {
+    const code = await exportJournalKeyCode(keeper);
+    const sloppy = code.toLowerCase().replace(/-/g, " ");
+    await expect(importJournalKeyCode(sloppy)).resolves.toBeTruthy();
+  });
+});
