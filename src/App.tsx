@@ -700,6 +700,12 @@ export default function App() {
 
       <main style={S.paper}>
         <div style={S.paperInner}>
+        {updateReady && (
+          <button className="reviewBanner" onClick={() => void applyUpdate()}>
+            <span style={{ fontWeight: 600 }}>New version available</span>
+            <span style={{ fontSize: 12.5, lineHeight: "13px" }}>Reload ›</span>
+          </button>
+        )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
         {loaded && view === "index" && (
           <IndexView
@@ -839,20 +845,10 @@ export default function App() {
         <UndoToast isCollection={!!toast.colSnap} onUndo={undoDelete} />
       )}
 
-      {updateReady && (
-        <div style={S.updateBar} role="status">
-          <span>New version ready</span>
-          <button className="toastBtn" onClick={() => void applyUpdate()}>
-            Reload
-          </button>
-        </div>
-      )}
-
       {install.showBanner && (
-        // Docked above the capture bar. Stacks above the update snackbar when
-        // both are showing so they never overlap.
+        // Docked above the capture bar.
         <div
-          style={{ ...S.installBar, bottom: updateReady ? 214 : 150 }}
+          style={{ ...S.installBar, bottom: 150 }}
           role="status"
         >
           {install.mode === "prompt" ? (

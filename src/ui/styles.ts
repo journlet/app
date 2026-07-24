@@ -288,31 +288,7 @@ export const S: Record<string, CSSProperties> = {
     boxShadow: "0 4px 14px rgba(38,50,62,.3)",
     zIndex: 40,
   },
-  // Full-width snackbar docked just above the capture bar; message and action
-  // sit on one line. Raised above a delete toast so the two never overlap.
-  updateBar: {
-    position: "fixed",
-    left: 12,
-    right: 12,
-    bottom: 150,
-    margin: "0 auto",
-    maxWidth: 536,
-    boxSizing: "border-box",
-    background: INK,
-    color: PAPER,
-    borderRadius: 12,
-    padding: "12px 16px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-    fontSize: 15,
-    fontWeight: 600,
-    whiteSpace: "nowrap",
-    boxShadow: "0 6px 20px rgba(38,50,62,.32)",
-    zIndex: 41,
-  },
-  // Install nudge. Same snackbar family as updateBar, but the iOS variants
+  // Install nudge. Same snackbar family as the capture bar, but the iOS variants
   // carry a sentence of instructions, so it wraps rather than staying one line.
   installBar: {
     position: "fixed",

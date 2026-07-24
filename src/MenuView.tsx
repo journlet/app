@@ -74,7 +74,7 @@ export default function MenuView({
     checkState === "checking"
       ? "Checking…"
       : checkState === "found"
-        ? "New version ready — tap Reload on the banner to apply it."
+        ? "New version available — tap Reload on the banner at the top to apply it."
         : checkState === "current"
           ? "You’re on the latest version."
           : checkState === "offline"
