@@ -67,6 +67,7 @@ import UndoToast from "./ui/UndoToast";
 import SpreadView from "./ui/SpreadView";
 import Header from "./ui/Header";
 import CaptureLauncher from "./ui/CaptureLauncher";
+import NotSyncingBanner from "./ui/NotSyncingBanner";
 import { buildSpreadData } from "./ui/spreadData";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
@@ -286,6 +287,14 @@ export default function App() {
     typeof view === "object"
       ? collections.find((c) => c.id === view.col) ?? null
       : null;
+
+  // Whether this device holds any journal content. Gates the "not syncing"
+  // banner (remediation item 11) so a brand-new empty install stays quiet,
+  // but any device with entries at risk of loss is warned.
+  const hasLocalContent =
+    collections.length > 0 ||
+    habits.length > 0 ||
+    Object.values(days).some((arr) => arr.length > 0);
 
   const submitEntry = useCallback(() => {
     const text = input.trim();
@@ -705,6 +714,9 @@ export default function App() {
             <span style={{ fontWeight: 600 }}>New version available</span>
             <span style={{ fontSize: 12.5, lineHeight: "13px" }}>Reload ›</span>
           </button>
+        )}
+        {syncStatus === "signed-out" && hasLocalContent && view !== "sync" && (
+          <NotSyncingBanner onSignIn={() => setView("sync")} />
         )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
         {loaded && view === "index" && (

@@ -307,7 +307,8 @@ body {
   opacity: 0.35;
   cursor: default;
 }
-.reviewBanner {
+.reviewBanner,
+.syncBanner {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -328,10 +329,12 @@ body {
   color: var(--ink);
   text-align: left;
 }
-.reviewBanner:hover {
+.reviewBanner:hover,
+.syncBanner:hover {
   border-color: var(--ink);
 }
-.reviewBanner:focus-visible {
+.reviewBanner:focus-visible,
+.syncBanner:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
