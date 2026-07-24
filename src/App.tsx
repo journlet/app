@@ -23,8 +23,9 @@ import {
   saveTheme,
 } from "./lib/theme";
 import type { ThemePref } from "./lib/theme";
-import { getSyncStatus, onSyncStatus } from "./store/sync";
+import { countUpdates, getSyncStatus, onSyncStatus } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
+import { logVolumeMetrics } from "./store/metrics";
 import { colPageKey } from "./lib/types";
 import type { CollectionKind } from "./lib/types";
 import {
@@ -401,6 +402,14 @@ export default function App() {
 
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatus());
   useEffect(() => onSyncStatus(setSyncStatus), []);
+
+  // Volume-size instrumentation (remediation item 15): log the encoded doc
+  // size and the update-log row count once the journal has opened, and again
+  // when it reaches "synced". Non-user-facing; feeds the future close nudge.
+  useEffect(() => {
+    if (!loaded) return;
+    void countUpdates().then((rows) => logVolumeMetrics(rows ?? undefined));
+  }, [loaded, syncStatus]);
 
   // A newer build is precached and waiting. Show a plainly labelled banner so
   // the user can reload in place (no app restart) whenever it suits them.

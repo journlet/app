@@ -262,6 +262,18 @@ export const getJournalKeyCode = async (): Promise<string> => {
   return exportJournalKeyCode(r.keeperKey);
 };
 
+// Row count of the append-only log for the active volume — instrumentation for
+// the volume-close nudge (remediation item 15). Head-only count, no payloads
+// fetched. Null when sync is unconfigured or signed out.
+export const countUpdates = async (): Promise<number | null> => {
+  if (!supabase || !session) return null;
+  const { count, error } = await supabase
+    .from("journal_updates")
+    .select("id", { count: "exact", head: true })
+    .eq("volume", getActiveVolume());
+  return error ? null : count ?? null;
+};
+
 // ---------- reconcile + realtime ----------
 
 const applyRemotePayload = async (payloadB64: string): Promise<void> => {
