@@ -511,10 +511,13 @@ export const verifyEmailCode = async (
   if (error) throw new Error(error.message);
 };
 
+// Routine sign-out of THIS device only. The default scope is global, which
+// would silently sign out every other device too — see lostDevice() for the
+// deliberate "others" case.
 export const signOut = async (): Promise<void> => {
   if (!supabase) return;
   teardown();
-  await supabase.auth.signOut();
+  await supabase.auth.signOut({ scope: "local" });
 };
 
 // Explicit sign-out (item 11): tear down sync, sign out of Supabase, and
@@ -530,7 +533,8 @@ export const signOutAndWipe = async (): Promise<void> => {
   clearPendingKey();
   if (supabase) {
     try {
-      await supabase.auth.signOut();
+      // This device only: wiping one device must not sign the others out.
+      await supabase.auth.signOut({ scope: "local" });
     } catch {
       // Offline: the local wipe still proceeds and the server session lapses.
     }
