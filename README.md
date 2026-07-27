@@ -73,4 +73,4 @@ Then install on your phone: open https://app.journlet.com in Safari (iOS) → Sh
 
 - Purist notation rule: symbols are never substituted; visibility is handled with weight, size and contrast only.
 - Every action is plainly labelled; destructive delete is undoable via toast, no confirmation dialogue.
-- Google Fonts (Fraunces, Public Sans) are loaded from fonts.googleapis.com for now; self-hosting them is a candidate for the CSP-hardening pass (spec build step 8).
+- Fraunces and Public Sans are self-hosted from `public/fonts` (SIL Open Font License, copies alongside). No third-party origin appears anywhere in the CSP: the Supabase project is the only external host the app can reach, and it only ever receives ciphertext.

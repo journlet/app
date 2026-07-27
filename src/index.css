@@ -1,5 +1,34 @@
 /* Journlet — ported faithfully from journlet-prototype-v17 */
 
+/* Fonts are self-hosted, not loaded from Google. An app whose whole argument
+   is that nobody can read your journal should not hand every launch's IP
+   address to a third party in order to draw its own headings. Self-hosting
+   also makes the offline case work: vite.config.ts precaches woff2, which was
+   matching nothing while the files lived on Google's CDN, so an offline launch
+   fell back to system fonts.
+   Both are variable fonts covering 100..900 in a single file, and Fraunces
+   carries its optical-size axis. Sources: @fontsource-variable/fraunces and
+   @fontsource-variable/public-sans (SIL Open Font License, copies alongside
+   the woff2 in public/fonts/). Identical to the declarations in
+   journlet/site styles.css — keep the two in step.
+   No unicode-range: there is only one subset, so per-glyph fallback handles
+   anything the file lacks, the ○ event bullet among them, exactly as before. */
+@font-face {
+  font-family: "Fraunces";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/fraunces-latin-opsz-normal.woff2) format("woff2-variations");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(/fonts/public-sans-latin-wght-normal.woff2)
+    format("woff2-variations");
+}
+
 :root {
   --ink: #26323e;
   /* Raised from #6b7683 (27 July 2026): that was 4.20:1 against --paper,
