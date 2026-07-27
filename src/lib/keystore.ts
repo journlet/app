@@ -67,6 +67,23 @@ export const replaceKeyRing = async (ring: KeyRing): Promise<void> => {
   ringPromise = Promise.resolve(ring);
 };
 
+/**
+ * Erase this device's keyring entirely (explicit sign-out, spec §6 / item
+ * 11). The keeper and data keys are gone locally after this; the server
+ * still holds only ciphertext, so without the journal key code the wiped
+ * journal is unrecoverable on this device. The next ensureKeys() generates
+ * a fresh ring silently, as on a first launch.
+ */
+export const wipeKeys = (): Promise<void> => {
+  ringPromise = null;
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => resolve(); // no open handles we keep; proceed
+  });
+};
+
 /** Load the device keyring, generating one silently on first launch. */
 export const ensureKeys = (): Promise<KeyRing> => {
   ringPromise ??= (async () => {

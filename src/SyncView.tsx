@@ -16,7 +16,7 @@ import {
   pendingJournalKey,
   provideJournalKey,
   signIn,
-  signOut,
+  signOutAndWipe,
   verifyEmailCode,
 } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
@@ -38,6 +38,8 @@ export default function SyncView() {
   const [otpCode, setOtpCode] = useState("");
   const [lostOpen, setLostOpen] = useState(false);
   const [lostDone, setLostDone] = useState(false);
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
   const [keyCode, setKeyCode] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [keyEntry, setKeyEntry] = useState("");
@@ -218,6 +220,8 @@ export default function SyncView() {
           <p style={ST.p}>
             Sign in to sync your journal across devices. Everything is
             end-to-end encrypted — the server only ever stores ciphertext.
+            Linking this device to an existing journal also happens after you
+            sign in: enter your journal key when asked.
           </p>
           {pendingJournalKey() && (
             <p style={{ ...ST.p, fontWeight: 600 }}>
@@ -454,13 +458,79 @@ export default function SyncView() {
               </button>
             )}
           </div>
-          <button
-            className="sheetBtn"
-            style={{ maxWidth: 260 }}
-            onClick={() => void signOut()}
-          >
-            Sign out (journal stays on this device)
-          </button>
+          <div style={ST.keyBox}>
+            <div style={ST.keyLabel}>Sign out</div>
+            {signOutOpen ? (
+              <>
+                <p style={{ ...ST.p, marginTop: 0 }}>
+                  Signing out removes this journal and its key from this
+                  device. Anything not yet synced, and the journal key itself,
+                  cannot be recovered afterwards — the server holds ciphertext
+                  only. You can sign back in and re-enter your journal key to
+                  restore what did sync.
+                </p>
+                <label
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "flex-start",
+                    fontSize: 13.5,
+                    lineHeight: 1.5,
+                    color: INK,
+                    maxWidth: 480,
+                    margin: "6px 0 10px",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={keySaved}
+                    onChange={(ev) => setKeySaved(ev.target.checked)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>I have saved my journal key somewhere safe.</span>
+                </label>
+                <div style={ST.row}>
+                  <button
+                    className="sheetBtn isDanger"
+                    style={{ width: "auto" }}
+                    disabled={busy || !keySaved}
+                    onClick={async () => {
+                      setError(null);
+                      setBusy(true);
+                      try {
+                        await signOutAndWipe();
+                        window.location.reload();
+                      } catch (e) {
+                        setBusy(false);
+                        setError(
+                          e instanceof Error
+                            ? e.message
+                            : "Could not sign out cleanly"
+                        );
+                      }
+                    }}
+                  >
+                    Sign out and remove journal from this device
+                  </button>
+                  <button
+                    className="sheetBtn isQuiet"
+                    style={{ width: "auto" }}
+                    disabled={busy}
+                    onClick={() => {
+                      setSignOutOpen(false);
+                      setKeySaved(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button className="miniBtn" onClick={() => setSignOutOpen(true)}>
+                sign out of this device
+              </button>
+            )}
+          </div>
         </>
       )}
 

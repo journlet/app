@@ -11,7 +11,7 @@
 import * as Y from "yjs";
 import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
-import { doc, REMOTE_ORIGIN } from "./journal";
+import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -22,10 +22,10 @@ import {
   wrapDataKey,
 } from "../lib/crypto";
 import type { WrappedDataKey } from "../lib/crypto";
-import { ensureKeys, replaceKeyRing } from "../lib/keystore";
+import { ensureKeys, replaceKeyRing, wipeKeys } from "../lib/keystore";
 import type { KeyRing } from "../lib/keystore";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
-import { getActiveVolume } from "../lib/volume";
+import { DEFAULT_VOLUME, getActiveVolume, setActiveVolume } from "../lib/volume";
 
 export type SyncStatus =
   | "disabled" // no Supabase config in the build
@@ -486,6 +486,39 @@ export const signOut = async (): Promise<void> => {
   if (!supabase) return;
   teardown();
   await supabase.auth.signOut();
+};
+
+// Explicit sign-out (item 11): tear down sync, sign out of Supabase, and
+// erase this device's journal and keys. Unsynced local changes and the
+// journal key are unrecoverable afterwards — the server holds ciphertext
+// only — so the UI gates this behind a warning that the key is saved. The
+// involuntary path (session expiry, see onAuthStateChange) never calls this;
+// it only tears down and shows the "not syncing" banner. Callers reload the
+// app immediately after, so a fresh empty journal and a new keyring are
+// generated silently, exactly as on a first launch.
+export const signOutAndWipe = async (): Promise<void> => {
+  teardown();
+  clearPendingKey();
+  if (supabase) {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Offline: the local wipe still proceeds and the server session lapses.
+    }
+  }
+  session = null;
+  ring = null;
+  await wipeLocalJournal();
+  await wipeKeys();
+  // Reminders track fired entry ids that no longer exist; reset the active
+  // volume so the fresh journal starts on the default (see reminders.ts,
+  // volume.ts). Best effort — a wipe must not fail on storage quirks.
+  try {
+    localStorage.removeItem("journlet-fired-reminders-v1");
+  } catch {
+    // ignore
+  }
+  setActiveVolume(DEFAULT_VOLUME);
 };
 
 export const getSessionEmail = (): string | null =>

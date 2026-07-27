@@ -45,6 +45,13 @@ export const recurrences = doc.getArray<Y.Map<unknown>>("recurrences");
 
 export const persistence = new IndexeddbPersistence(DOC_NAME, doc);
 
+/**
+ * Erase this volume's journal from local IndexedDB (explicit sign-out, item
+ * 11). The in-memory doc is untouched, so callers reload the app straight
+ * after to start from an empty, freshly persisted document.
+ */
+export const wipeLocalJournal = (): Promise<void> => persistence.clearData();
+
 // ---------- reads ----------
 
 const toEntry = (m: Y.Map<unknown>): Entry => ({
