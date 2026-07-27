@@ -5,15 +5,27 @@ STATUS: DRAFT - UNREVIEWED
 
 A bullet journal PWA that faithfully implements the Ryder Carroll method. Offline-first, CRDT-backed, and (eventually) end-to-end encrypted. Built against `bullet-journal-app-spec.md` v0.9; UI ported from the validated prototype v17.
 
-## Current state (build order step 1)
+## Current state
 
-PWA shell plus the Now Spread with quick capture: entry types (• task, ○ event, — note), priority signifier (*), scope row (today / week / month / year / date…), sticky capture state, tap-bullet-to-complete, bottom-sheet entry actions (edit, complete/reopen, move, strike out, delete with six-second undo), migration review for open tasks on past pages, and the Scheduled ahead section.
+The app is well past the initial shell. What works today:
 
-Persistence is local-only: a Yjs CRDT document stored in IndexedDB via y-indexeddb. This is the same document that will later be encrypted client-side and synced through Supabase Realtime, so no data migration will be needed. No Supabase, no accounts, no server code yet.
+**Capture and notation.** Quick capture with the core bullet types (• task, ○ event, — note), the priority signifier (*), a scope row (today / week / month / year / specific date), and sticky capture state for adding several entries in a row. Notation is purist Ryder Carroll: symbols are never substituted, visibility is handled with weight and contrast only. Entries support an optional details field (longer notes / read-later links) opened full-screen, nested parent/child items, and inline link detection.
+
+**The spread.** The Now Spread with a Scheduled-ahead section, tap-bullet-to-complete, and a bottom-sheet of entry actions (edit, complete/reopen, move, cycle type, strike out, delete). Delete is undoable via a six-second toast, no confirmation dialogue. A migration-review sheet prompts to migrate or drop open tasks left on past pages.
+
+**Collections and navigation.** Index view, custom collection creation, a Collection view, the Future Log, and a back-stack for moving between views.
+
+**Recurrence and reminders.** Recurrence rules that materialise occurrences (with single-occurrence skip and next-occurrence logic), plus local notification reminders fired once per occurrence with permission handling.
+
+**Sync and encryption.** End-to-end encryption — a data key wrapped by a keeper key, encrypted Yjs updates, and an exportable/importable journal key code. Supabase auth is email magic links (no passwords), with multi-device key sharing via the journal key or QR code. The app tracks sync status, shows a "not syncing" banner when signed out, supports lost-device recovery, and wipes the local journal and keys on sign-out. Everything works fully offline before any account exists.
+
+**PWA and platform.** Installable PWA with an add-to-home-screen prompt, an auto-updating service worker with a "new version available" banner and a manual update check, Markdown export of the journal, and storage/volume metrics in the menu (entries, doc KB, sync updates).
+
+Persistence is a Yjs CRDT document stored in IndexedDB via y-indexeddb — the same document that is encrypted client-side and synced through Supabase, so the server only ever holds ciphertext.
 
 ## Stack
 
-React 19 + TypeScript + Vite, vite-plugin-pwa (Workbox, auto-update service worker), Yjs + y-indexeddb.
+React 19 + TypeScript + Vite, vite-plugin-pwa (Workbox, auto-update service worker), Yjs + y-indexeddb for the offline-first CRDT store, and @supabase/supabase-js for auth and the encrypted sync relay.
 
 ## Develop
 
