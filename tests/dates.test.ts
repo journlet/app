@@ -3,6 +3,7 @@
 
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
+  defaultRemindAt,
   dkey,
   isFutureKey,
   isoWeekKey,
@@ -116,5 +117,48 @@ describe("keyToAnchor", () => {
     expect(keyToAnchor("2026")).toBe("2026-01-01");
     // week -> its Monday
     expect(keyToAnchor("2026-W01")).toBe("2025-12-29");
+  });
+});
+
+describe("defaultRemindAt", () => {
+  // A reminder defaults to the day the entry is written for, not the day the
+  // sheet was opened. Bug: a task on tomorrow's page prefilled today, so it
+  // fired early and showed up in Due before it was due.
+  const at = (y: number, m: number, d: number, h = 0, min = 0) =>
+    new Date(y, m - 1, d, h, min).getTime();
+
+  test("future day page prefills that day at 09:00", () => {
+    const now = at(2026, 7, 27, 14, 20);
+    expect(defaultRemindAt("2026-07-28", now)).toBe(at(2026, 7, 28, 9));
+  });
+
+  test("today's page before 09:00 still prefills 09:00 today", () => {
+    const now = at(2026, 7, 27, 6, 30);
+    expect(defaultRemindAt("2026-07-27", now)).toBe(at(2026, 7, 27, 9));
+  });
+
+  test("today's page after 09:00 falls back to an hour from now", () => {
+    const now = at(2026, 7, 27, 14, 20);
+    expect(defaultRemindAt("2026-07-27", now)).toBe(now + 3600_000);
+  });
+
+  test("past page falls back to an hour from now, never a past instant", () => {
+    const now = at(2026, 7, 27, 14, 20);
+    const got = defaultRemindAt("2026-07-20", now);
+    expect(got).toBe(now + 3600_000);
+    expect(got).toBeGreaterThan(now);
+  });
+
+  test("week and month pages anchor to the first day of the period", () => {
+    const now = at(2026, 7, 27, 14, 20);
+    // 2026-W32 starts Monday 3 August
+    expect(defaultRemindAt("2026-W32", now)).toBe(at(2026, 8, 3, 9));
+    expect(defaultRemindAt("2026-08", now)).toBe(at(2026, 8, 1, 9));
+    expect(defaultRemindAt("2027", now)).toBe(at(2027, 1, 1, 9));
+  });
+
+  test("an unrecognisable key falls back rather than throwing", () => {
+    const now = at(2026, 7, 27, 14, 20);
+    expect(defaultRemindAt("not-a-key", now)).toBe(now + 3600_000);
   });
 });

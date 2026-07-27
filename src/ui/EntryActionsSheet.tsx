@@ -8,6 +8,7 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   SCOPES,
   SCOPE_LABEL,
+  defaultRemindAt,
   keyScope,
   pageLabel,
   periodKey,
@@ -255,7 +256,10 @@ export default function EntryActionsSheet({
                   className="sheetBtn"
                   onClick={() =>
                     setEditRemind(
-                      toLocalInput(sheetEntry.remindAt ?? Date.now() + 3600_000)
+                      toLocalInput(
+                        sheetEntry.remindAt ??
+                          defaultRemindAt(sheetEntry.pageKey)
+                      )
                     )
                   }
                 >

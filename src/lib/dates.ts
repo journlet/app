@@ -126,6 +126,30 @@ export const keyToAnchor = (pk: string): string => {
   return `${pk}-01-01`;
 };
 
+/**
+ * Default reminder instant for an entry, derived from the page it lives on.
+ * A reminder belongs to the day the entry is written for, not the day you
+ * happened to open the sheet — an entry on a future page prefilled "today"
+ * fires while the task is still days off, and lands in the Due section early.
+ *
+ * Page date at 09:00. If that instant has already passed (today's page opened
+ * after 09:00, or an older page) there is no sensible past prefill, so fall
+ * back to an hour from now — the same behaviour as before for those pages.
+ * Week/month/year pages have no single clock time, so they anchor to the first
+ * day of the period (keyToAnchor) and take the same 09:00.
+ */
+export const DEFAULT_REMIND_HOUR = 9;
+
+export const defaultRemindAt = (pageKey: string, now = Date.now()): number => {
+  const anchor = keyScope(pageKey) ? keyToAnchor(pageKey) : null;
+  if (anchor) {
+    const d = toDate(anchor);
+    d.setHours(DEFAULT_REMIND_HOUR, 0, 0, 0);
+    if (d.getTime() > now) return d.getTime();
+  }
+  return now + 3600_000;
+};
+
 // Human label for a page key (used for past/future references)
 export const pageLabel = (pk: string): string => {
   const sc = keyScope(pk);
