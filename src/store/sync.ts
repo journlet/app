@@ -451,18 +451,47 @@ export const signIn = async (email: string): Promise<void> => {
 // unlocking the account. Returns the new journal key code to save.
 export const lostDevice = async (): Promise<string> => {
   if (!supabase || !session) throw new Error("Not signed in");
-  ring ??= await ensureKeys();
+  const previous = (ring ??= await ensureKeys());
   const { error: soErr } = await supabase.auth.signOut({ scope: "others" });
   if (soErr) throw new Error(soErr.message);
+
+  // Order matters: persist the new keeper key locally BEFORE publishing it.
+  // If the local write fails we abort having changed nothing anywhere — the
+  // old key still works on every device. Publishing first would leave the
+  // server holding a blob no surviving device can unwrap, with the only key
+  // that opens it discarded in memory and every other device already signed
+  // out: sync stuck in needs-key with no code to re-link from. Persisting
+  // first also means the code returned below is never the only copy —
+  // getJournalKeyCode() reads it back from the keyring at any time.
   const keeperKey = await generateKeeperKey();
-  const wrapped = await wrapDataKey(ring.dataKey, keeperKey);
+  const wrapped = await wrapDataKey(previous.dataKey, keeperKey);
+  const rotated: KeyRing = {
+    keeperKey,
+    dataKey: previous.dataKey,
+    wrapped,
+    createdAt: Date.now(),
+  };
+  await replaceKeyRing(rotated);
+  ring = rotated;
+
   const { error } = await supabase
     .from("journals")
     .update({ wrapped_key: wrappedToJson(wrapped) })
     .eq("user_id", session.user.id);
-  if (error) throw new Error(error.message);
-  ring = { keeperKey, dataKey: ring.dataKey, wrapped, createdAt: Date.now() };
-  await replaceKeyRing(ring);
+  if (error) {
+    // Publish failed, so the server still holds the old blob: put the old
+    // ring back so the two agree again and the old code keeps working. Best
+    // effort — if the restore itself fails the next connect() lands in
+    // needs-key, which the old code still resolves, because the server was
+    // never rotated.
+    try {
+      await replaceKeyRing(previous);
+      ring = previous;
+    } catch {
+      // fall through to the thrown error
+    }
+    throw new Error(error.message);
+  }
   return exportJournalKeyCode(keeperKey);
 };
 
