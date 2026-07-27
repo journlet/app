@@ -57,6 +57,50 @@ drop policy if exists "insert own updates" on public.journal_updates;
 create policy "insert own updates" on public.journal_updates
   for insert with check (auth.uid() = user_id);
 
+-- Account deletion (remediation item 16). Deleting an auth user normally needs
+-- the service role key, which cannot ship in a client-only app. A security
+-- definer function is the way round it that keeps the "no server-side code"
+-- constraint intact: this is a database function living beside the RLS, not an
+-- Edge Function.
+--
+-- The function takes no arguments on purpose. It deletes auth.uid() and nothing
+-- else, so a caller cannot name a victim — the only account any session can
+-- destroy is its own.
+--
+-- The data rows are deleted explicitly even though both tables cascade from
+-- auth.users (see the `on delete cascade` above). The cascade would cover it on
+-- a database built from this file, but this schema is also meant to converge an
+-- older project, and a table created before the cascade existed would silently
+-- leave its ciphertext behind. Deleting outright costs nothing and does not
+-- depend on how the database got here. It all runs in one transaction, so a
+-- failure at any point leaves the account exactly as it was.
+--
+-- search_path is pinned empty and every name fully qualified, which is the
+-- standard hardening for security definer: without it a caller could put a
+-- malicious `auth` or `public` schema ahead on the path and have it run with
+-- the owner's rights.
+create or replace function public.delete_account()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null then
+    raise exception 'Not signed in';
+  end if;
+  delete from public.journal_updates where user_id = uid;
+  delete from public.journals where user_id = uid;
+  delete from auth.users where id = uid;
+end;
+$$;
+
+-- Only signed-in users, and only ever on themselves.
+revoke all on function public.delete_account() from public, anon;
+grant execute on function public.delete_account() to authenticated;
+
 -- Realtime: broadcast inserts so other devices pick changes up live. Guarded so
 -- re-running doesn't error on the table already being a publication member.
 do $$

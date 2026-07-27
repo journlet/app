@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
 import {
+  deleteAccount,
   getJournalKeyCode,
   getSessionEmail,
   getSyncError,
@@ -40,6 +41,8 @@ export default function SyncView() {
   const [lostDone, setLostDone] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
   const [keyCode, setKeyCode] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [keyEntry, setKeyEntry] = useState("");
@@ -199,6 +202,21 @@ export default function SyncView() {
 
   const signedIn =
     status !== "signed-out" && status !== "disabled" && getSessionEmail();
+
+  // Deleting an account is the one genuinely irreversible action in the app,
+  // so it is the documented exception to the undo-toast rule (spec §4.1a):
+  // typing the account's own email is the gate. Compared case-insensitively
+  // and trimmed, because the friction should come from having to read which
+  // account is being destroyed, not from a stray space.
+  const accountEmail = getSessionEmail();
+  const deleteArmed =
+    Boolean(accountEmail) &&
+    deleteConfirm.trim().toLowerCase() === accountEmail?.trim().toLowerCase();
+
+  const closeDelete = () => {
+    setDeleteOpen(false);
+    setDeleteConfirm("");
+  };
 
   return (
     <section style={{ marginBottom: 18 }}>
@@ -528,6 +546,85 @@ export default function SyncView() {
             ) : (
               <button className="miniBtn" onClick={() => setSignOutOpen(true)}>
                 sign out of this device
+              </button>
+            )}
+          </div>
+
+          <div style={ST.keyBox}>
+            <div style={ST.keyLabel}>Delete account</div>
+            {deleteOpen ? (
+              <>
+                <p style={{ ...ST.p, marginTop: 0 }}>
+                  This deletes your account, every encrypted update the server
+                  holds for it, and your email address. It cannot be undone and
+                  there is no grace period — once it is gone, nobody can bring
+                  it back, including whoever runs Journlet.
+                </p>
+                <p style={ST.p}>
+                  This journal will also be removed from this device. Other
+                  devices you are signed in on keep the copy they already have
+                  until you sign out or delete the app there — nothing can erase
+                  a device remotely. Export first from the menu if you want to
+                  keep a readable copy.
+                </p>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 13.5,
+                    lineHeight: 1.5,
+                    color: INK,
+                    maxWidth: 480,
+                    margin: "10px 0 6px",
+                  }}
+                >
+                  Type <strong>{accountEmail}</strong> to confirm.
+                  <input
+                    value={deleteConfirm}
+                    onChange={(ev) => setDeleteConfirm(ev.target.value)}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    aria-label="Type your email address to confirm account deletion"
+                    style={{ ...ST.input, width: "100%", margin: "6px 0 4px" }}
+                  />
+                </label>
+                <div style={ST.row}>
+                  <button
+                    className="sheetBtn isDanger"
+                    style={{ width: "auto" }}
+                    disabled={busy || !deleteArmed}
+                    onClick={async () => {
+                      setError(null);
+                      setBusy(true);
+                      try {
+                        await deleteAccount();
+                        window.location.reload();
+                      } catch (e) {
+                        setBusy(false);
+                        setError(
+                          e instanceof Error
+                            ? `Could not delete the account: ${e.message}. Nothing has been deleted — your journal is untouched.`
+                            : "Could not delete the account. Nothing has been deleted — your journal is untouched."
+                        );
+                      }
+                    }}
+                  >
+                    Delete account and all synced data
+                  </button>
+                  <button
+                    className="sheetBtn isQuiet"
+                    style={{ width: "auto" }}
+                    disabled={busy}
+                    onClick={closeDelete}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button className="miniBtn" onClick={() => setDeleteOpen(true)}>
+                delete account and all synced data
               </button>
             )}
           </div>

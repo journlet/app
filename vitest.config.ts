@@ -8,6 +8,9 @@ import react from "@vitejs/plugin-react";
 // The React plugin gives those .tsx tests the same JSX transform as the app.
 export default defineConfig({
   plugins: [react()],
+  // vite.config.ts injects __BUILD_TIME__ at build time; components that show
+  // the build stamp would throw a ReferenceError under test without it.
+  define: { __BUILD_TIME__: JSON.stringify("test") },
   test: {
     environment: "node",
     include: ["tests/**/*.test.{ts,tsx}"],

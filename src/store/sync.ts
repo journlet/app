@@ -524,5 +524,49 @@ export const signOutAndWipe = async (): Promise<void> => {
   setActiveVolume(DEFAULT_VOLUME);
 };
 
+/**
+ * Delete the account and everything the server holds for it, then wipe this
+ * device (remediation item 16, UK GDPR right to erasure).
+ *
+ * The server side is one RPC to a security definer function that deletes only
+ * auth.uid() — see supabase/schema.sql. Deleting an auth user otherwise needs
+ * the service role key, which cannot ship in a client-only app.
+ *
+ * Server first, deliberately. If the RPC fails we stop with the local journal
+ * intact and report it, rather than wiping the device and leaving the user with
+ * nothing local AND an account they cannot reach to try again. Once the server
+ * is gone the local wipe cannot meaningfully fail: the data it removes is
+ * already unrecoverable.
+ *
+ * Other signed-in devices keep working offline until their JWT expires, then
+ * fall to the not-syncing banner. Nothing can remotely erase a device, which
+ * the UI says plainly.
+ */
+export const deleteAccount = async (): Promise<void> => {
+  if (!supabase || !session) throw new Error("Not signed in");
+  const { error } = await supabase.rpc("delete_account");
+  if (error) throw new Error(error.message);
+
+  teardown();
+  clearPendingKey();
+  try {
+    // The JWT outlives the user row, so drop it rather than leaving a token
+    // that authenticates to a deleted account.
+    await supabase.auth.signOut({ scope: "local" });
+  } catch {
+    // The account is already gone; a failed sign-out must not block the wipe.
+  }
+  session = null;
+  ring = null;
+  await wipeLocalJournal();
+  await wipeKeys();
+  try {
+    localStorage.removeItem("journlet-fired-reminders-v1");
+  } catch {
+    // ignore
+  }
+  setActiveVolume(DEFAULT_VOLUME);
+};
+
 export const getSessionEmail = (): string | null =>
   session?.user.email ?? null;
