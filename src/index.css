@@ -2,7 +2,13 @@
 
 :root {
   --ink: #26323e;
-  --ink-soft: #6b7683;
+  /* Raised from #6b7683 (27 July 2026): that was 4.20:1 against --paper,
+     under WCAG AA for normal text, and --ink-soft carries a lot of small
+     text (meta lines, section subtitles, migrated and completed entries).
+     #66717d clears AA at 4.52:1 on paper and 4.97:1 on surface, and the
+     change is all but invisible. The dark palette already passed at 6.70:1
+     and is unchanged. Mirrored in journlet/site styles.css. */
+  --ink-soft: #66717d;
   --paper: #f5f4ef;
   --surface: #ffffff; /* raised: cards, inputs, active pills */
   --line: #dcdad1;
