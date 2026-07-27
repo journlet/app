@@ -498,17 +498,11 @@ export const signOut = async (): Promise<void> => {
 // it only tears down and shows the "not syncing" banner. Callers reload the
 // app immediately after, so a fresh empty journal and a new keyring are
 // generated silently, exactly as on a first launch.
-export const signOutAndWipe = async (): Promise<void> => {
-  teardown();
-  clearPendingKey();
-  if (supabase) {
-    try {
-      // This device only: wiping one device must not sign the others out.
-      await supabase.auth.signOut({ scope: "local" });
-    } catch {
-      // Offline: the local wipe still proceeds and the server session lapses.
-    }
-  }
+// Erase everything this device holds. Shared by sign-out and account deletion
+// so the two can never drift on what "wiped" means — a future addition here
+// must not silently skip the deletion path, which is the one where leftovers
+// would be an incomplete erasure rather than an inconvenience.
+const wipeThisDevice = async (): Promise<void> => {
   session = null;
   ring = null;
   await wipeLocalJournal();
@@ -524,6 +518,33 @@ export const signOutAndWipe = async (): Promise<void> => {
   setActiveVolume(DEFAULT_VOLUME);
 };
 
+export const signOutAndWipe = async (): Promise<void> => {
+  teardown();
+  clearPendingKey();
+  if (supabase) {
+    try {
+      // This device only: wiping one device must not sign the others out.
+      await supabase.auth.signOut({ scope: "local" });
+    } catch {
+      // Offline: the local wipe still proceeds and the server session lapses.
+    }
+  }
+  await wipeThisDevice();
+};
+
+/**
+ * The account was deleted but this device could not be cleared. Distinct from a
+ * failed deletion because the two need opposite advice, and telling someone
+ * their journal is untouched when the account is already gone is the worst
+ * thing this flow could do.
+ */
+export class DeviceNotClearedError extends Error {
+  constructor(detail: string) {
+    super(detail);
+    this.name = "DeviceNotClearedError";
+  }
+}
+
 /**
  * Delete the account and everything the server holds for it, then wipe this
  * device (remediation item 16, UK GDPR right to erasure).
@@ -532,21 +553,28 @@ export const signOutAndWipe = async (): Promise<void> => {
  * auth.uid() — see supabase/schema.sql. Deleting an auth user otherwise needs
  * the service role key, which cannot ship in a client-only app.
  *
- * Server first, deliberately. If the RPC fails we stop with the local journal
- * intact and report it, rather than wiping the device and leaving the user with
- * nothing local AND an account they cannot reach to try again. Once the server
- * is gone the local wipe cannot meaningfully fail: the data it removes is
- * already unrecoverable.
+ * Server first, deliberately. If the RPC fails, nothing has been destroyed and
+ * the caller can say so; wiping first would leave someone with nothing local
+ * AND an account they can no longer reach to retry.
  *
- * Other signed-in devices keep working offline until their JWT expires, then
- * fall to the not-syncing banner. Nothing can remotely erase a device, which
- * the UI says plainly.
+ * The consequence is that the RPC is a point of no return, and the two sides of
+ * it need different error handling. A wipe that fails afterwards is not a
+ * failed deletion — the account is already gone — so it throws
+ * DeviceNotClearedError, which the UI must never report as "nothing was
+ * deleted". IndexedDB can and does reject: quota, private mode, an eviction
+ * mid-flight.
+ *
+ * Other signed-in devices keep the copy they hold. Their next push fails
+ * against the missing user row, and once the refresh token is gone they land
+ * back at signed-out. Nothing can remotely erase a device, which the UI says
+ * plainly.
  */
 export const deleteAccount = async (): Promise<void> => {
   if (!supabase || !session) throw new Error("Not signed in");
   const { error } = await supabase.rpc("delete_account");
   if (error) throw new Error(error.message);
 
+  // Point of no return. Nothing below may be reported as a failed deletion.
   teardown();
   clearPendingKey();
   try {
@@ -556,16 +584,13 @@ export const deleteAccount = async (): Promise<void> => {
   } catch {
     // The account is already gone; a failed sign-out must not block the wipe.
   }
-  session = null;
-  ring = null;
-  await wipeLocalJournal();
-  await wipeKeys();
   try {
-    localStorage.removeItem("journlet-fired-reminders-v1");
-  } catch {
-    // ignore
+    await wipeThisDevice();
+  } catch (e) {
+    throw new DeviceNotClearedError(
+      e instanceof Error ? e.message : String(e)
+    );
   }
-  setActiveVolume(DEFAULT_VOLUME);
 };
 
 export const getSessionEmail = (): string | null =>

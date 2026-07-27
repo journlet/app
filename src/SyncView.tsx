@@ -7,6 +7,7 @@ import QRCode from "qrcode";
 import jsQR from "jsqr";
 import {
   deleteAccount,
+  DeviceNotClearedError,
   getJournalKeyCode,
   getSessionEmail,
   getSyncError,
@@ -602,11 +603,23 @@ export default function SyncView() {
                         window.location.reload();
                       } catch (e) {
                         setBusy(false);
-                        setError(
-                          e instanceof Error
-                            ? `Could not delete the account: ${e.message}. Nothing has been deleted — your journal is untouched.`
-                            : "Could not delete the account. Nothing has been deleted — your journal is untouched."
-                        );
+                        // Two very different failures. Before the server call
+                        // succeeds nothing is destroyed and saying so is the
+                        // reassurance that matters. After it, the account is
+                        // gone for good and only the local clear-up failed —
+                        // claiming the journal is untouched would be a lie at
+                        // the one moment it would do real harm.
+                        if (e instanceof DeviceNotClearedError) {
+                          setError(
+                            `Your account and everything the server held are deleted. This device could not be cleared automatically (${e.message}). The journal is still on this device: sign out, or clear this site's data in your browser settings, to remove it.`
+                          );
+                        } else {
+                          setError(
+                            e instanceof Error
+                              ? `Could not delete the account: ${e.message}. Nothing has been deleted — your journal is untouched.`
+                              : "Could not delete the account. Nothing has been deleted — your journal is untouched."
+                          );
+                        }
                       }
                     }}
                   >

@@ -97,7 +97,13 @@ begin
 end;
 $$;
 
--- Only signed-in users, and only ever on themselves.
+-- Supabase's default privileges grant EXECUTE on new public functions to anon,
+-- authenticated and service_role, so the revoke is load-bearing rather than
+-- decorative: without it an unauthenticated caller could invoke this. service_role
+-- keeps its grant, which is harmless — that key never ships in the client, and
+-- anyone holding it can delete users directly anyway. Re-running emits a
+-- "no privileges could be revoked" warning once the default grant is gone; that
+-- is cosmetic and the file stays idempotent.
 revoke all on function public.delete_account() from public, anon;
 grant execute on function public.delete_account() to authenticated;
 

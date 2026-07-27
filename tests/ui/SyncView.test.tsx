@@ -18,27 +18,40 @@ const EMAIL = "gary@example.com";
 const deleteAccount = vi.fn();
 const signOutAndWipe = vi.fn();
 
-vi.mock("../../src/store/sync", () => ({
-  deleteAccount: (...a: unknown[]) => deleteAccount(...a),
-  signOutAndWipe: (...a: unknown[]) => signOutAndWipe(...a),
-  getJournalKeyCode: vi.fn(async () => "J1-TESTKEY"),
-  getSessionEmail: () => EMAIL,
-  getSyncError: () => null,
-  getSyncStatus: () => "synced",
-  isConfigured: () => true,
-  lostDevice: vi.fn(),
-  onSyncStatus: (fn: (s: string) => void) => {
-    fn("synced");
-    return () => {};
-  },
-  provideJournalKey: vi.fn(),
-  signIn: vi.fn(),
-  verifyEmailCode: vi.fn(),
-}));
+vi.mock("../../src/store/sync", () => {
+  // A real class, so the component's `instanceof` branch is exercised rather
+  // than stubbed past.
+  class DeviceNotClearedError extends Error {
+    constructor(detail: string) {
+      super(detail);
+      this.name = "DeviceNotClearedError";
+    }
+  }
+  return {
+    DeviceNotClearedError,
+    deleteAccount: (...a: unknown[]) => deleteAccount(...a),
+    signOutAndWipe: (...a: unknown[]) => signOutAndWipe(...a),
+    getJournalKeyCode: vi.fn(async () => "J1-TESTKEY"),
+    getSessionEmail: () => EMAIL,
+    getSyncError: () => null,
+    getSyncStatus: () => "synced",
+    isConfigured: () => true,
+    lostDevice: vi.fn(),
+    onSyncStatus: (fn: (s: string) => void) => {
+      fn("synced");
+      return () => {};
+    },
+    provideJournalKey: vi.fn(),
+    signIn: vi.fn(),
+    verifyEmailCode: vi.fn(),
+  };
+});
 
 import SyncView from "../../src/SyncView";
+import { DeviceNotClearedError } from "../../src/store/sync";
 
 const reload = vi.fn();
+const realLocation = window.location;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -48,7 +61,13 @@ beforeEach(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: realLocation,
+  });
+});
 
 const openDelete = () => {
   render(<SyncView />);
@@ -154,12 +173,28 @@ describe("running the delete", () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
-  test("a failure leaves the journal alone", async () => {
-    deleteAccount.mockRejectedValueOnce(new Error("network"));
+  test("does nothing while the gate is shut", () => {
+    openDelete();
+    fireEvent.click(deleteButton());
+    expect(deleteAccount).not.toHaveBeenCalled();
+  });
+
+  // The dangerous case: the account is already gone and only the local clear-up
+  // failed. Saying "your journal is untouched" here would be a lie at the one
+  // moment it does real harm, so the two failures must read differently.
+  test("a wipe failure after deletion does not claim the journal survived", async () => {
+    deleteAccount.mockRejectedValueOnce(
+      new DeviceNotClearedError("QuotaExceededError")
+    );
     openDelete();
     fireEvent.change(confirmField(), { target: { value: EMAIL } });
     fireEvent.click(deleteButton());
-    await waitFor(() => expect(deleteAccount).toHaveBeenCalled());
-    expect(signOutAndWipe).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByText(/are deleted/i)).toBeTruthy()
+    );
+    expect(screen.queryByText(/untouched/i)).toBeNull();
+    expect(screen.getByText(/QuotaExceededError/)).toBeTruthy();
+    expect(screen.getByText(/clear this site's data/i)).toBeTruthy();
+    expect(reload).not.toHaveBeenCalled();
   });
 });
