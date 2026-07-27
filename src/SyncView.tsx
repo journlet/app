@@ -13,13 +13,13 @@ import {
   lostDevice,
   isConfigured,
   onSyncStatus,
-  pendingJournalKey,
   provideJournalKey,
   signIn,
   signOutAndWipe,
   verifyEmailCode,
 } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
+import { pendingJournalKey } from "./lib/pendingKey";
 
 const STATUS_LABEL: Record<SyncStatus, string> = {
   disabled: "sync not configured in this build",

@@ -24,6 +24,12 @@ import {
 import type { WrappedDataKey } from "../lib/crypto";
 import { ensureKeys, replaceKeyRing, wipeKeys } from "../lib/keystore";
 import type { KeyRing } from "../lib/keystore";
+import {
+  clearPendingKey,
+  pendingJournalKey,
+  stashKeyFromUrl,
+  sweepPendingKey,
+} from "../lib/pendingKey";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import { DEFAULT_VOLUME, getActiveVolume, setActiveVolume } from "../lib/volume";
 
@@ -106,43 +112,6 @@ const wrappedFromJson = (j: WrappedKeyJson): WrappedDataKey => ({
 });
 
 // ---------- engine state ----------
-
-// A journal key can arrive via QR: the other device shows a link like
-// https://app.journlet.com/#jk=J1-…; the phone camera opens it here. The
-// fragment never reaches any server. We stash it locally (it must survive
-// the magic-link redirect) and apply it once signed in.
-const PENDING_KEY = "journlet-pending-journal-key";
-
-const stashKeyFromUrl = (): void => {
-  const m = window.location.hash.match(/jk=([A-Za-z0-9-]+)/);
-  if (!m) return;
-  try {
-    localStorage.setItem(PENDING_KEY, m[1]);
-  } catch {
-    // storage unavailable — manual entry still works
-  }
-  history.replaceState(
-    null,
-    "",
-    window.location.pathname + window.location.search
-  );
-};
-
-export const pendingJournalKey = (): string | null => {
-  try {
-    return localStorage.getItem(PENDING_KEY);
-  } catch {
-    return null;
-  }
-};
-
-const clearPendingKey = (): void => {
-  try {
-    localStorage.removeItem(PENDING_KEY);
-  } catch {
-    // best effort
-  }
-};
 
 let session: Session | null = null;
 let ring: KeyRing | null = null;
@@ -406,6 +375,7 @@ const connect = async (): Promise<void> => {
 export const startSync = (): void => {
   if (started || !supabase) return;
   started = true;
+  sweepPendingKey();
   stashKeyFromUrl();
 
   supabase.auth.onAuthStateChange((_event, s) => {
