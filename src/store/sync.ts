@@ -390,18 +390,51 @@ const checkJournalKeys = async (): Promise<boolean> => {
     return true;
   }
   // Journal exists: can our keeper unwrap its data key?
+  const remoteWrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
   try {
-    const remoteWrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
     const dataKey = await unwrapDataKey(remoteWrapped, ring.keeperKey);
     ring = {
       ...ring,
       dataKey,
       wrapped: remoteWrapped,
       verifiedUserId: session?.user.id,
+      // The current key opened the server's blob, so any rotation this ring was
+      // carrying is confirmed landed and the old key is no longer needed. Held
+      // no longer than that: it is a live credential for this journal.
+      supersededKeeperKey: undefined,
     };
     await replaceKeyRing(ring);
     return true;
   } catch {
+    // Before concluding anything, try the key this ring rotated away from, if
+    // it is still carrying one. If *that* opens the blob, the server never
+    // moved: our own rotation did not land — a failed publish, or the app being
+    // quit between the local write and the publish. This device is the rightful
+    // holder and must not lock itself out over its own half-finished write, so
+    // it reverts to the key that agrees with the server. The new code stops
+    // working, which is correct, because it never became the account's key.
+    if (ring.supersededKeeperKey) {
+      try {
+        const dataKey = await unwrapDataKey(
+          remoteWrapped,
+          ring.supersededKeeperKey
+        );
+        ring = {
+          keeperKey: ring.supersededKeeperKey,
+          dataKey,
+          wrapped: remoteWrapped,
+          createdAt: ring.createdAt,
+          verifiedUserId: session?.user.id,
+        };
+        await replaceKeyRing(ring);
+        setError(
+          "The new journal key was not saved to the server, so your previous journal key is still the one in use. Other devices have been signed out. Please report the lost device again to change the key."
+        );
+        return true;
+      } catch {
+        // Neither key fits: fall through to the ordinary handling below.
+      }
+    }
     // A fresh device and a locked-out device fail identically here — both hold
     // a keeper key that will not open the server's blob. Only the record of
     // having opened it before tells them apart, and they need opposite
@@ -856,28 +889,49 @@ const rotateForLoss = async (): Promise<string> => {
     // the journal. Dropping the marker here would make a later mismatch on
     // this device look like a first link rather than a lockout.
     verifiedUserId: session.user.id,
+    // Kept until the publish is confirmed. If this device is quit or crashes
+    // between here and the next few lines, the persisted ring holds a key the
+    // server has never seen, and without this it would read that as having been
+    // locked out and sign itself out of its own journal. See keystore.KeyRing.
+    supersededKeeperKey: previous.keeperKey,
   };
   await replaceKeyRing(rotated);
   ring = rotated;
 
-  const { error } = await supabase
+  // `.select()` so the affected rows come back. Without it a matched-nothing
+  // update is indistinguishable from a successful one: no error is returned,
+  // and the user would be handed a new journal key that opens nothing while the
+  // server quietly kept the old blob. That happens if the journals row is
+  // missing or RLS excludes it, neither of which is exotic.
+  const { data, error } = await supabase
     .from("journals")
     .update({ wrapped_key: wrappedToJson(wrapped) })
-    .eq("user_id", session.user.id);
-  if (error) {
-    // Publish failed, so the server still holds the old blob: put the old
-    // ring back so the two agree again and the old code keeps working. Best
-    // effort — if the restore itself fails the next connect() lands in
-    // needs-key, which the old code still resolves, because the server was
-    // never rotated.
+    .eq("user_id", session.user.id)
+    .select("user_id");
+  if (error || !data || data.length === 0) {
+    // The server still holds the old blob, so put the old ring back and let the
+    // old code keep working everywhere. If this restore itself fails, the
+    // superseded key above makes the next check recover instead.
     try {
       await replaceKeyRing(previous);
       ring = previous;
     } catch {
       // fall through to the thrown error
     }
-    throw new Error(error.message);
+    // Note what did and did not happen. The sign-out of the other devices has
+    // already gone through and cannot be undone, so reporting this as "nothing
+    // happened" would be false and would leave someone wondering why their
+    // other devices had dropped out.
+    throw new Error(
+      `Your other devices have been signed out, but the journal key could not be changed${
+        error ? `: ${error.message}` : " — the server did not accept the update"
+      }. Your existing journal key still works. Try reporting the lost device again.`
+    );
   }
+  // Confirmed on the server, so the old key is no longer needed anywhere.
+  const confirmed: KeyRing = { ...rotated, supersededKeeperKey: undefined };
+  await replaceKeyRing(confirmed);
+  ring = confirmed;
   return exportJournalKeyCode(keeperKey);
 };
 
