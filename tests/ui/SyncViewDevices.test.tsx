@@ -189,6 +189,79 @@ describe("the device register", () => {
     expect(forgetDevice).toHaveBeenCalledWith("b");
   });
 
+  test("renaming happens in the row, with no native dialog", () => {
+    // The app has no window.prompt/confirm/alert anywhere else, and a native
+    // prompt looks foreign in an installed home-screen app — where it can also
+    // be suppressed, leaving a button that silently does nothing.
+    const prompt = vi.spyOn(window, "prompt");
+    render(<SyncView />);
+
+    fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
+
+    expect(prompt).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Name for Mac/i)).toBeTruthy();
+  });
+
+  test("saving the new name commits it", () => {
+    render(<SyncView />);
+    fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
+
+    fireEvent.change(screen.getByLabelText(/Name for Mac/i), {
+      target: { value: "work laptop" },
+    });
+    fireEvent.click(screen.getByText(/save name/i));
+
+    expect(renameDevice).toHaveBeenCalledWith("a", "work laptop");
+  });
+
+  test("Enter saves, so it behaves like the rest of the app's inputs", () => {
+    render(<SyncView />);
+    fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
+    const input = screen.getByLabelText(/Name for Mac/i);
+
+    fireEvent.change(input, { target: { value: "desk Mac" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(renameDevice).toHaveBeenCalledWith("a", "desk Mac");
+  });
+
+  test("cancelling leaves the name alone", () => {
+    render(<SyncView />);
+    fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
+    fireEvent.change(screen.getByLabelText(/Name for Mac/i), {
+      target: { value: "discarded" },
+    });
+
+    fireEvent.click(screen.getByText(/^cancel$/i));
+
+    expect(renameDevice).not.toHaveBeenCalled();
+    expect(screen.getByText("Mac")).toBeTruthy();
+  });
+
+  test("a blank name is refused rather than saved", () => {
+    // Saving empty would leave a row with no label at all, which is worse than
+    // a wrong one: an unrecognised device is the thing you are looking for.
+    render(<SyncView />);
+    fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
+    fireEvent.change(screen.getByLabelText(/Name for Mac/i), {
+      target: { value: "   " },
+    });
+
+    fireEvent.keyDown(screen.getByLabelText(/Name for Mac/i), {
+      key: "Enter",
+    });
+
+    expect(renameDevice).not.toHaveBeenCalled();
+  });
+
+  test("only the row being renamed turns into an input", () => {
+    render(<SyncView />);
+    fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
+
+    expect(screen.getByText("iPhone")).toBeTruthy();
+    expect(screen.queryByLabelText(/Name for iPhone/i)).toBeNull();
+  });
+
   test("an empty register says so rather than rendering nothing", () => {
     deviceRows = [];
     render(<SyncView />);

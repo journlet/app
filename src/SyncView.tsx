@@ -84,6 +84,18 @@ export default function SyncView() {
     return onDevicesChange(refresh);
   }, []);
 
+  // Renaming happens in place in the row. The app has no native dialogs
+  // anywhere else, and window.prompt in particular looks foreign in an
+  // installed home-screen app and can be suppressed outright there.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState("");
+
+  const saveRename = (id: string) => {
+    if (!renameText.trim()) return;
+    renameDevice(id, renameText);
+    setRenaming(null);
+  };
+
   useEffect(() => {
     if (!keyCode) {
       setQrUrl(null);
@@ -478,44 +490,74 @@ export default function SyncView() {
               <p style={ST.p}>No devices recorded yet.</p>
             ) : (
               <ul style={ST.devList}>
-                {deviceList.map((d) => (
-                  <li key={d.id} style={ST.devRow}>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>
-                        {d.label}
-                        {d.isThisDevice && (
-                          <span style={ST.devHere}> this device</span>
-                        )}
-                      </div>
-                      <div style={ST.devMeta}>
-                        last synced {relativeTime(d.lastSeen)}
-                        {d.firstSeen ? ` · added ${relativeTime(d.firstSeen)}` : ""}
-                      </div>
-                    </div>
-                    <div style={ST.row}>
-                      <button
-                        className="miniBtn"
-                        onClick={() => {
-                          const next = window.prompt(
-                            "Name for this device",
-                            d.label
-                          );
-                          if (next) renameDevice(d.id, next);
+                {deviceList.map((d) =>
+                  renaming === d.id ? (
+                    <li key={d.id} style={ST.devRow}>
+                      <input
+                        style={{ ...ST.input, fontSize: 14, minWidth: 140 }}
+                        value={renameText}
+                        autoFocus
+                        aria-label={`Name for ${d.label}`}
+                        onChange={(ev) => setRenameText(ev.target.value)}
+                        onKeyDown={(ev) => {
+                          if (ev.key === "Enter") saveRename(d.id);
+                          if (ev.key === "Escape") setRenaming(null);
                         }}
-                      >
-                        rename
-                      </button>
-                      {!d.isThisDevice && (
+                      />
+                      <div style={ST.row}>
                         <button
                           className="miniBtn"
-                          onClick={() => forgetDevice(d.id)}
+                          disabled={!renameText.trim()}
+                          onClick={() => saveRename(d.id)}
                         >
-                          remove from list
+                          save name
                         </button>
-                      )}
-                    </div>
-                  </li>
-                ))}
+                        <button
+                          className="miniBtn"
+                          onClick={() => setRenaming(null)}
+                        >
+                          cancel
+                        </button>
+                      </div>
+                    </li>
+                  ) : (
+                    <li key={d.id} style={ST.devRow}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>
+                          {d.label}
+                          {d.isThisDevice && (
+                            <span style={ST.devHere}> this device</span>
+                          )}
+                        </div>
+                        <div style={ST.devMeta}>
+                          last synced {relativeTime(d.lastSeen)}
+                          {d.firstSeen
+                            ? ` · added ${relativeTime(d.firstSeen)}`
+                            : ""}
+                        </div>
+                      </div>
+                      <div style={ST.row}>
+                        <button
+                          className="miniBtn"
+                          onClick={() => {
+                            setRenaming(d.id);
+                            setRenameText(d.label);
+                          }}
+                        >
+                          rename
+                        </button>
+                        {!d.isThisDevice && (
+                          <button
+                            className="miniBtn"
+                            onClick={() => forgetDevice(d.id)}
+                          >
+                            remove from list
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  )
+                )}
               </ul>
             )}
           </div>
