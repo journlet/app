@@ -110,28 +110,17 @@ grant execute on function public.delete_account() to authenticated;
 -- Realtime: broadcast inserts so other devices pick changes up live. Guarded so
 -- re-running doesn't error on the table already being a publication member.
 --
--- `journals` is published too (28 Jul) so that reporting a lost device reaches
--- the surviving devices at once. Rotating the keeper key is already an UPDATE
--- to journals.wrapped_key, so the event that matters is one the devices can be
--- pushed directly — no revocation table, no extra column, and no Realtime
--- broadcast channel, which would have been a channel any session holder could
--- write to. RLS still limits both the row and the event to its owner.
---
--- The published row carries the wrapped key blob, which is ciphertext, and the
--- user id, which the recipient already knows. Nothing readable is added to the
--- wire that was not already there.
+-- Only journal_updates is published. `journals` was briefly published too, to
+-- push key changes at surviving devices, and that went with the machinery it
+-- served (28 Jul, see spec §6.1b). If a project already has it published, that
+-- is harmless: nothing subscribes to it. To tidy it up:
+--   alter publication supabase_realtime drop table public.journals;
 do $$
-declare
-  t text;
 begin
-  foreach t in array array['journal_updates', 'journals'] loop
-    if not exists (
-      select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and tablename = t
-    ) then
-      execute format(
-        'alter publication supabase_realtime add table public.%I', t
-      );
-    end if;
-  end loop;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'journal_updates'
+  ) then
+    alter publication supabase_realtime add table public.journal_updates;
+  end if;
 end $$;

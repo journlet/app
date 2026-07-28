@@ -19,27 +19,6 @@ export interface KeyRing {
   dataKey: CryptoKey;
   wrapped: WrappedDataKey;
   createdAt: number;
-  // Account whose remote journal this keeper key has actually unwrapped at
-  // least once. This is what separates "never linked" from "was linked and
-  // has been locked out": a fresh device and a revoked device both fail to
-  // unwrap the server blob, and only this field tells them apart. Absent on
-  // rings written before it existed, which reads as never-verified and so
-  // degrades to the ordinary needs-key prompt — the safe direction.
-  verifiedUserId?: string;
-  /**
-   * The keeper key this ring rotated away from, kept until the rotation is
-   * confirmed to have reached the server, then dropped.
-   *
-   * Rotation cannot be atomic: it writes here first so a failed publish leaves
-   * the old key working everywhere. But if the publish then fails, or the app
-   * is quit or crashes in between, this device is left holding a key the server
-   * has never heard of — indistinguishable from having been locked out, which
-   * means signing itself out of a journal it is the rightful holder of, with a
-   * new code that opens nothing. Keeping the superseded key makes that state
-   * recoverable without the user doing anything: the check falls back to it,
-   * finds the server never moved, and reverts.
-   */
-  supersededKeeperKey?: CryptoKey;
 }
 
 const openDb = (): Promise<IDBDatabase> =>

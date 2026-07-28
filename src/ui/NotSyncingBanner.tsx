@@ -11,9 +11,9 @@ import type { SyncStatus } from "../store/sync";
  *
  * A Record rather than a list of the states that warn, so adding a SyncStatus
  * fails the build until someone decides which side it falls on. That is not
- * hypothetical: "revoked" was added and the banner's condition was left as a
- * bare `=== "signed-out"`, so a device locked out by a lost-device report kept
- * saving locally and said so nowhere on the journal.
+ * hypothetical: a state was once added and this condition left as a bare
+ * `=== "signed-out"`, so a device that had stopped syncing said so nowhere on
+ * the journal itself.
  *
  * The states that do NOT warn divide into two kinds, both deliberate. Sync is
  * working ("synced", "connecting", "pending"), or the user has already been
@@ -25,7 +25,6 @@ import type { SyncStatus } from "../store/sync";
 const WARNS: Record<SyncStatus, boolean> = {
   disabled: false,
   "signed-out": true,
-  revoked: true,
   connecting: false,
   "needs-key": false,
   synced: false,

@@ -6,14 +6,10 @@ import NotSyncingBanner, { isNotSyncing } from "../../src/ui/NotSyncingBanner";
 afterEach(cleanup);
 
 describe("which states warn that writing reaches nothing", () => {
-  test("a device locked out by a lost-device report warns", () => {
-    // Regression: this was a bare === "signed-out", so a revoked device kept
-    // saving locally and said so nowhere on the journal itself. Keeping capture
-    // working is deliberate, which is exactly why the warning has to appear.
-    expect(isNotSyncing("revoked")).toBe(true);
-  });
-
-  test("an ordinary signed-out device warns", () => {
+  test("a signed-out device warns", () => {
+    // Including one signed out because another device pressed "lost a device":
+    // entries keep saving locally and reaching nothing, which is exactly the
+    // silent state this banner exists to break.
     expect(isNotSyncing("signed-out")).toBe(true);
   });
 

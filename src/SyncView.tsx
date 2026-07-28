@@ -13,7 +13,7 @@ import {
   getSessionEmail,
   getSyncError,
   getSyncStatus,
-  lostDevice,
+  signOutOtherDevices,
   isConfigured,
   onSyncStatus,
   provideJournalKey,
@@ -48,7 +48,6 @@ const relativeTime = (ms: number): string => {
 const STATUS_LABEL: Record<SyncStatus, string> = {
   disabled: "sync not configured in this build",
   "signed-out": "not signed in",
-  revoked: "signed out — a lost device was reported",
   connecting: "connecting…",
   "needs-key": "journal key needed",
   synced: "synced",
@@ -65,11 +64,6 @@ export default function SyncView() {
   const [lostDone, setLostDone] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
-  // Which way out of the revoked screen the user has chosen: re-link, or erase
-  // and start over. Null until they pick, so the screen is a fork rather than a
-  // list of everything they might have to do.
-  const [choice, setChoice] = useState<"relink" | "erase" | null>(null);
-  const [resetAck, setResetAck] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [keyCode, setKeyCode] = useState<string | null>(null);
@@ -161,25 +155,6 @@ export default function SyncView() {
     URL.revokeObjectURL(a.href);
   };
 
-  /**
-   * Take a typed journal key on a signed-out device: it cannot be applied yet,
-   * so acceptJournalKey holds it and the sign-in that follows applies it. Same
-   * route as the camera, so typing and scanning behave identically.
-   */
-  const holdTypedKey = async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const outcome = await acceptJournalKey(keyEntry.trim());
-      setScanHeld(outcome === "held");
-      setKeyEntry("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "That key did not work");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const submitKey = async () => {
     setError(null);
     setBusy(true);
@@ -196,8 +171,6 @@ export default function SyncView() {
   // ---- in-app QR scanning (the only linking path that works inside an
   // iOS home-screen app, where external links open in the browser) ----
   const [scanning, setScanning] = useState(false);
-  // A key scanned before signing in, held rather than applied.
-  const [scanHeld, setScanHeld] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -259,11 +232,10 @@ export default function SyncView() {
       if (!code) return;
       stopScan();
       setBusy(true);
-      // Links now if signed in, holds the key for after sign-in if not — see
-      // acceptJournalKey. A signed-out device scanning a key is an ordinary
-      // path, not a failure, and is the normal case after a lost-device report.
+      // The camera is only offered once signed in, so this links immediately.
+      // acceptJournalKey still handles the signed-out case by holding the key,
+      // which is the path a #jk= link takes.
       acceptJournalKey(code)
-        .then((outcome) => setScanHeld(outcome === "held"))
         .catch((e) =>
           setError(e instanceof Error ? e.message : "That key did not work")
         )
@@ -344,173 +316,14 @@ export default function SyncView() {
         </p>
       )}
 
-      {/* One explanation and two choices, nothing else until one is picked
-          (decision 28 Jul, Gary). The screen previously laid the whole
-          recovery out at once — an explanation, a camera, a sign-in form and an
-          erase box — which read as four things to work through rather than a
-          fork with two ways out. */}
-      {status === "revoked" && (
-        <div style={ST.keyBox}>
-          <div style={ST.keyLabel}>This device was signed out</div>
-          <p style={{ ...ST.p, marginTop: 0 }}>
-            A lost device was reported on another of your devices. The journal
-            key was changed, which signs out every other device including this
-            one. Nothing has been deleted: everything written here is still on
-            this device, and you can carry on writing.
-          </p>
-          {choice === null && (
-            <>
-              <p style={ST.p}>There are two ways on from here.</p>
-              <div style={ST.row}>
-                <button
-                  className="sheetBtn"
-                  style={{ width: "auto" }}
-                  onClick={() => setChoice("relink")}
-                >
-                  Re-link this device
-                </button>
-                <button
-                  className="sheetBtn isQuiet"
-                  style={{ width: "auto" }}
-                  onClick={() => setChoice("erase")}
-                >
-                  Erase and start over
-                </button>
-              </div>
-              <p style={{ ...ST.devMeta, marginTop: 8 }}>
-                Re-linking keeps what is on this device and reconnects it.
-                Erasing clears it and starts from what the server holds.
-              </p>
-            </>
-          )}
-          {choice === "relink" && (
-            <>
-              <p style={ST.p}>
-                Two steps. First the new journal key, from the device where you
-                reported the loss (Sync → show journal key). Then your email, to
-                sign back in.
-              </p>
-              {scanHeld || pendingJournalKey() ? (
-                <p style={{ ...ST.p, fontWeight: 600 }}>
-                  Step 1 done: the new journal key is held. Sign in below and
-                  this device re-links itself.
-                </p>
-              ) : (
-                <>
-                  {scanner("Step 1: scan the new journal key")}
-                  <input
-                    style={{ ...ST.input, width: "100%", marginBottom: 8 }}
-                    value={keyEntry}
-                    placeholder="or type it: J1-XXXX-XXXX-…"
-                    onChange={(ev) => setKeyEntry(ev.target.value)}
-                    onKeyDown={(ev) => ev.key === "Enter" && holdTypedKey()}
-                    aria-label="New journal key"
-                  />
-                  <button
-                    className="miniBtn"
-                    disabled={busy || keyEntry.trim().length < 10}
-                    onClick={holdTypedKey}
-                  >
-                    use this journal key
-                  </button>
-                </>
-              )}
-              <button
-                className="miniBtn"
-                style={{ marginTop: 10 }}
-                onClick={() => setChoice(null)}
-              >
-                back
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Choosing "Erase and start over" IS the intent, so this goes straight
-          to the warning and the acknowledgement rather than making the user ask
-          twice before being told what it costs. */}
-      {status === "revoked" && choice === "erase" && (
-        <div style={ST.keyBox}>
-          <div style={ST.keyLabel}>Erase and start over</div>
-          <>
-              <p style={{ ...ST.p, marginTop: 0 }}>
-                This erases the journal and keys held here, leaving the device
-                as it was before you first signed in. What reached the server
-                comes back when you sign in and re-link.
-              </p>
-              <p style={ST.p}>
-                Anything written on this device that had <em>not</em> synced
-                yet goes with it, and cannot be recovered — the server only ever
-                held what it was sent. If this device has been offline, re-link
-                first and erase later, once you can see everything is there.
-              </p>
-              <label style={ST.ackLabel}>
-                <input
-                  type="checkbox"
-                  checked={resetAck}
-                  onChange={(ev) => setResetAck(ev.target.checked)}
-                  style={{ marginTop: 3 }}
-                />
-                <span>
-                  I understand anything not yet synced from this device will be
-                  lost.
-                </span>
-              </label>
-              <div style={ST.row}>
-                <button
-                  className="sheetBtn isDanger"
-                  style={{ width: "auto" }}
-                  disabled={busy || !resetAck}
-                  onClick={async () => {
-                    setError(null);
-                    setBusy(true);
-                    try {
-                      await signOutAndWipe();
-                      window.location.reload();
-                    } catch (e) {
-                      setBusy(false);
-                      setError(
-                        e instanceof Error
-                          ? e.message
-                          : "Could not clear this device"
-                      );
-                    }
-                  }}
-                >
-                  Erase this device and start over
-                </button>
-                <button
-                  className="sheetBtn isQuiet"
-                  style={{ width: "auto" }}
-                  disabled={busy}
-                  onClick={() => {
-                    setChoice(null);
-                    setResetAck(false);
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-          </>
-        </div>
-      )}
-
-      {(status === "signed-out" ||
-        (status === "revoked" && choice === "relink")) &&
-        isConfigured() && (
+      {status === "signed-out" && isConfigured() && (
         <>
-          {/* Suppressed on the revoked screen: the box above has already said
-              what happened and what the two steps are, and repeating the
-              general pitch there was most of what made it feel like a wall. */}
-          {status === "signed-out" && (
-            <p style={ST.p}>
-              Sign in to sync your journal across devices. Everything is
-              end-to-end encrypted — the server only ever stores ciphertext.
-              Linking this device to an existing journal also happens after you
-              sign in: enter your journal key when asked.
-            </p>
-          )}
+          <p style={ST.p}>
+            Sign in to sync your journal across devices. Everything is
+            end-to-end encrypted — the server only ever stores ciphertext.
+            Linking this device to an existing journal also happens after you
+            sign in: enter your journal key when asked.
+          </p>
           {pendingJournalKey() && (
             <p style={{ ...ST.p, fontWeight: 600 }}>
               Journal key received from the QR scan — sign in below and this
@@ -765,35 +578,27 @@ export default function SyncView() {
           <div style={ST.keyBox}>
             <div style={ST.keyLabel}>Lost a device?</div>
             {lostDone ? (
-              <>
-                <p style={{ ...ST.p, marginTop: 0 }}>
-                  Done. Every other device has been signed out and your journal
-                  key has changed — the new one is shown above. Save it, and
-                  use it to re-link the devices you still have.
-                </p>
-                <p style={ST.p}>
-                  Your devices drop their sign-in as soon as they hear about
-                  this, which is immediate for any that are open now, and on
-                  next opening for the rest. The lost device can still reach
-                  the server until its sign-in token expires, which is a matter
-                  of minutes, so if it is genuinely in someone else's hands,
-                  change your email password too.
-                </p>
-              </>
+              <p style={{ ...ST.p, marginTop: 0 }}>
+                Done. Every other device has been signed out. They will ask you
+                to sign in again with your email; your journal key is unchanged,
+                so there is nothing to re-enter. The lost device can still reach
+                the server for a few minutes until its sign-in expires, so if it
+                is genuinely in someone else's hands, change your email password
+                too.
+              </p>
             ) : lostOpen ? (
               <>
                 <p style={{ ...ST.p, marginTop: 0 }}>
-                  This signs out every device except this one and issues a
-                  new journal key. Afterwards, re-link your remaining devices
-                  with the new key.
+                  This ends the sign-in on every device except this one. They
+                  keep their journals and their journal key, so getting one back
+                  is an ordinary sign-in with nothing to re-enter.
                 </p>
                 <p style={ST.p}>
-                  What it does not do: the lost device keeps the copy it
-                  already holds, because nothing can reach out and erase a
-                  device. It also keeps working for the few minutes its
-                  existing sign-in token remains valid, so entries it writes in
-                  that window can still arrive. After that it is locked out for
-                  good, and the old journal key stops opening the account.
+                  What it does not do: the lost device keeps the copy it already
+                  holds, because nothing can reach out and erase a device. It
+                  also keeps working for the few minutes its existing sign-in
+                  remains valid, so entries it writes in that window can still
+                  arrive.
                 </p>
                 <div style={ST.row}>
                   <button
@@ -804,22 +609,21 @@ export default function SyncView() {
                       setError(null);
                       setBusy(true);
                       try {
-                        const newCode = await lostDevice();
-                        setKeyCode(newCode);
+                        await signOutOtherDevices();
                         setLostDone(true);
                         setLostOpen(false);
                       } catch (e) {
                         setError(
                           e instanceof Error
                             ? e.message
-                            : "Could not complete the lost-device steps"
+                            : "Could not sign the other devices out"
                         );
                       } finally {
                         setBusy(false);
                       }
                     }}
                   >
-                    Sign out other devices and issue a new journal key
+                    Sign out all other devices
                   </button>
                   <button
                     className="sheetBtn isQuiet"

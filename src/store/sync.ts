@@ -16,12 +16,10 @@ import { touchThisDevice } from "./devices";
 import {
   decryptUpdate,
   encryptUpdate,
-  generateKeeperKey,
   LegacyPayloadError,
   unwrapDataKey,
   importJournalKeyCode,
   exportJournalKeyCode,
-  wrapDataKey,
 } from "../lib/crypto";
 import type { WrappedDataKey } from "../lib/crypto";
 import { ensureKeys, replaceKeyRing, wipeKeys } from "../lib/keystore";
@@ -39,7 +37,6 @@ import { DEFAULT_VOLUME, getActiveVolume, setActiveVolume } from "../lib/volume"
 export type SyncStatus =
   | "disabled" // no Supabase config in the build
   | "signed-out"
-  | "revoked" // a lost device was reported elsewhere; re-link to resume
   | "connecting"
   | "needs-key" // remote journal uses a different journal key
   | "synced"
@@ -295,75 +292,8 @@ doc.on("update", (update: Uint8Array, origin: unknown) => {
 
 // ---------- journal key handling ----------
 
-// Set when this device has been locked out by a lost-device report made on
-// another device. Sticky, because the local sign-out that follows fires the
-// auth listener, and "signed out" on its own would leave someone guessing why.
-let revoked = false;
-
-export const wasRevoked = (): boolean => revoked;
-
-/**
- * This device's keeper key used to open the remote journal and no longer
- * does, which means a lost device was reported somewhere else and the keeper
- * key was rotated. Give up the session at once rather than carrying on with a
- * token that outlives its authority: the access token is a signed JWT that
- * Postgres validates without consulting any revocation list, so `signOut({
- * scope: "others" })` on the reporting device does not stop this one — it
- * would keep reading and pushing until the token expired.
- *
- * The local journal is deliberately kept. This device is a surviving device,
- * not the lost one, and its content is wanted; it needs the new journal key
- * code to re-link, nothing more. Wiping here would turn "you must re-link"
- * into data loss.
- */
-const handleRevoked = async (): Promise<void> => {
-  revoked = true;
-  teardown();
-  // Local scope only. A global sign-out here would sign out every sibling
-  // device as a side effect of one of them noticing, and each would then do
-  // the same to the others — a revocation storm out of a single report.
-  try {
-    await supabase?.auth.signOut({ scope: "local" });
-  } catch {
-    // The session is already unusable; the status below is what matters.
-  }
-  setStatus("revoked");
-};
-
-/**
- * Key operations run one at a time.
- *
- * Rotating the keeper key is a read-modify-write spanning the local keystore and
- * the server, and it deliberately persists locally *first* (see lostDevice for
- * why). That leaves a window in which the two disagree by design: the server
- * still holds a blob the newly rotated keeper key cannot open. A key check
- * landing inside that window sees exactly the signature of revocation, so the
- * device doing the reporting concluded it had been revoked and signed itself
- * out — both devices logged out from one press of the button.
- *
- * Serialising removes the window rather than special-casing it: a check runs
- * either wholly before or wholly after a rotation, never inside one. Worth
- * preferring over an "am I rotating" flag, which would have to be consulted
- * correctly by every future caller to work.
- */
-let keyOps: Promise<unknown> = Promise.resolve();
-
-const serialisedKeyOp = <T>(fn: () => Promise<T>): Promise<T> => {
-  const next = keyOps.then(fn, fn);
-  // Swallowed on the chain only: a failed key op must not wedge every later
-  // one, while the caller still sees its own rejection through `next`.
-  keyOps = next.then(
-    () => undefined,
-    () => undefined
-  );
-  return next;
-};
-
 // Returns true when this device's keys are good for the remote journal
-const ensureJournalKeys = (): Promise<boolean> =>
-  serialisedKeyOp(checkJournalKeys);
-
-const checkJournalKeys = async (): Promise<boolean> => {
+const ensureJournalKeys = async (): Promise<boolean> => {
   if (!supabase || !ring) return false;
   const { data, error } = await supabase
     .from("journals")
@@ -385,65 +315,23 @@ const checkJournalKeys = async (): Promise<boolean> => {
       setStatus(navigator.onLine ? "pending" : "offline");
       return false;
     }
-    ring = { ...ring, verifiedUserId: session?.user.id };
-    await replaceKeyRing(ring);
     return true;
   }
   // Journal exists: can our keeper unwrap its data key?
-  const remoteWrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
   try {
+    const remoteWrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
     const dataKey = await unwrapDataKey(remoteWrapped, ring.keeperKey);
-    ring = {
-      ...ring,
-      dataKey,
-      wrapped: remoteWrapped,
-      verifiedUserId: session?.user.id,
-      // The current key opened the server's blob, so any rotation this ring was
-      // carrying is confirmed landed and the old key is no longer needed. Held
-      // no longer than that: it is a live credential for this journal.
-      supersededKeeperKey: undefined,
-    };
+    ring = { ...ring, dataKey, wrapped: remoteWrapped };
     await replaceKeyRing(ring);
     return true;
   } catch {
-    // Before concluding anything, try the key this ring rotated away from, if
-    // it is still carrying one. If *that* opens the blob, the server never
-    // moved: our own rotation did not land — a failed publish, or the app being
-    // quit between the local write and the publish. This device is the rightful
-    // holder and must not lock itself out over its own half-finished write, so
-    // it reverts to the key that agrees with the server. The new code stops
-    // working, which is correct, because it never became the account's key.
-    if (ring.supersededKeeperKey) {
-      try {
-        const dataKey = await unwrapDataKey(
-          remoteWrapped,
-          ring.supersededKeeperKey
-        );
-        ring = {
-          keeperKey: ring.supersededKeeperKey,
-          dataKey,
-          wrapped: remoteWrapped,
-          createdAt: ring.createdAt,
-          verifiedUserId: session?.user.id,
-        };
-        await replaceKeyRing(ring);
-        setError(
-          "The new journal key was not saved to the server, so your previous journal key is still the one in use. Other devices have been signed out. Please report the lost device again to change the key."
-        );
-        return true;
-      } catch {
-        // Neither key fits: fall through to the ordinary handling below.
-      }
-    }
-    // A fresh device and a locked-out device fail identically here — both hold
-    // a keeper key that will not open the server's blob. Only the record of
-    // having opened it before tells them apart, and they need opposite
-    // handling: one is asked for the journal key, the other has had its
-    // authority withdrawn and must stop syncing now.
-    if (ring.verifiedUserId && ring.verifiedUserId === session?.user.id) {
-      await handleRevoked();
-      return false;
-    }
+    // This device holds a keeper key that will not open the account's journal,
+    // so it needs the journal key from a device that can. One meaning, one
+    // response: ask for the key. Inferring anything more from this — that the
+    // key must have been *changed*, and therefore that this device has been
+    // locked out and should sign itself out — is what the retreat of 28 July
+    // removed, and it caused two worse bugs than the one it addressed. See
+    // spec §6.1b.
     setStatus("needs-key");
     return false;
   }
@@ -476,15 +364,8 @@ const adoptJournalKey = async (code: string): Promise<void> => {
   } catch {
     throw new Error("That journal key does not match this account's journal");
   }
-  ring = {
-    keeperKey,
-    dataKey,
-    wrapped,
-    createdAt: Date.now(),
-    verifiedUserId: session?.user.id,
-  };
+  ring = { keeperKey, dataKey, wrapped, createdAt: Date.now() };
   await replaceKeyRing(ring);
-  revoked = false; // re-linked with the new code: authority restored
 };
 
 /** Link this device: adopt the journal key code from another device, then sync. */
@@ -689,28 +570,6 @@ const subscribe = () => {
         if (row.payload) void applyRemotePayload(row.payload);
       }
     )
-    // The same change feed that carries journal content carries the answer to
-    // "has my authority been withdrawn" (Gary's question, 28 Jul): rotating
-    // the keeper key after a lost-device report IS an update to this row, so
-    // surviving devices can be pushed the event itself instead of waiting to
-    // notice. Awake devices react in about a second.
-    //
-    // The fast path, never the guarantee. A backgrounded PWA misses realtime
-    // events with no replay (see the visibilitychange note below), so the
-    // check on foreground remains the floor. And a hostile device can simply
-    // ignore the message — this makes honest devices prompt, it does not
-    // enforce anything. Enforcement is the token lifetime, which is why the
-    // JWT expiry setting matters (spec §6.2).
-    .on(
-      "postgres_changes",
-      {
-        event: "UPDATE",
-        schema: "public",
-        table: "journals",
-        filter: `user_id=eq.${session.user.id}`,
-      },
-      () => void ensureJournalKeys()
-    )
     .subscribe((state) => {
       if (state === "SUBSCRIBED") {
         // A re-join after a dropped socket means events were missed while
@@ -802,9 +661,8 @@ export const startSync = (): void => {
       // "Not signed in" would be true and useless — it would read as a
       // spontaneous logout with no cause given, which is precisely the
       // confusion this whole change exists to remove.
-      setStatus(revoked ? "revoked" : "signed-out");
+      setStatus("signed-out");
     } else if (s.user.id !== wasUser || !connectedUserId) {
-      revoked = false; // a new session supersedes the lockout
       void connect();
     }
   });
@@ -820,24 +678,9 @@ export const startSync = (): void => {
   // replay — catch up whenever the app comes back to the foreground
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !session) return;
-    if (connectedUserId) void checkKeyThenReconcile();
+    if (connectedUserId) void reconcile("visibility");
     else void connect();
   });
-};
-
-/**
- * On foreground, ask whether this device still has authority before syncing.
- *
- * reconcile() cannot answer that by itself. A lost-device report rotates the
- * keeper key but reuses the same data key, so every row still decrypts
- * perfectly on a device that has been locked out — sync looks entirely healthy
- * and the badge reads "synced". The only local evidence is the wrapped key on
- * the journal row, so it has to be read explicitly. One head-sized row read
- * per foreground.
- */
-const checkKeyThenReconcile = async (): Promise<void> => {
-  if (!(await ensureJournalKeys())) return; // sets revoked / needs-key
-  await reconcile("visibility");
 };
 
 export const signIn = async (email: string): Promise<void> => {
@@ -849,90 +692,29 @@ export const signIn = async (email: string): Promise<void> => {
   if (error) throw new Error(error.message);
 };
 
-// Lost-device response: revoke every other session, then rotate the keeper
-// key (rewrapping the SAME data key — no re-encryption of history). The
-// lost device keeps its local copy — nothing can remotely erase that — but
-// it can never download anything new, and the old journal key code stops
-// unlocking the account. Returns the new journal key code to save.
-export const lostDevice = (): Promise<string> => serialisedKeyOp(rotateForLoss);
-
 /**
- * Held inside serialisedKeyOp for its whole length, which is load-bearing rather
- * than tidy. The rotation below leaves the local keyring and the server
- * disagreeing for as long as the publish takes, and to a key check that gap is
- * indistinguishable from having been locked out — so an unserialised check
- * landing in it made the reporting device sign itself out, taking every device
- * down from one press of the button.
+ * Lost-device response: end every other device's session. That is the whole
+ * operation (simplified 28 July, after the elaborate version caused worse
+ * problems than it solved — spec §6.1b).
+ *
+ * This is the only thing that actually stops a device you no longer hold. Its
+ * session is what lets it reach the server, and it already has the data key
+ * locally, so nothing done to the *key* takes anything away from it. Rotating
+ * the journal key alongside this was the previous behaviour, and all it added
+ * for the common case was making every surviving device re-link.
+ *
+ * What it does not do, and cannot: reach the lost device. It keeps the copy it
+ * holds, and it keeps working until its access token expires, because a signed
+ * JWT cannot be revoked. That window is the real boundary, which is why the
+ * project's JWT expiry setting matters (§6.2).
+ *
+ * The surviving devices keep their journal key, so getting one back is an
+ * ordinary sign-in with nothing to re-enter.
  */
-const rotateForLoss = async (): Promise<string> => {
+export const signOutOtherDevices = async (): Promise<void> => {
   if (!supabase || !session) throw new Error("Not signed in");
-  const previous = (ring ??= await ensureKeys());
-  const { error: soErr } = await supabase.auth.signOut({ scope: "others" });
-  if (soErr) throw new Error(soErr.message);
-
-  // Order matters: persist the new keeper key locally BEFORE publishing it.
-  // If the local write fails we abort having changed nothing anywhere — the
-  // old key still works on every device. Publishing first would leave the
-  // server holding a blob no surviving device can unwrap, with the only key
-  // that opens it discarded in memory and every other device already signed
-  // out: sync stuck in needs-key with no code to re-link from. Persisting
-  // first also means the code returned below is never the only copy —
-  // getJournalKeyCode() reads it back from the keyring at any time.
-  const keeperKey = await generateKeeperKey();
-  const wrapped = await wrapDataKey(previous.dataKey, keeperKey);
-  const rotated: KeyRing = {
-    keeperKey,
-    dataKey: previous.dataKey,
-    wrapped,
-    createdAt: Date.now(),
-    // Carried over: this device is the one doing the reporting and has opened
-    // the journal. Dropping the marker here would make a later mismatch on
-    // this device look like a first link rather than a lockout.
-    verifiedUserId: session.user.id,
-    // Kept until the publish is confirmed. If this device is quit or crashes
-    // between here and the next few lines, the persisted ring holds a key the
-    // server has never seen, and without this it would read that as having been
-    // locked out and sign itself out of its own journal. See keystore.KeyRing.
-    supersededKeeperKey: previous.keeperKey,
-  };
-  await replaceKeyRing(rotated);
-  ring = rotated;
-
-  // `.select()` so the affected rows come back. Without it a matched-nothing
-  // update is indistinguishable from a successful one: no error is returned,
-  // and the user would be handed a new journal key that opens nothing while the
-  // server quietly kept the old blob. That happens if the journals row is
-  // missing or RLS excludes it, neither of which is exotic.
-  const { data, error } = await supabase
-    .from("journals")
-    .update({ wrapped_key: wrappedToJson(wrapped) })
-    .eq("user_id", session.user.id)
-    .select("user_id");
-  if (error || !data || data.length === 0) {
-    // The server still holds the old blob, so put the old ring back and let the
-    // old code keep working everywhere. If this restore itself fails, the
-    // superseded key above makes the next check recover instead.
-    try {
-      await replaceKeyRing(previous);
-      ring = previous;
-    } catch {
-      // fall through to the thrown error
-    }
-    // Note what did and did not happen. The sign-out of the other devices has
-    // already gone through and cannot be undone, so reporting this as "nothing
-    // happened" would be false and would leave someone wondering why their
-    // other devices had dropped out.
-    throw new Error(
-      `Your other devices have been signed out, but the journal key could not be changed${
-        error ? `: ${error.message}` : " — the server did not accept the update"
-      }. Your existing journal key still works. Try reporting the lost device again.`
-    );
-  }
-  // Confirmed on the server, so the old key is no longer needed anywhere.
-  const confirmed: KeyRing = { ...rotated, supersededKeeperKey: undefined };
-  await replaceKeyRing(confirmed);
-  ring = confirmed;
-  return exportJournalKeyCode(keeperKey);
+  const { error } = await supabase.auth.signOut({ scope: "others" });
+  if (error) throw new Error(error.message);
 };
 
 // Sign in by typing the 6-digit code from the email — the only way to get
@@ -952,8 +734,8 @@ export const verifyEmailCode = async (
 };
 
 // Routine sign-out of THIS device only. The default scope is global, which
-// would silently sign out every other device too — see lostDevice() for the
-// deliberate "others" case.
+// would silently sign out every other device too — see signOutOtherDevices()
+// for the deliberate "others" case.
 export const signOut = async (): Promise<void> => {
   if (!supabase) return;
   teardown();
@@ -991,10 +773,6 @@ const wipeThisDevice = async (): Promise<void> => {
 export const signOutAndWipe = async (): Promise<void> => {
   teardown();
   clearPendingKey();
-  // After a wipe this is a device with no journal and no keys, which is a fresh
-  // device rather than a locked-out one. Leaving the flag set would keep
-  // explaining a lockout that no longer applies to anything held here.
-  revoked = false;
   if (supabase) {
     try {
       // This device only: wiping one device must not sign the others out.
