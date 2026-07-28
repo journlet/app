@@ -16,6 +16,7 @@ import {
   decryptUpdate,
   encryptUpdate,
   generateKeeperKey,
+  LegacyPayloadError,
   unwrapDataKey,
   importJournalKeyCode,
   exportJournalKeyCode,
@@ -140,10 +141,18 @@ const teardown = () => {
 const pushPayload = async (update: Uint8Array): Promise<boolean> => {
   if (!supabase || !session || !ring) return false;
   try {
-    const payload = b64encode(await encryptUpdate(ring.dataKey, update));
+    // One read of the active volume, used for both the AAD and the row, so the
+    // binding can never disagree with where the row actually lands.
+    const volume = getActiveVolume();
+    const payload = b64encode(
+      await encryptUpdate(ring.dataKey, update, {
+        userId: session.user.id,
+        volume,
+      })
+    );
     const { error } = await supabase
       .from("journal_updates")
-      .insert({ payload, volume: getActiveVolume() });
+      .insert({ payload, volume });
     if (error) throw new Error(error.message);
     // the server now has it — reflect that in the shadow immediately
     Y.applyUpdate(ensureShadow(), update);
@@ -245,15 +254,61 @@ export const countUpdates = async (): Promise<number | null> => {
 
 // ---------- reconcile + realtime ----------
 
-const applyRemotePayload = async (payloadB64: string): Promise<void> => {
-  if (!ring) return;
+// A row that will not decrypt is either an expected leftover from the retired
+// payload format or a genuine problem — tampering, truncation, corruption. The
+// two must not look the same. Legacy rows are counted and ignored; anything
+// else is counted and surfaced, because a journal that quietly drops content
+// while the badge reads "synced" is worse than one that admits a problem.
+interface SkipTally {
+  legacy: number;
+  undecryptable: number;
+}
+
+const newTally = (): SkipTally => ({ legacy: 0, undecryptable: 0 });
+
+const decryptRow = async (
+  payloadB64: string,
+  tally: SkipTally
+): Promise<Uint8Array | null> => {
+  if (!ring || !session) return null;
   try {
-    const update = await decryptUpdate(ring.dataKey, b64decode(payloadB64));
-    Y.applyUpdate(doc, update, REMOTE_ORIGIN);
-  } catch {
-    // Undecryptable row (corruption or foreign key) — skip rather than crash
-    console.warn("journlet: skipped an undecryptable update");
+    // Expected values, never the row's own: a blob moved between volumes or
+    // replayed into another account must fail here.
+    return await decryptUpdate(ring.dataKey, b64decode(payloadB64), {
+      userId: session.user.id,
+      volume: getActiveVolume(),
+    });
+  } catch (e) {
+    if (e instanceof LegacyPayloadError) tally.legacy += 1;
+    else tally.undecryptable += 1;
+    return null;
   }
+};
+
+const reportTally = (tally: SkipTally): void => {
+  if (tally.undecryptable > 0) {
+    setError(
+      `${tally.undecryptable} synced ${
+        tally.undecryptable === 1 ? "update" : "updates"
+      } could not be decrypted and ${
+        tally.undecryptable === 1 ? "was" : "were"
+      } skipped. Some recent writing may be missing from this device.`
+    );
+  }
+  if (tally.legacy > 0) {
+    // Not a fault: these are pre-AAD rows that are never read again. Logged
+    // rather than surfaced so the migration is visible without alarming.
+    console.info(
+      `journlet: ignored ${tally.legacy} update(s) in the retired payload format`
+    );
+  }
+};
+
+const applyRemotePayload = async (payloadB64: string): Promise<void> => {
+  const tally = newTally();
+  const update = await decryptRow(payloadB64, tally);
+  if (update) Y.applyUpdate(doc, update, REMOTE_ORIGIN);
+  reportTally(tally);
 };
 
 let reconciling = false;
@@ -262,6 +317,7 @@ const reconcile = async (): Promise<boolean> => {
   if (!supabase || !ring || reconciling) return false;
   reconciling = true;
   const sh = ensureShadow();
+  const tally = newTally();
   try {
     // Fetch only rows this session hasn't seen yet
     for (;;) {
@@ -274,26 +330,31 @@ const reconcile = async (): Promise<boolean> => {
         .limit(PAGE);
       if (error) throw new Error(error.message);
       for (const row of data ?? []) {
-        try {
-          const update = await decryptUpdate(
-            ring.dataKey,
-            b64decode(row.payload as string)
-          );
+        const update = await decryptRow(row.payload as string, tally);
+        if (update) {
+          // The shadow only ever learns about updates we could actually read,
+          // which is what makes the migration below work by itself.
           Y.applyUpdate(sh, update);
           Y.applyUpdate(doc, update, REMOTE_ORIGIN);
-        } catch {
-          console.warn("journlet: skipped an undecryptable update");
         }
         lastMaxId = Math.max(lastMaxId, row.id as number);
       }
       if (!data || data.length < PAGE) break;
     }
-    // Push whatever the server is missing (offline edits, first sync)
+    // Push whatever the server is missing (offline edits, first sync).
+    //
+    // This is also the entire migration off the retired payload format. On the
+    // first sync after the upgrade every stored row is legacy, so the shadow
+    // stays empty, so this diff is the whole local journal and goes up as a
+    // single v2 payload. Nothing has to read the old rows to convert them, and
+    // because Yjs updates merge idempotently it does not matter how many
+    // devices do this or in what order.
     const diff = Y.encodeStateAsUpdate(doc, Y.encodeStateVector(sh));
     if (diff.length > 2) {
       const ok = await pushPayload(diff);
       if (!ok) return false;
     }
+    reportTally(tally);
     dirty = false;
     if (connectedUserId) setStatus("synced");
     return true;

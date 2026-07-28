@@ -8,9 +8,28 @@
 // passphrase could be added later without re-encrypting content.
 
 const ALG = "AES-GCM";
-const PAYLOAD_VERSION = 1;
 const IV_BYTES = 12;
 const KEY_BYTES = 32;
+
+/**
+ * Update payload format. Version 2 binds each payload to the account and volume
+ * it belongs to via AES-GCM additional authenticated data; version 1 did not.
+ *
+ * Version 1 is not decryptable by this code and never will be. Supporting both
+ * would reintroduce exactly the hole the AAD closes: the version byte sits
+ * outside the authenticated envelope, so anyone able to write a row could flip
+ * a 2 back to a 1 and have the client decrypt it with no binding checked at
+ * all. A v1 payload therefore raises LegacyPayloadError and is skipped.
+ *
+ * Existing v1 rows are not migrated in place — the update log is append-only by
+ * design. They are simply never read again: on first sync after the upgrade the
+ * client finds nothing it can decrypt, so the ordinary reconcile push writes the
+ * whole local journal back as a single v2 payload. See store/sync.ts.
+ */
+export const PAYLOAD_VERSION = 2;
+
+/** The wrapped-data-key blob format, unchanged by the AAD work. */
+const WRAP_VERSION = 1;
 
 // ---------- key generation ----------
 
@@ -43,7 +62,7 @@ export const wrapDataKey = async (
     name: ALG,
     iv,
   });
-  return { v: PAYLOAD_VERSION, iv, blob: new Uint8Array(blob) };
+  return { v: WRAP_VERSION, iv, blob: new Uint8Array(blob) };
 };
 
 export const unwrapDataKey = (
@@ -63,13 +82,54 @@ export const unwrapDataKey = (
 // ---------- CRDT update payloads ----------
 // Layout: [version:1][iv:12][ciphertext]
 
+/**
+ * Where a payload belongs. Encryption and decryption must be given the values
+ * the caller *expects*, never the ones the server supplied alongside the row —
+ * that is the whole point. A blob moved to another volume, replayed into
+ * another account, or handed back under a different version fails to decrypt.
+ */
+export interface PayloadContext {
+  userId: string;
+  volume: string;
+}
+
+/**
+ * A payload in the retired version 1 format. Expected on any account that
+ * synced before the AAD change; distinct from a decryption failure because the
+ * two mean completely different things to the user.
+ */
+export class LegacyPayloadError extends Error {
+  constructor(version: number) {
+    super(`Payload is in retired format version ${version}`);
+    this.name = "LegacyPayloadError";
+  }
+}
+
+// Canonical, unambiguous, and versioned. The version is baked in rather than
+// read from the payload, so the version byte outside the envelope cannot be
+// used to select a weaker binding: a flipped byte is either refused as legacy
+// or fails authentication.
+const additionalData = (ctx: PayloadContext): Uint8Array =>
+  new TextEncoder().encode(
+    `journlet/${PAYLOAD_VERSION}\nuser=${ctx.userId}\nvolume=${ctx.volume}`
+  );
+
 export const encryptUpdate = async (
   dataKey: CryptoKey,
-  update: Uint8Array
+  update: Uint8Array,
+  ctx: PayloadContext
 ): Promise<Uint8Array> => {
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const ct = new Uint8Array(
-    await crypto.subtle.encrypt({ name: ALG, iv }, dataKey, update as BufferSource)
+    await crypto.subtle.encrypt(
+      {
+        name: ALG,
+        iv,
+        additionalData: additionalData(ctx) as BufferSource,
+      },
+      dataKey,
+      update as BufferSource
+    )
   );
   const out = new Uint8Array(1 + IV_BYTES + ct.length);
   out[0] = PAYLOAD_VERSION;
@@ -80,15 +140,21 @@ export const encryptUpdate = async (
 
 export const decryptUpdate = async (
   dataKey: CryptoKey,
-  payload: Uint8Array
+  payload: Uint8Array,
+  ctx: PayloadContext
 ): Promise<Uint8Array> => {
+  if (payload[0] < PAYLOAD_VERSION) throw new LegacyPayloadError(payload[0]);
   if (payload[0] !== PAYLOAD_VERSION)
     throw new Error(`Unsupported payload version ${payload[0]}`);
   const iv = payload.slice(1, 1 + IV_BYTES);
   const ct = payload.slice(1 + IV_BYTES);
   return new Uint8Array(
     await crypto.subtle.decrypt(
-      { name: ALG, iv: iv as BufferSource },
+      {
+        name: ALG,
+        iv: iv as BufferSource,
+        additionalData: additionalData(ctx) as BufferSource,
+      },
       dataKey,
       ct as BufferSource
     )
