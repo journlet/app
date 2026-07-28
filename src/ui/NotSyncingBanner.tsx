@@ -4,6 +4,37 @@
 // device only and never reach the server. This banner makes that state
 // impossible to miss and offers a plainly labelled route to sign back in.
 
+import type { SyncStatus } from "../store/sync";
+
+/**
+ * Which sync states mean "writing here reaches nothing".
+ *
+ * A Record rather than a list of the states that warn, so adding a SyncStatus
+ * fails the build until someone decides which side it falls on. That is not
+ * hypothetical: "revoked" was added and the banner's condition was left as a
+ * bare `=== "signed-out"`, so a device locked out by a lost-device report kept
+ * saving locally and said so nowhere on the journal.
+ *
+ * The states that do NOT warn divide into two kinds, both deliberate. Sync is
+ * working ("synced", "connecting", "pending"), or the user has already been
+ * told in a way this banner would only repeat: "offline" is temporary and
+ * expected, "needs-key" and "disabled" have their own explanations on the Sync
+ * screen, and "disabled" is a build without sync at all, where a warning would
+ * be noise on every launch forever.
+ */
+const WARNS: Record<SyncStatus, boolean> = {
+  disabled: false,
+  "signed-out": true,
+  revoked: true,
+  connecting: false,
+  "needs-key": false,
+  synced: false,
+  pending: false,
+  offline: false,
+};
+
+export const isNotSyncing = (s: SyncStatus): boolean => WARNS[s];
+
 interface NotSyncingBannerProps {
   onSignIn: () => void;
 }

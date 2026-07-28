@@ -9,6 +9,7 @@ import {
   PENDING_TTL_MS,
   clearPendingKey,
   pendingJournalKey,
+  stashKey,
   stashKeyFromUrl,
   sweepPendingKey,
 } from "../src/lib/pendingKey";
@@ -131,5 +132,30 @@ describe("clearPendingKey", () => {
     stashKeyFromUrl();
     clearPendingKey();
     expect(pendingJournalKey()).toBeNull();
+  });
+});
+
+describe("stashKey", () => {
+  // A device that has been signed out can scan a QR but cannot use it: reading
+  // the wrapped data key needs a session. So the scan is held and applied after
+  // sign-in, which is the order that suits someone holding two devices.
+  it("holds a scanned key for after sign-in", () => {
+    stashKey(CODE);
+    expect(pendingJournalKey()).toBe(CODE);
+  });
+
+  it("expires like a key taken off the URL, since it is the same credential", () => {
+    vi.useFakeTimers();
+    stashKey(CODE);
+    vi.advanceTimersByTime(PENDING_TTL_MS + 1000);
+
+    expect(pendingJournalKey()).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("replaces an earlier key rather than leaving two", () => {
+    stashKey("J1-OLDOLDOLD");
+    stashKey(CODE);
+    expect(pendingJournalKey()).toBe(CODE);
   });
 });

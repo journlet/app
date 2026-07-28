@@ -15,6 +15,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
 import {
+  exportJournalKeyCode,
   generateDataKey,
   generateKeeperKey,
   wrapDataKey,
@@ -301,6 +302,48 @@ describe("how the news reaches a device", () => {
 
     expect(sync.getSyncStatus()).not.toBe("revoked");
     expect(signOutScopes).toEqual([]);
+  });
+});
+
+describe("taking a journal key on a device with no session", () => {
+  // After a lost-device report every surviving device is signed out, so this is
+  // the normal state in which someone scans the new key off another screen.
+  test("holds the key instead of failing", async () => {
+    const sync = await boot({
+      verifiedUserId: USER_ID,
+      serverKey: wrappedToJson(rotatedWrapped),
+    });
+    expect(sync.getSyncStatus()).toBe("revoked");
+
+    const outcome = await sync.acceptJournalKey("J1-SCANNED-KEY");
+
+    expect(outcome).toBe("held");
+    expect(localStorage.getItem("journlet-pending-journal-key")).toContain(
+      "J1-SCANNED-KEY"
+    );
+  });
+
+  test("links immediately when there is a session", async () => {
+    const sync = await boot({ verifiedUserId: USER_ID });
+    expect(sync.getSyncStatus()).toBe("synced");
+
+    // The code for the key the server's blob is actually wrapped with, which is
+    // what scanning a valid QR hands over.
+    const outcome = await sync.acceptJournalKey(
+      await exportJournalKeyCode(keeperKey)
+    );
+
+    expect(outcome).toBe("linked");
+    // Nothing left holding a plaintext keeper key on disk once it is used.
+    expect(localStorage.getItem("journlet-pending-journal-key")).toBeNull();
+  });
+
+  test("a wrong key still reports failure rather than being held", async () => {
+    // Holding whatever was scanned would turn a mis-scan into a silent no-op
+    // that only surfaces as a failed link much later.
+    const sync = await boot({ verifiedUserId: USER_ID });
+
+    await expect(sync.acceptJournalKey("J1-NOTTHEKEY")).rejects.toThrow();
   });
 });
 

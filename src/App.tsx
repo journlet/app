@@ -75,7 +75,7 @@ import UndoToast from "./ui/UndoToast";
 import SpreadView from "./ui/SpreadView";
 import Header from "./ui/Header";
 import CaptureLauncher from "./ui/CaptureLauncher";
-import NotSyncingBanner from "./ui/NotSyncingBanner";
+import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
 import { buildSpreadData } from "./ui/spreadData";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
@@ -837,7 +837,12 @@ export default function App() {
             <span style={{ fontSize: 12.5, lineHeight: "13px" }}>Reload ›</span>
           </button>
         )}
-        {syncStatus === "signed-out" && hasLocalContent && view !== "sync" && (
+        {/* Which states warn is decided in NotSyncingBanner, where a Record
+            over SyncStatus makes a new state fail the build until someone
+            chooses. This is also the deliberate answer to journalling for
+            weeks into a device that is not syncing: capture keeps working
+            (§6.1b), so the state has to be impossible to miss instead. */}
+        {isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner onSignIn={() => setView("sync")} />
         )}
         {!loaded && <div style={S.empty}>opening journal…</div>}

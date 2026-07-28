@@ -29,6 +29,7 @@ import type { KeyRing } from "../lib/keystore";
 import {
   clearPendingKey,
   pendingJournalKey,
+  stashKey,
   stashKeyFromUrl,
   sweepPendingKey,
 } from "../lib/pendingKey";
@@ -409,6 +410,32 @@ export const provideJournalKey = async (code: string): Promise<void> => {
   await replaceKeyRing(ring);
   revoked = false; // re-linked with the new code: authority restored
   await connect();
+};
+
+/**
+ * Take a journal key that has just arrived, from a QR scan or a paste, and do
+ * whatever is possible with it now.
+ *
+ * Signed in, it links immediately. Signed out, it is held for after sign-in,
+ * because using a key means reading the wrapped data key off the server and
+ * that needs a session. Both are ordinary paths rather than one being an error:
+ * a device locked out by a lost-device report has no session by definition, and
+ * scanning before signing in is the natural order when the key is on a screen
+ * in front of you and the email has yet to arrive.
+ *
+ * Lives here rather than in the view so the decision is testable: the scanner's
+ * decode loop needs a real canvas and cannot run under jsdom at all, which had
+ * left this branch uncovered.
+ */
+export const acceptJournalKey = async (
+  code: string
+): Promise<"linked" | "held"> => {
+  if (!session) {
+    stashKey(code);
+    return "held";
+  }
+  await provideJournalKey(code);
+  return "linked";
 };
 
 export const getJournalKeyCode = async (): Promise<string> => {
@@ -844,6 +871,10 @@ const wipeThisDevice = async (): Promise<void> => {
 export const signOutAndWipe = async (): Promise<void> => {
   teardown();
   clearPendingKey();
+  // After a wipe this is a device with no journal and no keys, which is a fresh
+  // device rather than a locked-out one. Leaving the flag set would keep
+  // explaining a lockout that no longer applies to anything held here.
+  revoked = false;
   if (supabase) {
     try {
       // This device only: wiping one device must not sign the others out.

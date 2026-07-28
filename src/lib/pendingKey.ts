@@ -69,18 +69,31 @@ export const pendingJournalKey = (): string | null => {
 };
 
 /**
+ * Hold a key that cannot be applied yet.
+ *
+ * Scanning a QR code needs no session, but *using* the key does: the wrapped
+ * data key has to be read from the server before anything can be unwrapped. So
+ * a device that has been signed out — including one locked out by a lost-device
+ * report — can scan first and sign in second, which is the natural order when
+ * the key is on a screen in front of you and the email is not.
+ */
+export const stashKey = (code: string): void => {
+  try {
+    const record: PendingKeyRecord = { k: code, t: Date.now() };
+    localStorage.setItem(PENDING_KEY, JSON.stringify(record));
+  } catch {
+    // storage unavailable — manual entry still works
+  }
+};
+
+/**
  * Take a journal key off the URL fragment, if one is there, and stash it.
  * The fragment is stripped from the address bar either way.
  */
 export const stashKeyFromUrl = (): void => {
   const m = window.location.hash.match(/jk=([A-Za-z0-9-]+)/);
   if (!m) return;
-  try {
-    const record: PendingKeyRecord = { k: m[1], t: Date.now() };
-    localStorage.setItem(PENDING_KEY, JSON.stringify(record));
-  } catch {
-    // storage unavailable — manual entry still works
-  }
+  stashKey(m[1]);
   history.replaceState(
     null,
     "",

@@ -17,6 +17,7 @@ const EMAIL = "gary@example.com";
 let status = "synced";
 let signedIn = true;
 const lostDevice = vi.fn(async () => "J1-NEWKEY");
+const signIn = vi.fn(async () => {});
 
 vi.mock("../../src/store/sync", () => ({
   DeviceNotClearedError: class extends Error {},
@@ -33,7 +34,7 @@ vi.mock("../../src/store/sync", () => ({
     return () => {};
   },
   provideJournalKey: vi.fn(),
-  signIn: vi.fn(),
+  signIn: (...a: unknown[]) => signIn(...(a as [])),
   verifyEmailCode: vi.fn(),
 }));
 
@@ -115,8 +116,94 @@ describe("a device that has been locked out", () => {
   test("tells you how to get back: sign in, then the new key", () => {
     render(<SyncView />);
 
-    expect(screen.getByText(/new journal key/i)).toBeTruthy();
+    expect(
+      screen.getByText(/enter the new journal key\s+when asked/i)
+    ).toBeTruthy();
     expect(screen.getByLabelText(/Email address/i)).toBeTruthy();
+  });
+
+  test("offers the camera, not just typing the key in", () => {
+    // The key is on another device's screen, and on an installed iOS app the
+    // QR is the only linking path that does not involve retyping 40 characters.
+    render(<SyncView />);
+
+    expect(
+      screen.getByText(/Scan the new journal key with the camera/i)
+    ).toBeTruthy();
+  });
+
+  test("offers erasing this device, but does not push you towards it", () => {
+    // Keeping the device costs nothing: entries still save locally and merge on
+    // re-link. Erasing is the exception, so it sits behind its own step.
+    render(<SyncView />);
+
+    expect(screen.getByText(/erase this device and start over/i)).toBeTruthy();
+    expect(screen.queryByText(/^Erase this device and start over$/)).toBeNull();
+  });
+
+  test("erasing warns that unsynced writing goes with it, and gates on that", () => {
+    // "A re-link would bring it back" is only true of what reached the server.
+    // Anything this device wrote offline and never pushed is here alone.
+    render(<SyncView />);
+    fireEvent.click(screen.getByText(/erase this device and start over/i));
+
+    // The warning wraps "not" in <em>, so match around it.
+    expect(screen.getByText(/cannot be recovered/i)).toBeTruthy();
+    expect(screen.getByText(/not yet synced from this device/i)).toBeTruthy();
+    const confirm = screen.getByText(/^Erase this device and start over$/);
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("getting back in on a device that was signed out", () => {
+  // Reporting a lost device drops every surviving device into the sign-in
+  // flow at once, so this step stops being a rare once-per-device event and
+  // becomes the recovery path for the whole account. It cannot be a dead end.
+  beforeEach(() => {
+    status = "revoked";
+    signedIn = false;
+  });
+
+  const requestCode = () => {
+    fireEvent.change(screen.getByLabelText(/Email address/i), {
+      target: { value: "gary@example.com" },
+    });
+    fireEvent.click(screen.getByText(/Send sign-in link/i));
+  };
+
+  test("says which address the code went to", async () => {
+    // Otherwise a typo is invisible: you wait for an email that was sent
+    // somewhere else, with nothing on screen to tell you so.
+    render(<SyncView />);
+    requestCode();
+
+    expect(await screen.findByText("gary@example.com")).toBeTruthy();
+  });
+
+  test("offers a way back to the address field", async () => {
+    render(<SyncView />);
+    requestCode();
+    expect(await screen.findByLabelText(/Sign-in code/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByText(/use a different email address/i));
+
+    expect(screen.getByLabelText(/Email address/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/Sign-in code/i)).toBeNull();
+  });
+
+  test("offers a new code without leaving the step", async () => {
+    render(<SyncView />);
+    requestCode();
+    await screen.findByLabelText(/Sign-in code/i);
+    expect(signIn).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByText(/send a new code/i));
+
+    expect(signIn).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText(/Sign-in code/i)).toBeTruthy();
   });
 });
 

@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
 import {
+  acceptJournalKey,
   deleteAccount,
   DeviceNotClearedError,
   getJournalKeyCode,
@@ -64,6 +65,8 @@ export default function SyncView() {
   const [lostDone, setLostDone] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetAck, setResetAck] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [keyCode, setKeyCode] = useState<string | null>(null);
@@ -171,6 +174,8 @@ export default function SyncView() {
   // ---- in-app QR scanning (the only linking path that works inside an
   // iOS home-screen app, where external links open in the browser) ----
   const [scanning, setScanning] = useState(false);
+  // A key scanned before signing in, held rather than applied.
+  const [scanHeld, setScanHeld] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -232,7 +237,11 @@ export default function SyncView() {
       if (!code) return;
       stopScan();
       setBusy(true);
-      provideJournalKey(code)
+      // Links now if signed in, holds the key for after sign-in if not — see
+      // acceptJournalKey. A signed-out device scanning a key is an ordinary
+      // path, not a failure, and is the normal case after a lost-device report.
+      acceptJournalKey(code)
+        .then((outcome) => setScanHeld(outcome === "held"))
         .catch((e) =>
           setError(e instanceof Error ? e.message : "That key did not work")
         )
@@ -243,6 +252,42 @@ export default function SyncView() {
       scanTimer.current = null;
     };
   }, [scanning, stopScan]);
+
+  // Shared by the needs-key and revoked screens. Both need the camera for the
+  // same reason — the key is on another device's screen — and duplicating the
+  // <video> wiring would risk the two drifting apart.
+  const scanner = (label: string) =>
+    scanning ? (
+      <div style={{ marginBottom: 10 }}>
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          style={{
+            width: "100%",
+            maxWidth: 320,
+            borderRadius: 10,
+            border: `1px solid ${LINE}`,
+            display: "block",
+          }}
+        />
+        <button
+          className="sheetBtn isQuiet"
+          style={{ maxWidth: 320 }}
+          onClick={stopScan}
+        >
+          Cancel scanning
+        </button>
+      </div>
+    ) : (
+      <button
+        className="sheetBtn"
+        style={{ maxWidth: 320, marginBottom: 10 }}
+        onClick={() => void startScan()}
+      >
+        {label}
+      </button>
+    );
 
   const signedIn =
     status !== "signed-out" && status !== "disabled" && getSessionEmail();
@@ -291,6 +336,98 @@ export default function SyncView() {
             when asked. You will find it on the device where you reported the
             loss, under Sync → show journal key.
           </p>
+          {scanHeld ? (
+            <p style={{ ...ST.p, fontWeight: 600 }}>
+              New journal key scanned and held. Sign in below and this device
+              re-links itself.
+            </p>
+          ) : (
+            <>
+              <p style={ST.p}>
+                Quickest: scan the QR code shown beside that key.
+              </p>
+              {scanner("Scan the new journal key with the camera")}
+            </>
+          )}
+        </div>
+      )}
+
+      {status === "revoked" && (
+        <div style={ST.keyBox}>
+          <div style={ST.keyLabel}>Or start over on this device</div>
+          {resetOpen ? (
+            <>
+              <p style={{ ...ST.p, marginTop: 0 }}>
+                This erases the journal and keys held here, leaving the device
+                as it was before you first signed in. What reached the server
+                comes back when you sign in and re-link.
+              </p>
+              <p style={ST.p}>
+                Anything written on this device that had <em>not</em> synced
+                yet goes with it, and cannot be recovered — the server only ever
+                held what it was sent. If this device has been offline, re-link
+                first and erase later, once you can see everything is there.
+              </p>
+              <label style={ST.ackLabel}>
+                <input
+                  type="checkbox"
+                  checked={resetAck}
+                  onChange={(ev) => setResetAck(ev.target.checked)}
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  I understand anything not yet synced from this device will be
+                  lost.
+                </span>
+              </label>
+              <div style={ST.row}>
+                <button
+                  className="sheetBtn isDanger"
+                  style={{ width: "auto" }}
+                  disabled={busy || !resetAck}
+                  onClick={async () => {
+                    setError(null);
+                    setBusy(true);
+                    try {
+                      await signOutAndWipe();
+                      window.location.reload();
+                    } catch (e) {
+                      setBusy(false);
+                      setError(
+                        e instanceof Error
+                          ? e.message
+                          : "Could not clear this device"
+                      );
+                    }
+                  }}
+                >
+                  Erase this device and start over
+                </button>
+                <button
+                  className="sheetBtn isQuiet"
+                  style={{ width: "auto" }}
+                  disabled={busy}
+                  onClick={() => {
+                    setResetOpen(false);
+                    setResetAck(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p style={{ ...ST.p, marginTop: 0 }}>
+                Keeping this device as it is costs nothing: entries still save
+                here and merge in when you re-link. Erasing is for a device you
+                are handing on, or one you would rather start clean.
+              </p>
+              <button className="miniBtn" onClick={() => setResetOpen(true)}>
+                erase this device and start over
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -311,9 +448,10 @@ export default function SyncView() {
           {linkSent ? (
             <>
               <p style={ST.p}>
-                Check your email. In a normal browser, tapping the link signs
-                you in. In the home-screen app, type the 6-digit code from
-                the same email here instead:
+                Check the email sent to <strong>{email.trim()}</strong>. In a
+                normal browser, tapping the link signs you in. In the
+                home-screen app, type the 6-digit code from the same email
+                here instead:
               </p>
               <div style={ST.row}>
                 <input
@@ -344,6 +482,27 @@ export default function SyncView() {
                   }}
                 >
                   Sign in with code
+                </button>
+              </div>
+              {/* Without these this step was a dead end: no way back to the
+                  address field, so a typo, an email that never arrives or an
+                  expired code left the only route back a force-quit. Tolerable
+                  while sign-in was a once-per-device event; not once reporting
+                  a lost device drops every surviving device into this flow at
+                  the same time. */}
+              <div style={{ ...ST.row, marginTop: 8 }}>
+                <button className="miniBtn" disabled={busy} onClick={sendLink}>
+                  send a new code
+                </button>
+                <button
+                  className="miniBtn"
+                  onClick={() => {
+                    setLinkSent(false);
+                    setOtpCode("");
+                    setError(null);
+                  }}
+                >
+                  use a different email address
                 </button>
               </div>
             </>
@@ -378,37 +537,7 @@ export default function SyncView() {
             journal key, then scan its QR with the camera button below. Or
             type the key in.
           </p>
-          {scanning ? (
-            <div style={{ marginBottom: 10 }}>
-              <video
-                ref={videoRef}
-                playsInline
-                muted
-                style={{
-                  width: "100%",
-                  maxWidth: 320,
-                  borderRadius: 10,
-                  border: `1px solid ${LINE}`,
-                  display: "block",
-                }}
-              />
-              <button
-                className="sheetBtn isQuiet"
-                style={{ maxWidth: 320 }}
-                onClick={stopScan}
-              >
-                Cancel scanning
-              </button>
-            </div>
-          ) : (
-            <button
-              className="sheetBtn"
-              style={{ maxWidth: 320, marginBottom: 10 }}
-              onClick={() => void startScan()}
-            >
-              Scan journal key with the camera
-            </button>
-          )}
+          {scanner("Scan journal key with the camera")}
           <input
             style={{ ...ST.input, width: "100%", marginBottom: 8 }}
             value={keyEntry}
@@ -859,6 +988,18 @@ const ST: Record<string, CSSProperties> = {
     letterSpacing: "0.08em",
     color: INK_SOFT,
     marginBottom: 4,
+  },
+  // Matches the inline checkbox label used by the sign-out confirmation, so the
+  // two irreversible actions look and read the same way.
+  ackLabel: {
+    display: "flex",
+    gap: 8,
+    alignItems: "flex-start",
+    fontSize: 13.5,
+    lineHeight: 1.5,
+    color: INK,
+    maxWidth: 480,
+    margin: "6px 0 10px",
   },
   devList: { listStyle: "none", padding: 0, margin: "6px 0 0" },
   devRow: {
