@@ -129,6 +129,41 @@ let lastMaxId = 0;
 
 const ensureShadow = (): Y.Doc => (shadow ??= new Y.Doc());
 
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
+/**
+ * Would sending this diff change anything for a peer that already holds the
+ * shadow's state?
+ *
+ * Yjs includes the entire delete set in every state-vector diff, because
+ * tombstones are not covered by a state vector. So on any journal where an
+ * entry has ever been deleted — completed, migrated, struck through —
+ * `encodeStateAsUpdate(doc, stateVector(shadow))` returns a non-empty update
+ * even when the shadow already has everything, and returns the *same bytes*
+ * every time. Treating "longer than an empty update" as "the server needs this"
+ * therefore re-pushed the whole delete set on every reconcile: every launch,
+ * every foreground, every socket rejoin, for the life of the journal. On a
+ * nine-day-old journal that was 374 bytes a time and the single largest source
+ * of rows in the log.
+ *
+ * The probe runs on a throwaway copy rather than the shadow itself, so a push
+ * that then fails cannot leave the shadow believing the server holds something
+ * it does not — that direction loses data, where a redundant row only wastes
+ * space.
+ */
+const wouldChangeServer = (sh: Y.Doc, diff: Uint8Array): boolean => {
+  const probe = new Y.Doc();
+  try {
+    Y.applyUpdate(probe, Y.encodeStateAsUpdate(sh));
+    const before = Y.encodeStateAsUpdate(probe);
+    Y.applyUpdate(probe, diff);
+    return !sameBytes(before, Y.encodeStateAsUpdate(probe));
+  } finally {
+    probe.destroy();
+  }
+};
+
 const teardown = () => {
   if (channel && supabase) void supabase.removeChannel(channel);
   channel = null;
@@ -446,6 +481,9 @@ const reconcile = async (trigger: SyncTrigger): Promise<boolean> => {
     const ok = await serialised(async () => {
       const diff = Y.encodeStateAsUpdate(doc, Y.encodeStateVector(sh));
       if (diff.length <= 2) return true;
+      // Not enough to be non-empty: it has to actually tell the server
+      // something. See wouldChangeServer.
+      if (!wouldChangeServer(sh, diff)) return true;
       return insertPayload(diff, trigger);
     });
     if (!ok) return false;

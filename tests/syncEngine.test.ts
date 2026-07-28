@@ -138,11 +138,26 @@ const legacyRow = async (id: number, text: string): Promise<Row> => {
   return { id, payload: b64encode(out), volume: "v1" };
 };
 
+/** A v2 row holding a doc's complete state, as the server would store it. */
+const snapshotRow = async (id: number, from: Y.Doc): Promise<Row> => {
+  const payload = await encryptUpdate(dataKey, Y.encodeStateAsUpdate(from), {
+    userId: USER_ID,
+    volume: "v1",
+  });
+  return { id, payload: b64encode(payload), volume: "v1" };
+};
+
 /** Fresh engine, fresh local journal, given server rows, signed in. */
-const boot = async (opts: { local: string[]; server: Row[] }) => {
+const boot = async (opts: {
+  local?: string[];
+  /** Runs against the fresh local doc — use for deletions and other edits. */
+  prepare?: (d: Y.Doc) => void;
+  server: Row[];
+}) => {
   vi.resetModules();
   doc = new Y.Doc();
-  doc.getArray("entries").push(opts.local);
+  if (opts.local) doc.getArray("entries").push(opts.local);
+  opts.prepare?.(doc);
   rows = opts.server;
   inserted = [];
   authCallback = null;
@@ -349,6 +364,90 @@ describe("several auth events on launch", () => {
     await vi.waitFor(() => expect(inserted.length).toBeGreaterThan(0));
     await new Promise((r) => setTimeout(r, 250));
     expect(inserted).toHaveLength(1);
+  });
+});
+
+// The bug that produced every duplicate row actually reported, and the reason
+// none of the tests above caught any of it: this harness only ever *appended* to
+// the doc. Yjs includes the whole delete set in a state-vector diff, so a
+// journal with tombstones — completed, migrated or struck-through entries, which
+// is every real journal — computes a non-empty diff on every reconcile even when
+// the server already holds everything. Append-only docs never have a delete set,
+// so the old `diff.length > 2` test looked correct here and was wrong in life.
+describe("a journal that has had entries deleted", () => {
+  // Content plus a tombstone, built up front so the same state can be put on
+  // the server and in the local doc.
+  const stagedWithDeletion = () => {
+    const staged = new Y.Doc();
+    const entries = staged.getArray("entries");
+    entries.push(["kept", "struck", "also kept"]);
+    entries.delete(1, 1);
+    return staged;
+  };
+
+  test("does not re-push the delete set when the server is already current", async () => {
+    const staged = stagedWithDeletion();
+    const state = Y.encodeStateAsUpdate(staged);
+
+    await boot({
+      prepare: (d) => Y.applyUpdate(d, state),
+      server: [await snapshotRow(1, staged)],
+    });
+
+    await new Promise((r) => setTimeout(r, 200));
+    expect(inserted).toHaveLength(0);
+  });
+
+  test("stays quiet across repeated reconciles", async () => {
+    const staged = stagedWithDeletion();
+    const state = Y.encodeStateAsUpdate(staged);
+
+    await boot({
+      prepare: (d) => Y.applyUpdate(d, state),
+      server: [await snapshotRow(1, staged)],
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Every foreground and socket rejoin used to cost a row.
+    subscribeCallback?.("SUBSCRIBED");
+    subscribeCallback?.("SUBSCRIBED");
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(inserted).toHaveLength(0);
+  });
+
+  test("still pushes a genuinely new deletion", async () => {
+    const staged = stagedWithDeletion();
+    const state = Y.encodeStateAsUpdate(staged);
+
+    await boot({
+      prepare: (d) => Y.applyUpdate(d, state),
+      server: [await snapshotRow(1, staged)],
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(inserted).toHaveLength(0);
+
+    // Deleting something the server has not seen deleted must still sync.
+    doc.getArray("entries").delete(0, 1);
+    await vi.waitFor(() => expect(inserted).toHaveLength(1));
+  });
+
+  test("still pushes offline edits found at startup", async () => {
+    // The case the diff push exists for: local content the server lacks, on a
+    // journal that also has tombstones. Must not be suppressed.
+    const staged = stagedWithDeletion();
+    const serverRow = await snapshotRow(1, staged);
+    const state = Y.encodeStateAsUpdate(staged);
+
+    await boot({
+      prepare: (d) => {
+        Y.applyUpdate(d, state);
+        d.getArray("entries").push(["written while offline"]);
+      },
+      server: [serverRow],
+    });
+
+    await vi.waitFor(() => expect(inserted).toHaveLength(1));
   });
 });
 
