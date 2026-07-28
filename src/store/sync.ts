@@ -384,8 +384,19 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   }
 };
 
-/** Link this device: adopt the journal key code from another device. */
-export const provideJournalKey = async (code: string): Promise<void> => {
+/**
+ * Adopt a journal key code, leaving the keyring able to open the journal.
+ *
+ * Separate from provideJournalKey because this half must be callable from
+ * *inside* doConnect, and provideJournalKey ends by calling connect(). connect()
+ * is single-flight, so calling it from within doConnect returns the very promise
+ * doConnect is still executing, and awaiting that deadlocks: the connect never
+ * finishes, `connecting` is never cleared, and every later trigger gets the same
+ * dead promise. That wedged a device linked from a QR scan in needs-key
+ * permanently, with no reconcile and no device registration — see the tests in
+ * tests/linkPending.test.ts.
+ */
+const adoptJournalKey = async (code: string): Promise<void> => {
   if (!supabase) throw new Error("Sync is not configured");
   const keeperKey = await importJournalKeyCode(code);
   const { data, error } = await supabase
@@ -409,6 +420,11 @@ export const provideJournalKey = async (code: string): Promise<void> => {
   };
   await replaceKeyRing(ring);
   revoked = false; // re-linked with the new code: authority restored
+};
+
+/** Link this device: adopt the journal key code from another device, then sync. */
+export const provideJournalKey = async (code: string): Promise<void> => {
+  await adoptJournalKey(code);
   await connect();
 };
 
@@ -649,22 +665,30 @@ const doConnect = async (): Promise<void> => {
   setStatus("connecting");
   ring = await ensureKeys();
   if (!(await ensureJournalKeys())) {
-    // A QR-scanned key may be waiting — try it before asking the user
-    const pending = pendingJournalKey();
-    if (getSyncStatus() === "needs-key" && pending) {
-      try {
-        await provideJournalKey(pending);
-      } catch {
-        // wrong or stale key — leave needs-key showing for manual entry
-      } finally {
-        // Always clear it: the pending key is the master keeper key in
-        // plaintext, applied at most once. Whether the link succeeded or
-        // failed, it must never linger in localStorage — manual entry is a
-        // separate path and does not read this value.
-        clearPendingKey();
-      }
+    // A QR-scanned key may be waiting — try it before asking the user.
+    const pending =
+      getSyncStatus() === "needs-key" ? pendingJournalKey() : null;
+    if (!pending) return;
+    let adopted = false;
+    try {
+      // adoptJournalKey, never provideJournalKey: the latter ends in connect(),
+      // which from here is this same doConnect and deadlocks on itself.
+      await adoptJournalKey(pending);
+      adopted = true;
+    } catch {
+      // wrong or stale key — leave needs-key showing for manual entry
+    } finally {
+      // Always clear it: the pending key is the master keeper key in
+      // plaintext, applied at most once. Whether the link succeeded or
+      // failed, it must never linger in localStorage — manual entry is a
+      // separate path and does not read this value.
+      clearPendingKey();
     }
-    return;
+    if (!adopted) return;
+    // Adopting proved the key unwraps the server's blob, so carry on into the
+    // same connect rather than asking the caller to start another. This is what
+    // makes a QR link reach reconcile and register the device at all.
+    setStatus("connecting");
   }
   clearPendingKey(); // linked without needing it
   // Register this device (see store/devices.ts) BEFORE reconciling, so the row
