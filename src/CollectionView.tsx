@@ -157,6 +157,10 @@ export default function CollectionView({
               streak
             </div>
           )}
+          {/* A tracker page can be threaded to like any other page (spec
+              §4.4): the reciprocal listing sits under the grid, where a
+              margin note would sit on paper */}
+          {threadedHere}
           <div style={{ marginTop: 12 }}>
             {habitName === null ? (
               <button className="miniBtn" onClick={() => setHabitName("")}>

@@ -167,8 +167,10 @@ describe("thread picker sub-view", () => {
     expect(
       screen.getByRole("button", { name: "Thread to Reading list" })
     ).toBeTruthy();
-    // habit trackers hold no entry list to relate to
-    expect(screen.queryByRole("button", { name: "Thread to Habits" })).toBeNull();
+    // a habit tracker is a page like any other, so it can be threaded to
+    expect(
+      screen.getByRole("button", { name: "Thread to Habits" })
+    ).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Thread to This week" })
     ).toBeTruthy();

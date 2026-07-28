@@ -63,17 +63,26 @@ describe("pageRefLabel", () => {
 });
 
 describe("threadTargets", () => {
-  test("offers list collections and the current period pages", () => {
+  test("offers every collection and the current period pages", () => {
     const t = threadTargets("2026-07-28", collections, nowKeys);
     expect(t.map((x) => x.pageKey)).toEqual([
       "col:c1",
+      "col:c2",
       "2026-W31",
       "2026-07",
       "2026",
     ]);
-    // habit trackers hold no entries to relate to; today is the entry's own page
-    expect(t.map((x) => x.label)).not.toContain("Routines");
+    // today is the entry's own page
     expect(t.map((x) => x.label)).not.toContain("Today");
+  });
+
+  test("habit trackers are threadable, and say what they are", () => {
+    // the method threads page numbers; a page's layout is no reason to refuse
+    const tracker = threadTargets("2026-07-28", collections, nowKeys).find(
+      (x) => x.pageKey === "col:c2"
+    );
+    expect(tracker?.label).toBe("Routines");
+    expect(tracker?.hint).toBe("habit tracker");
   });
 
   test("excludes the collection an entry already lives on", () => {

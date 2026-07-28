@@ -30,15 +30,22 @@ export const pageRefLabel = (pk: string, collections: Collection[]): string => {
 export interface ThreadTarget {
   pageKey: string;
   label: string;
-  /** the current period pages read relatively in the picker — "This week" */
+  /** what kind of page this is, or which period — shown beside the label */
   hint?: string;
 }
 
 /**
- * Pages an entry can be threaded to: every collection plus the four current
- * period pages, minus the page the entry already lives on. Deliberately not
- * every past and future page — the picker stays a glance, and a reference to
- * an arbitrary past day is a use case nobody has asked for yet.
+ * Pages an entry can be threaded to: every collection — habit trackers
+ * included — plus the four current period pages, minus the page the entry
+ * already lives on. Deliberately not every past and future page: the picker
+ * stays a glance, and a reference to an arbitrary past day is a use case
+ * nobody has asked for yet.
+ *
+ * Habit trackers were excluded at first on the grounds that they hold no
+ * entry list for the reciprocal listing to sit in. That was backwards: the
+ * method threads page numbers, and every page has a number regardless of
+ * what is drawn on it, so the tracker's own layout was never a reason to
+ * refuse. The listing goes under the grid instead (spec §4.4).
  */
 export const threadTargets = (
   ownPageKey: string,
@@ -53,8 +60,12 @@ export const threadTargets = (
     hint: pageLabel(nowKeys[sc]),
   }));
   const cols: ThreadTarget[] = collections
-    .filter((c) => c.kind === "list" && colPageKey(c.id) !== ownPageKey)
-    .map((c) => ({ pageKey: colPageKey(c.id), label: c.name }));
+    .filter((c) => colPageKey(c.id) !== ownPageKey)
+    .map((c) => ({
+      pageKey: colPageKey(c.id),
+      label: c.name,
+      hint: c.kind === "habits" ? "habit tracker" : "collection",
+    }));
   return [...cols, ...periods];
 };
 
