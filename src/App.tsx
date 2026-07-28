@@ -162,6 +162,10 @@ export default function App() {
       return next;
     });
   const [editRemind, setEditRemind] = useState<string | null>(null);
+  // Thread-to-a-page sub-view of the ⋯ sheet: null = closed, otherwise the
+  // current filter text (spec §4.4). A sub-view rather than inline buttons so
+  // the sheet's length doesn't grow with the number of collections.
+  const [threadFilter, setThreadFilter] = useState<string | null>(null);
   const [editRepeat, setEditRepeat] = useState<EditRepeat | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -364,6 +368,7 @@ export default function App() {
     setEditText(null);
     setEditRemind(null);
     setEditRepeat(null);
+    setThreadFilter(null);
     setSchedDate("");
   };
 
@@ -1073,6 +1078,8 @@ export default function App() {
           nowKeys={nowKeys}
           editRepeat={editRepeat}
           setEditRepeat={setEditRepeat}
+          threadFilter={threadFilter}
+          setThreadFilter={setThreadFilter}
           editRemind={editRemind}
           setEditRemind={setEditRemind}
           editText={editText}

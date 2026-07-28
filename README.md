@@ -15,7 +15,7 @@ The app is well past the initial shell. What works today:
 
 **Collections and navigation.** Index view, custom collection creation, a Collection view, the Future Log, and a back-stack for moving between views.
 
-**Threading.** An entry can carry references to other pages — any collection or period page — from the ⋯ sheet's "Thread to a page" group. This is the Carroll method's margin page number, not a move: the entry stays where it happened, keeps its glyph, and nothing is copied. The reference reads as plain words on the entry's line, and the target page lists what points at it under "Threaded here from other pages". References are inherited by a migrated copy and survive Markdown export.
+**Threading.** An entry can carry references to other pages — any collection or period page — added from the ⋯ sheet's "Thread to a page…" picker and listed, removably, in the sheet itself. This is the Carroll method's margin page number, not a move: the entry stays where it happened, keeps its glyph, and nothing is copied. The reference reads as plain words on the entry's line, and the target page lists what points at it under "Threaded here from other pages". References are inherited by a migrated copy and survive Markdown export.
 
 **Recurrence and reminders.** Recurrence rules that materialise occurrences (with single-occurrence skip and next-occurrence logic), plus local notification reminders fired once per occurrence with permission handling.
 

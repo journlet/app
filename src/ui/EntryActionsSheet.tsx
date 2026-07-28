@@ -1,6 +1,6 @@
 // Entry-actions sheet: the bottom-sheet dialog opened from an entry's ⋯ menu.
-// Four modes (edit repeat rule, edit reminder, actions list, edit text) driven
-// by App-owned draft state. Presentational — App owns the state and the
+// Five modes (edit repeat rule, edit reminder, thread-to-a-page picker, actions
+// list, edit text) driven by App-owned draft state. Presentational — App owns the state and the
 // save/close/delete closures; pure store and date helpers are imported here so
 // the JSX matches the inline version this was extracted from verbatim.
 
@@ -15,7 +15,7 @@ import {
   shiftAnchor,
 } from "../lib/dates";
 import type { Scope } from "../lib/dates";
-import { threadTargets } from "../lib/threads";
+import { pageRefLabel, threadTargets } from "../lib/threads";
 import { GLYPH } from "../lib/types";
 import type {
   Collection,
@@ -54,6 +54,9 @@ interface EntryActionsSheetProps {
   setEditRepeat: Dispatch<SetStateAction<EditRepeat | null>>;
   editRemind: string | null;
   setEditRemind: Dispatch<SetStateAction<string | null>>;
+  /** thread picker sub-view: null = closed, otherwise its filter text */
+  threadFilter: string | null;
+  setThreadFilter: Dispatch<SetStateAction<string | null>>;
   editText: string | null;
   setEditText: Dispatch<SetStateAction<string | null>>;
   /** open the full-screen details view for this entry */
@@ -84,6 +87,8 @@ export default function EntryActionsSheet({
   setEditRepeat,
   editRemind,
   setEditRemind,
+  threadFilter,
+  setThreadFilter,
   editText,
   setEditText,
   onEditDetails,
@@ -233,6 +238,114 @@ export default function EntryActionsSheet({
                   Back
                 </button>
               </>
+            ) : threadFilter !== null ? (
+              // Thread-to-a-page picker (spec §4.4). A sub-view, like the
+              // repeat and reminder editors, so the actions list stays the
+              // same length however many collections the journal has. Pages
+              // already referenced show as plain rows, not buttons: removal
+              // lives in the actions list where the reference is listed, so
+              // there is exactly one place to undo it.
+              (() => {
+                const targets = threadTargets(
+                  sheetEntry.pageKey,
+                  collections,
+                  nowKeys
+                );
+                const q = threadFilter.trim().toLowerCase();
+                const shown = q
+                  ? targets.filter((t) =>
+                      t.label.toLowerCase().includes(q)
+                    )
+                  : targets;
+                return (
+                  <>
+                    <div style={S.sheetGroupLabel}>
+                      Thread to a page — the entry stays on{" "}
+                      {pageRefLabel(sheetEntry.pageKey, collections)}
+                    </div>
+                    {/* A filter only earns its place once the list is past a
+                        glance; below that it is one more thing to look at */}
+                    {targets.length > 8 && (
+                      <input
+                        style={S.sheetInput}
+                        value={threadFilter}
+                        autoFocus
+                        placeholder="Find a page…"
+                        onChange={(ev) => setThreadFilter(ev.target.value)}
+                        aria-label="Find a page"
+                      />
+                    )}
+                    <div style={{ maxHeight: "42vh", overflowY: "auto" }}>
+                      {shown.length === 0 && (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontStyle: "italic",
+                            color: "var(--ink-soft)",
+                            padding: "4px 4px 10px",
+                          }}
+                        >
+                          no page matches
+                        </div>
+                      )}
+                      {shown.map((t) => {
+                        const already = Boolean(
+                          sheetEntry.threads?.includes(t.pageKey)
+                        );
+                        return already ? (
+                          <div
+                            key={t.pageKey}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 8,
+                              padding: "12px 14px",
+                              marginBottom: 8,
+                              fontSize: 15,
+                              color: "var(--ink-soft)",
+                              border: "1px solid var(--line)",
+                              borderRadius: 10,
+                            }}
+                          >
+                            <span>{t.label}</span>
+                            <span style={{ fontSize: 12 }}>
+                              already threaded
+                            </span>
+                          </div>
+                        ) : (
+                          <button
+                            key={t.pageKey}
+                            className="sheetBtn"
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 8,
+                            }}
+                            aria-label={`Thread to ${t.label}`}
+                            onClick={() => {
+                              toggleThread(sheet.id, t.pageKey);
+                              setThreadFilter(null);
+                            }}
+                          >
+                            <span>{t.label}</span>
+                            <span
+                              style={{ fontSize: 12, color: "var(--ink-soft)" }}
+                            >
+                              {t.hint ?? "collection"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      className="sheetBtn isQuiet"
+                      onClick={() => setThreadFilter(null)}
+                    >
+                      Back
+                    </button>
+                  </>
+                );
+              })()
             ) : editText === null ? (
               <>
                 <div style={S.sheetEntry}>
@@ -437,54 +550,40 @@ export default function EntryActionsSheet({
                     thread back to a period page. Buttons toggle and the sheet
                     stays open, because relating one entry to two pages is
                     normal and each tap is its own margin note. */}
-                {(() => {
-                  const targets = threadTargets(
-                    sheetEntry.pageKey,
-                    collections,
-                    nowKeys
-                  );
-                  if (targets.length === 0) return null;
-                  return (
-                    <>
-                      <div style={S.sheetGroupLabel}>
-                        Thread to a page (entry stays here)
-                      </div>
-                      <div style={S.sheetRow}>
-                        {targets.map((t) => {
-                          const on = Boolean(
-                            sheetEntry.threads?.includes(t.pageKey)
-                          );
-                          return (
-                            <button
-                              key={t.pageKey}
-                              className="sheetBtn isCompact"
-                              style={
-                                on
-                                  ? {
-                                      borderColor: "var(--ink)",
-                                      fontWeight: 600,
-                                    }
-                                  : undefined
-                              }
-                              aria-pressed={on}
-                              // Spelled out: the visible label is the page
-                              // name, which a period page shares with the
-                              // Move group's button
-                              aria-label={
-                                (on ? "Remove reference to " : "Thread to ") +
-                                t.label
-                              }
-                              onClick={() => toggleThread(sheet.id, t.pageKey)}
-                            >
-                              {on ? "✓ " : ""}
-                              {t.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  );
-                })()}
+                {/* What this entry already points at, each removable where
+                    you can see it. Adding happens in the picker sub-view, so
+                    the sheet's length tracks the entry's own references
+                    rather than the number of collections (spec §4.4). */}
+                {sheetEntry.threads && sheetEntry.threads.length > 0 && (
+                  <>
+                    <div style={S.sheetGroupLabel}>Threaded to</div>
+                    {sheetEntry.threads.map((pk) => (
+                      <button
+                        key={pk}
+                        className="sheetBtn"
+                        style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
+                        aria-label={`Remove reference to ${pageRefLabel(pk, collections)}`}
+                        onClick={() => toggleThread(sheet.id, pk)}
+                      >
+                        <span>{pageRefLabel(pk, collections)}</span>
+                        <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                          remove reference
+                        </span>
+                      </button>
+                    ))}
+                  </>
+                )}
+                {threadTargets(sheetEntry.pageKey, collections, nowKeys).length >
+                  0 && (
+                  <button
+                    className="sheetBtn"
+                    onClick={() => setThreadFilter("")}
+                  >
+                    {sheetEntry.threads?.length
+                      ? "Thread to another page…"
+                      : "Thread to a page… (entry stays here)"}
+                  </button>
+                )}
                 <button
                   className="sheetBtn"
                   onClick={() => {

@@ -76,6 +76,8 @@ const setup = (
     setEditRepeat: vi.fn(),
     editRemind: null,
     setEditRemind: vi.fn(),
+    threadFilter: null,
+    setThreadFilter: vi.fn(),
     editText: null,
     setEditText: vi.fn(),
     onEditDetails: vi.fn(),
@@ -129,42 +131,111 @@ describe("actions mode", () => {
     expect(moveTo).toHaveBeenCalledWith("e1", "2026-W30");
   });
 
-  test("Thread to a page lists list collections and offers the current periods", () => {
-    setup();
+  test("threading is one line in the actions list, whatever the collection count", () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      id: `c${i}`,
+      kind: "list" as const,
+      name: `Collection ${i}`,
+      createdAt: i,
+    }));
+    const props = setup({ collections: many });
+    // no per-collection buttons in the actions list — just the one opener
+    expect(screen.queryByRole("button", { name: "Collection 3" })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Thread to a page/ })
+    );
+    expect(props.setThreadFilter).toHaveBeenCalledWith("");
+  });
+
+  test("current references are listed and removable in the actions list", () => {
+    setup({ sheetEntry: { ...openTask, threads: ["col:c1"] } });
+    expect(screen.getByText("Reading list")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove reference to Reading list" })
+    );
+    expect(toggleThread).toHaveBeenCalledWith("e1", "col:c1");
+    // opener wording shifts once the entry already points somewhere
+    expect(
+      screen.getByRole("button", { name: "Thread to another page…" })
+    ).toBeTruthy();
+  });
+});
+
+describe("thread picker sub-view", () => {
+  test("lists list collections and the current period pages, not the entry's own page", () => {
+    setup({ threadFilter: "" });
     expect(
       screen.getByRole("button", { name: "Thread to Reading list" })
     ).toBeTruthy();
-    // habit trackers have no entry list to relate to
+    // habit trackers hold no entry list to relate to
     expect(screen.queryByRole("button", { name: "Thread to Habits" })).toBeNull();
     expect(
       screen.getByRole("button", { name: "Thread to This week" })
     ).toBeTruthy();
-    // never the page the entry already lives on
     expect(screen.queryByRole("button", { name: "Thread to Today" })).toBeNull();
   });
 
-  test("threading references a page without moving the entry or closing", () => {
-    const props = setup();
+  test("choosing a page references it and returns to the actions list", () => {
+    const props = setup({ threadFilter: "" });
     fireEvent.click(
       screen.getByRole("button", { name: "Thread to Reading list" })
     );
     expect(toggleThread).toHaveBeenCalledWith("e1", "col:c1");
     expect(moveTo).not.toHaveBeenCalled();
     expect(migrateEntry).not.toHaveBeenCalled();
-    // the sheet stays open — one entry can carry several references
+    expect(props.setThreadFilter).toHaveBeenCalledWith(null);
     expect(props.closeSheet).not.toHaveBeenCalled();
   });
 
-  test("an existing reference reads as removable", () => {
-    setup({ sheetEntry: { ...openTask, threads: ["col:c1"] } });
-    const btn = screen.getByRole("button", {
-      name: "Remove reference to Reading list",
+  test("a page already referenced is shown as such, not as a second way to remove it", () => {
+    setup({
+      threadFilter: "",
+      sheetEntry: { ...openTask, threads: ["col:c1"] },
     });
-    expect(btn.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(btn);
-    expect(toggleThread).toHaveBeenCalledWith("e1", "col:c1");
+    expect(
+      screen.queryByRole("button", { name: "Thread to Reading list" })
+    ).toBeNull();
+    expect(screen.getByText("already threaded")).toBeTruthy();
   });
 
+  test("the filter appears only past a glance, and narrows the list", () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      id: `c${i}`,
+      kind: "list" as const,
+      name: `Collection ${i}`,
+      createdAt: i,
+    }));
+    setup({ threadFilter: "", collections: many });
+    expect(screen.getByLabelText("Find a page")).toBeTruthy();
+    cleanup();
+
+    setup({ threadFilter: "collection 1" , collections: many });
+    expect(
+      screen.getByRole("button", { name: "Thread to Collection 1" })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Thread to Collection 2" })
+    ).toBeNull();
+    cleanup();
+
+    setup({ threadFilter: "", collections: [] });
+    expect(screen.queryByLabelText("Find a page")).toBeNull();
+  });
+
+  test("says so plainly when nothing matches", () => {
+    setup({ threadFilter: "zzz" });
+    expect(screen.getByText("no page matches")).toBeTruthy();
+  });
+
+  test("Back returns to the actions list without changing anything", () => {
+    const props = setup({ threadFilter: "" });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(props.setThreadFilter).toHaveBeenCalledWith(null);
+    expect(toggleThread).not.toHaveBeenCalled();
+  });
+});
+
+describe("actions mode, continued", () => {
   test("Add details opens the full-screen details view when none set", () => {
     const props = setup();
     fireEvent.click(screen.getByRole("button", { name: "Add details" }));
