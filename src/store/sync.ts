@@ -138,7 +138,27 @@ const teardown = () => {
   lastMaxId = 0;
 };
 
-const pushPayload = async (update: Uint8Array): Promise<boolean> => {
+// Writes are serialised. The shadow doc only learns that the server has an
+// update once the insert *completes*, so anything that computes a diff against
+// the shadow while a push is in flight will compute that same update again and
+// send it twice. A live edit racing the reconcile fired by visibilitychange is
+// the easy way to hit it: background and foreground the app just after typing
+// and you get two identical rows a few hundred milliseconds apart.
+//
+// Everything that inserts, and every diff computed to decide what to insert,
+// therefore runs through this queue. Failures do not break the chain.
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+const serialised = <T>(fn: () => Promise<T>): Promise<T> => {
+  const run = writeQueue.then(fn, fn);
+  writeQueue = run.catch(() => undefined);
+  return run;
+};
+
+// The raw insert. Only ever called from inside the write queue — call
+// pushPayload instead, or serialise it yourself alongside the diff that
+// produced it.
+const insertPayload = async (update: Uint8Array): Promise<boolean> => {
   if (!supabase || !session || !ring) return false;
   try {
     // One read of the active volume, used for both the AAD and the row, so the
@@ -164,6 +184,9 @@ const pushPayload = async (update: Uint8Array): Promise<boolean> => {
     return false;
   }
 };
+
+const pushPayload = (update: Uint8Array): Promise<boolean> =>
+  serialised(() => insertPayload(update));
 
 // Live local edits (origin null = our own transactions; y-indexeddb loads
 // and remote applies carry their own origins and must not echo back)
@@ -359,11 +382,15 @@ const reconcile = async (): Promise<boolean> => {
     // single v2 payload. Nothing has to read the old rows to convert them, and
     // because Yjs updates merge idempotently it does not matter how many
     // devices do this or in what order.
-    const diff = Y.encodeStateAsUpdate(doc, Y.encodeStateVector(sh));
-    if (diff.length > 2) {
-      const ok = await pushPayload(diff);
-      if (!ok) return false;
-    }
+    // Inside the write queue, so any live push started while we were fetching
+    // has settled into the shadow before the diff is taken. Otherwise this
+    // recomputes that update and sends a duplicate.
+    const ok = await serialised(async () => {
+      const diff = Y.encodeStateAsUpdate(doc, Y.encodeStateVector(sh));
+      if (diff.length <= 2) return true;
+      return insertPayload(diff);
+    });
+    if (!ok) return false;
     reportTally(tally);
     dirty = false;
     if (connectedUserId) setStatus("synced");

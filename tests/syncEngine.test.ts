@@ -44,6 +44,9 @@ let authCallback: ((event: string, session: unknown) => void) | null = null;
 // another device's edit would arrive.
 let realtimeHandler: ((msg: { new: Row }) => void) | null = null;
 let subscribeCallback: ((state: string) => void) | null = null;
+// Inserts resolve instantly by default. Slowing them opens the window in which
+// a live push is in flight, which is what the duplicate-push race needs.
+let insertDelayMs = 0;
 
 const b64encode = (bytes: Uint8Array): string =>
   btoa(String.fromCharCode(...bytes));
@@ -58,6 +61,8 @@ const updatesTable = () => {
     order: () => builder,
     limit: async () => ({ data: rows, error: null }),
     insert: async (row: { payload: string; volume: string }) => {
+      if (insertDelayMs > 0)
+        await new Promise((r) => setTimeout(r, insertDelayMs));
       inserted.push(row);
       return { error: null };
     },
@@ -143,6 +148,7 @@ const boot = async (opts: { local: string[]; server: Row[] }) => {
   authCallback = null;
   realtimeHandler = null;
   subscribeCallback = null;
+  insertDelayMs = 0;
 
   const sync = await import("../src/store/sync");
   sync.startSync();
@@ -269,6 +275,56 @@ describe("another device's edit arriving over realtime", () => {
 
     doc.getArray("entries").push(["and now mine again"]);
     await vi.waitFor(() => expect(inserted.length).toBe(2));
+  });
+});
+
+// Regression: nothing coordinated a live push with a concurrent reconcile. The
+// shadow doc is only updated once an insert *completes*, so a reconcile landing
+// mid-flight computed the same update as a local diff and sent it a second time.
+// Observed in the wild as pairs of identical-length rows 126ms and 342ms apart,
+// on a single device with the other closed. Harmless — Yjs updates are
+// idempotent — but it doubled the log.
+describe("a reconcile landing while a push is in flight", () => {
+  test("does not send the same update twice", async () => {
+    await boot({ local: ["mine"], server: [] });
+    await vi.waitFor(() => expect(inserted.length).toBe(1)); // initial snapshot
+
+    // Make the insert slow, then edit and immediately reconcile — which is what
+    // backgrounding and foregrounding the app does via visibilitychange.
+    insertDelayMs = 40;
+    doc.getArray("entries").push(["an edit mid-flight"]);
+    subscribeCallback?.("SUBSCRIBED");
+
+    await new Promise((r) => setTimeout(r, 250));
+    expect(inserted).toHaveLength(2);
+  });
+
+  test("still sends it once when the reconcile is the only writer", async () => {
+    await boot({ local: ["mine"], server: [] });
+    await vi.waitFor(() => expect(inserted.length).toBe(1));
+
+    // Same shape, but the push settles before the reconcile starts, which
+    // always worked. Guards against fixing the race by dropping writes.
+    insertDelayMs = 0;
+    doc.getArray("entries").push(["an edit, then a pause"]);
+    await vi.waitFor(() => expect(inserted.length).toBe(2));
+
+    subscribeCallback?.("SUBSCRIBED");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(inserted).toHaveLength(2);
+  });
+
+  test("two edits in quick succession both reach the server", async () => {
+    await boot({ local: ["mine"], server: [] });
+    await vi.waitFor(() => expect(inserted.length).toBe(1));
+
+    insertDelayMs = 40;
+    doc.getArray("entries").push(["first"]);
+    doc.getArray("entries").push(["second"]);
+
+    await vi.waitFor(() => expect(inserted.length).toBe(3));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(inserted).toHaveLength(3);
   });
 });
 
