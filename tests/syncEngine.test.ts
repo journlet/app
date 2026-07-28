@@ -328,6 +328,30 @@ describe("a reconcile landing while a push is in flight", () => {
   });
 });
 
+// Invariant: several auth events on launch must not each open with their own
+// push. Worth pinning, but read the caveat — this passes with or without the
+// single-flight guard on connect(), because reconcile's own `reconciling` flag
+// already blocks the second one in this harness. It is therefore NOT a
+// regression test for that guard, and it does not reproduce the two [connect]
+// pushes with an identical hash 125ms apart seen on a real device on 28 July.
+// That interleaving is still unexplained; see the note in sync.ts.
+describe("several auth events on launch", () => {
+  test("open with a single push, not one each", async () => {
+    insertDelayMs = 40;
+    await boot({ local: ["mine"], server: [] });
+    authCallback?.("TOKEN_REFRESHED", {
+      user: { id: USER_ID, email: "g@example.com" },
+    });
+    authCallback?.("SIGNED_IN", {
+      user: { id: USER_ID, email: "g@example.com" },
+    });
+
+    await vi.waitFor(() => expect(inserted.length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 250));
+    expect(inserted).toHaveLength(1);
+  });
+});
+
 describe("rows that should worry us", () => {
   // A v2 row that will not decrypt is a real problem and must not be silent.
   test("a corrupt v2 row is surfaced to the user", async () => {

@@ -495,7 +495,7 @@ const subscribe = () => {
     });
 };
 
-const connect = async (): Promise<void> => {
+const doConnect = async (): Promise<void> => {
   if (!supabase || !session) return;
   if (connectedUserId === session.user.id && channel) return;
   clearError();
@@ -525,6 +525,24 @@ const connect = async (): Promise<void> => {
   subscribe();
   setStatus("synced");
 };
+
+// Single-flight. connect() has four callers — the auth listener, the online
+// handler, visibilitychange and provideJournalKey — and doConnect is not
+// reentrant: its early-out tests connectedUserId, which is not set until the
+// very last line, so two invocations can both get past it and both reconcile.
+// A launch that fires two auth events in quick succession is enough.
+//
+// This is worth having regardless of whether it is the cause of the duplicate
+// [connect] pushes seen on 28 July (same update, 125ms apart, one client). I
+// could not explain how both reached a push given reconcile already guards
+// against overlapping itself, so this is a fix for a real design gap rather
+// than a proven diagnosis — see spec §6.1 notes.
+let connecting: Promise<void> | null = null;
+
+const connect = (): Promise<void> =>
+  (connecting ??= doConnect().finally(() => {
+    connecting = null;
+  }));
 
 // ---------- public API ----------
 
