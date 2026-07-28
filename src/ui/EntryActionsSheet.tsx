@@ -15,8 +15,14 @@ import {
   shiftAnchor,
 } from "../lib/dates";
 import type { Scope } from "../lib/dates";
+import { threadTargets } from "../lib/threads";
 import { GLYPH } from "../lib/types";
-import type { Entry, Recurrence, RecurrenceUnit } from "../lib/types";
+import type {
+  Collection,
+  Entry,
+  Recurrence,
+  RecurrenceUnit,
+} from "../lib/types";
 import {
   endRecurrence,
   migrateEntry,
@@ -26,6 +32,7 @@ import {
   setText,
   toggleDone,
   toggleStruck,
+  toggleThread,
 } from "../store/journal";
 import { nextOccurrence } from "../store/recurrence";
 import { notificationPermission } from "../store/reminders";
@@ -39,6 +46,8 @@ interface EntryActionsSheetProps {
   sheetNestTarget: Entry | null;
   sheetMigrates: boolean;
   recurrences: Recurrence[];
+  /** list collections, for the thread-to-a-page targets (spec §4.4) */
+  collections: Collection[];
   today: string;
   nowKeys: Record<Scope, string>;
   editRepeat: EditRepeat | null;
@@ -68,6 +77,7 @@ export default function EntryActionsSheet({
   sheetNestTarget,
   sheetMigrates,
   recurrences,
+  collections,
   today,
   nowKeys,
   editRepeat,
@@ -421,6 +431,60 @@ export default function EntryActionsSheet({
                       </div>
                     </>
                   )}
+                {/* Threading (spec §4.4): a page reference, not a move. The
+                    entry stays put and keeps its glyph, so this group is
+                    offered on every page — including collections, which can
+                    thread back to a period page. Buttons toggle and the sheet
+                    stays open, because relating one entry to two pages is
+                    normal and each tap is its own margin note. */}
+                {(() => {
+                  const targets = threadTargets(
+                    sheetEntry.pageKey,
+                    collections,
+                    nowKeys
+                  );
+                  if (targets.length === 0) return null;
+                  return (
+                    <>
+                      <div style={S.sheetGroupLabel}>
+                        Thread to a page (entry stays here)
+                      </div>
+                      <div style={S.sheetRow}>
+                        {targets.map((t) => {
+                          const on = Boolean(
+                            sheetEntry.threads?.includes(t.pageKey)
+                          );
+                          return (
+                            <button
+                              key={t.pageKey}
+                              className="sheetBtn isCompact"
+                              style={
+                                on
+                                  ? {
+                                      borderColor: "var(--ink)",
+                                      fontWeight: 600,
+                                    }
+                                  : undefined
+                              }
+                              aria-pressed={on}
+                              // Spelled out: the visible label is the page
+                              // name, which a period page shares with the
+                              // Move group's button
+                              aria-label={
+                                (on ? "Remove reference to " : "Thread to ") +
+                                t.label
+                              }
+                              onClick={() => toggleThread(sheet.id, t.pageKey)}
+                            >
+                              {on ? "✓ " : ""}
+                              {t.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
                 <button
                   className="sheetBtn"
                   onClick={() => {

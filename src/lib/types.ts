@@ -17,6 +17,12 @@ export interface Entry {
    *  Metadata only; never appears in quick capture, added later via the ⋯
    *  sheet (spec §9). Orthogonal to the purist glyphs — not a notation change. */
   details?: string;
+  /** page keys this entry references — collections or period pages (spec §4.4
+   *  Threading). The margin page number of the paper method: the entry stays
+   *  where it happened and nothing is copied, so this is metadata only and
+   *  the purist glyphs are untouched. The reciprocal listing on the target
+   *  page is derived from these, never stored twice. */
+  threads?: string[];
   state: EntryState;
   /** Period the entry lives on: YYYY-MM-DD | YYYY-Www | YYYY-MM | YYYY */
   pageKey: string;

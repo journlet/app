@@ -54,6 +54,18 @@ export const wipeLocalJournal = (): Promise<void> => persistence.clearData();
 
 // ---------- reads ----------
 
+// Threads are held as a Y.Map keyed by page key (value always true) rather
+// than an array: two devices threading the same entry to different pages
+// both survive the merge, and threading to the same page twice can't
+// duplicate. Read back as a sorted list so render order is stable.
+const readThreads = (m: Y.Map<unknown>): string[] | undefined => {
+  const t = m.get("threads");
+  if (!(t instanceof Y.Map) || t.size === 0) return undefined;
+  const keys: string[] = [];
+  t.forEach((_v, k) => keys.push(k));
+  return keys.sort();
+};
+
 const toEntry = (m: Y.Map<unknown>): Entry => ({
   id: m.get("id") as string,
   type: m.get("type") as EntryType,
@@ -62,6 +74,7 @@ const toEntry = (m: Y.Map<unknown>): Entry => ({
   inspiration: Boolean(m.get("inspiration")) || undefined,
   parentId: (m.get("parentId") as string | undefined) ?? undefined,
   details: (m.get("details") as string | undefined) ?? undefined,
+  threads: readThreads(m),
   state: m.get("state") as EntryState,
   pageKey: m.get("pageKey") as string,
   createdAt: m.get("createdAt") as number,
@@ -107,9 +120,28 @@ const makeMap = (e: Entry): Y.Map<unknown> => {
   return m;
 };
 
+/**
+ * Append an entry to the shared array, including any page references it
+ * carries. The threads sub-map is attached after the entry map is in the
+ * document rather than while it is still preliminary: a Yjs type nested
+ * inside another un-integrated type doesn't carry its content across, which
+ * silently dropped references on migrated copies and undone deletes.
+ * Callers wrap this in their own transaction.
+ */
+const pushEntry = (e: Entry): void => {
+  const m = makeMap(e);
+  entries.push([m]);
+  // never reference the page the entry itself lives on
+  const refs = (e.threads ?? []).filter((pk) => pk !== e.pageKey);
+  if (refs.length === 0) return;
+  const t = new Y.Map<unknown>();
+  m.set("threads", t);
+  refs.forEach((pk) => t.set(pk, true));
+};
+
 /** Insert a fully-formed entry (used by the recurrence materialiser). */
 export const insertEntry = (e: Entry): void => {
-  doc.transact(() => entries.push([makeMap(e)]));
+  doc.transact(() => pushEntry(e));
 };
 
 export const tagEntryRecurrence = (id: string, ruleId: string): void => {
@@ -147,7 +179,7 @@ export const addEntry = (
     pageKey,
     createdAt: Date.now(),
   };
-  doc.transact(() => entries.push([makeMap(e)]));
+  doc.transact(() => pushEntry(e));
   return e;
 };
 
@@ -192,6 +224,64 @@ export const setDetails = (id: string, details: string | null): void => {
   });
 };
 
+/**
+ * Add or remove a page reference on an entry (spec §4.4 Threading). Not a
+ * move and not a migration: the entry stays on its own page, no glyph
+ * changes, nothing is copied. Threading to the entry's own page is a no-op —
+ * the paper equivalent would be writing a page's own number in its margin.
+ */
+export const toggleThread = (id: string, pageKey: string): void => {
+  const m = findMap(id);
+  if (!m || m.get("pageKey") === pageKey) return;
+  doc.transact(() => {
+    let t = m.get("threads");
+    if (!(t instanceof Y.Map)) {
+      t = new Y.Map<unknown>();
+      m.set("threads", t);
+    }
+    const map = t as Y.Map<unknown>;
+    if (map.has(pageKey)) map.delete(pageKey);
+    else map.set(pageKey, true);
+  });
+};
+
+/**
+ * Drop a page reference from every entry that holds it — used when the page
+ * it pointed at is deleted, so no entry is left referencing a page that has
+ * gone. Returns the ids and keys removed so the caller's undo can put them
+ * back (deleting a collection is undoable, spec §4.4).
+ */
+export const dropThreadsTo = (pageKey: string): string[] => {
+  const affected: string[] = [];
+  doc.transact(() => {
+    for (let i = 0; i < entries.length; i++) {
+      const t = entries.get(i).get("threads");
+      if (t instanceof Y.Map && t.has(pageKey)) {
+        affected.push(entries.get(i).get("id") as string);
+        t.delete(pageKey);
+      }
+    }
+  });
+  return affected;
+};
+
+/** Re-add a page reference to a set of entries (undo of dropThreadsTo). */
+export const restoreThreadsTo = (pageKey: string, ids: string[]): void => {
+  doc.transact(() => ids.forEach((id) => toggleThreadOn(id, pageKey)));
+};
+
+// Set (rather than toggle) — restore must be idempotent
+const toggleThreadOn = (id: string, pageKey: string): void => {
+  const m = findMap(id);
+  if (!m || m.get("pageKey") === pageKey) return;
+  let t = m.get("threads");
+  if (!(t instanceof Y.Map)) {
+    t = new Y.Map<unknown>();
+    m.set("threads", t);
+  }
+  (t as Y.Map<unknown>).set(pageKey, true);
+};
+
 export const moveTo = (id: string, targetPageKey: string): void => {
   const m = findMap(id);
   if (!m || m.get("pageKey") === targetPageKey) return;
@@ -199,6 +289,10 @@ export const moveTo = (id: string, targetPageKey: string): void => {
     m.set("pageKey", targetPageKey);
     // nesting doesn't survive a move — the parent stays behind
     m.delete("parentId");
+    // page references survive a move (spec §4.4), except one pointing at the
+    // page the entry has just landed on, which would reference itself
+    const t = m.get("threads");
+    if (t instanceof Y.Map) t.delete(targetPageKey);
   });
 };
 
@@ -221,7 +315,7 @@ export const removeEntry = (id: string): Entry | null => {
 };
 
 export const restoreEntry = (e: Entry): void => {
-  doc.transact(() => entries.push([makeMap(e)]));
+  doc.transact(() => pushEntry(e));
 };
 
 // Migrate: mark the original on its old page, copy forward as open.
@@ -234,17 +328,17 @@ export const migrateEntry = (id: string, targetPageKey: string): void => {
   const original = toEntry(m);
   doc.transact(() => {
     m.set("state", isFutureKey(targetPageKey) ? "scheduled" : "migrated");
-    entries.push([
-      makeMap({
-        ...original,
-        id: uid(),
-        state: "open",
-        pageKey: targetPageKey,
-        createdAt: Date.now(),
-        migratedFrom: original.id,
-        parentId: undefined, // nesting stays with the original page
-      }),
-    ]);
+    // page references are inherited by the copy (spec §4.4): paper rewrites
+    // the margin reference along with the entry
+    pushEntry({
+      ...original,
+      id: uid(),
+      state: "open",
+      pageKey: targetPageKey,
+      createdAt: Date.now(),
+      migratedFrom: original.id,
+      parentId: undefined, // nesting stays with the original page
+    });
   });
 };
 
@@ -330,6 +424,8 @@ export interface CollectionSnapshot {
   collection: Collection;
   entries: Entry[];
   habits: Habit[];
+  /** ids of entries elsewhere that referenced this collection (spec §4.4) */
+  threadedFrom: string[];
 }
 
 // Delete a collection with everything on it; returns a snapshot for undo
@@ -344,6 +440,7 @@ export const removeCollection = (id: string): CollectionSnapshot | null => {
     collection: toCollection(collections.get(ci)),
     entries: readAll().filter((e) => e.pageKey === pk),
     habits: readHabits().filter((h) => h.collectionId === id),
+    threadedFrom: dropThreadsTo(pk),
   };
   doc.transact(() => {
     collections.delete(ci, 1);
@@ -422,7 +519,8 @@ export const advanceRecurrence = (id: string, through: string): void => {
 export const restoreCollection = (snap: CollectionSnapshot): void => {
   doc.transact(() => {
     collections.push([makeCollectionMap(snap.collection)]);
-    snap.entries.forEach((e) => entries.push([makeMap(e)]));
+    snap.entries.forEach((e) => pushEntry(e));
     snap.habits.forEach((h) => habits.push([makeHabitMap(h)]));
+    restoreThreadsTo(colPageKey(snap.collection.id), snap.threadedFrom ?? []);
   });
 };

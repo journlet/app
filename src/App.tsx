@@ -29,6 +29,12 @@ import { logVolumeMetrics } from "./store/metrics";
 import { colPageKey } from "./lib/types";
 import type { CollectionKind } from "./lib/types";
 import {
+  colIdFromKey,
+  isColPageKey,
+  pageRefLabel,
+  threadedHere,
+} from "./lib/threads";
+import {
   addCollection,
   addRecurrence,
   removeCollection,
@@ -543,6 +549,21 @@ export default function App() {
     return chain.length > 1 ? chain : [];
   })();
 
+  // Open any page by its key — a collection or a period page. Used by the
+  // threading affordances (spec §4.4), where the reference is a page number
+  // and following it has to land you on that page whichever kind it is.
+  const openPage = (pk: string) => {
+    if (isColPageKey(pk)) {
+      const id = colIdFromKey(pk);
+      if (collections.some((c) => c.id === id)) setView({ col: id });
+      return;
+    }
+    const sc = keyScope(pk);
+    if (!sc) return;
+    setAnchors((a) => ({ ...a, [sc]: keyToAnchor(pk) }));
+    setView("spread");
+  };
+
   const renderEntry = (e: Entry, pk: string, sc: Scope | null) => (
     <li key={e.id} className={"entry" + (e.parentId ? " isSub" : "")}>
       <button
@@ -614,6 +635,22 @@ export default function App() {
             ▸ details
           </button>
         )}
+        {/* Page references (spec §4.4): the margin page number. Plain words,
+            on the entry's own line box so the row stays one dot-grid line,
+            and never a notation glyph — the entry's • ○ — × is untouched. */}
+        {e.threads?.map((t) => (
+          <button
+            key={t}
+            className="detailsToggle"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              openPage(t);
+            }}
+            aria-label={`Open ${pageRefLabel(t, collections)}`}
+          >
+            threaded to {pageRefLabel(t, collections)}
+          </button>
+        ))}
       </span>
       <span className="actions">
         <button
@@ -627,6 +664,49 @@ export default function App() {
       </span>
     </li>
   );
+
+  // The reciprocal page number (spec §4.4): entries elsewhere that reference
+  // this page. Derived from their own threads field, never stored twice, and
+  // read-only here — an entry is edited on the page it lives on. Muted ink so
+  // the page's own entries stay the page.
+  const renderThreadedHere = (pk: string) => {
+    const rows = threadedHere(pk, days);
+    if (rows.length === 0) return null;
+    return (
+      <>
+        <div style={S.subGroupLabel}>Threaded here from other pages</div>
+        <ul style={S.list}>
+          {rows.map((e) => (
+            <li key={`th-${e.id}`} className="entry">
+              <span className="bullet isMigrated" aria-hidden="true">
+                {e.state === "done" ||
+                e.state === "migrated" ||
+                e.state === "scheduled"
+                  ? STATE_GLYPH[e.state]
+                  : GLYPH[e.type]}
+              </span>
+              <span
+                className={
+                  "etext" + (e.state === "struck" ? " isStruck" : "")
+                }
+                style={{ color: "var(--ink-soft)" }}
+              >
+                {e.priority && <span className="prio"><i>*</i></span>}
+                {e.text}
+                <button
+                  className="detailsToggle"
+                  onClick={() => openPage(e.pageKey)}
+                  aria-label={`Open ${pageRefLabel(e.pageKey, collections)}`}
+                >
+                  on {pageRefLabel(e.pageKey, collections)}
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </>
+    );
+  };
 
   // When-label for a scheduled row: inside a month group the heading
   // already names the month, so day rows shrink to weekday + day
@@ -804,6 +884,7 @@ export default function App() {
             entries={days[colPageKey(activeCol.id)] || []}
             habits={habits.filter((h) => h.collectionId === activeCol.id)}
             renderEntry={(e) => renderEntry(e, colPageKey(activeCol.id), null)}
+            threadedHere={renderThreadedHere(colPageKey(activeCol.id))}
             onDelete={() => {
               const snap = removeCollection(activeCol.id);
               setView("index");
@@ -815,6 +896,7 @@ export default function App() {
           <SpreadView
             renderEntry={renderEntry}
             renderScheduledRow={renderScheduledRow}
+            renderThreadedHere={renderThreadedHere}
             pastOpen={pastOpen}
             dueItems={dueItems}
             days={days}
@@ -986,6 +1068,7 @@ export default function App() {
           sheetNestTarget={sheetNestTarget}
           sheetMigrates={sheetMigrates}
           recurrences={recurrences}
+          collections={collections}
           today={today}
           nowKeys={nowKeys}
           editRepeat={editRepeat}

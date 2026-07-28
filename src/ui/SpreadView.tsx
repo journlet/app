@@ -25,6 +25,8 @@ import type { ScheduledRow } from "./types";
 interface SpreadViewProps {
   renderEntry: (e: Entry, pk: string, sc: Scope | null) => ReactNode;
   renderScheduledRow: (row: ScheduledRow, grouped: boolean) => ReactNode;
+  /** entries elsewhere referencing this page (spec §4.4 Threading) */
+  renderThreadedHere: (pk: string) => ReactNode;
   pastOpen: { pk: string; entry: Entry }[];
   dueItems: { pk: string; entry: Entry }[];
   days: Record<string, Entry[]>;
@@ -41,6 +43,7 @@ interface SpreadViewProps {
 export default function SpreadView({
   renderEntry,
   renderScheduledRow,
+  renderThreadedHere,
   pastOpen,
   dueItems,
   days,
@@ -175,6 +178,7 @@ export default function SpreadView({
                     </ul>
                   </>
                 )}
+                {renderThreadedHere(pk)}
               </section>
             );
           })}

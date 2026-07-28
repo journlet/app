@@ -16,6 +16,7 @@ vi.mock("../../src/store/journal", () => ({
   setText: vi.fn(),
   toggleDone: vi.fn(),
   toggleStruck: vi.fn(),
+  toggleThread: vi.fn(),
 }));
 vi.mock("../../src/store/recurrence", () => ({
   nextOccurrence: vi.fn(() => "2026-08-01"),
@@ -30,6 +31,7 @@ import {
   setText,
   toggleDone,
   toggleStruck,
+  toggleThread,
 } from "../../src/store/journal";
 
 afterEach(() => {
@@ -64,6 +66,10 @@ const setup = (
     sheetNestTarget: null,
     sheetMigrates: false,
     recurrences: [],
+    collections: [
+      { id: "c1", kind: "list" as const, name: "Reading list", createdAt: 0 },
+      { id: "c2", kind: "habits" as const, name: "Habits", createdAt: 0 },
+    ],
     today: "2026-07-24",
     nowKeys,
     editRepeat: null,
@@ -121,6 +127,42 @@ describe("actions mode", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: "This week" }));
     expect(moveTo).toHaveBeenCalledWith("e1", "2026-W30");
+  });
+
+  test("Thread to a page lists list collections and offers the current periods", () => {
+    setup();
+    expect(
+      screen.getByRole("button", { name: "Thread to Reading list" })
+    ).toBeTruthy();
+    // habit trackers have no entry list to relate to
+    expect(screen.queryByRole("button", { name: "Thread to Habits" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Thread to This week" })
+    ).toBeTruthy();
+    // never the page the entry already lives on
+    expect(screen.queryByRole("button", { name: "Thread to Today" })).toBeNull();
+  });
+
+  test("threading references a page without moving the entry or closing", () => {
+    const props = setup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Thread to Reading list" })
+    );
+    expect(toggleThread).toHaveBeenCalledWith("e1", "col:c1");
+    expect(moveTo).not.toHaveBeenCalled();
+    expect(migrateEntry).not.toHaveBeenCalled();
+    // the sheet stays open — one entry can carry several references
+    expect(props.closeSheet).not.toHaveBeenCalled();
+  });
+
+  test("an existing reference reads as removable", () => {
+    setup({ sheetEntry: { ...openTask, threads: ["col:c1"] } });
+    const btn = screen.getByRole("button", {
+      name: "Remove reference to Reading list",
+    });
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(btn);
+    expect(toggleThread).toHaveBeenCalledWith("e1", "col:c1");
   });
 
   test("Add details opens the full-screen details view when none set", () => {

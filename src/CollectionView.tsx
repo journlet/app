@@ -50,6 +50,8 @@ interface Props {
   entries: Entry[];
   habits: Habit[];
   renderEntry: (e: Entry) => ReactNode;
+  /** entries elsewhere referencing this collection (spec §4.4 Threading) */
+  threadedHere: ReactNode;
   onDelete: () => void;
 }
 
@@ -58,6 +60,7 @@ export default function CollectionView({
   entries,
   habits,
   renderEntry,
+  threadedHere,
   onDelete,
 }: Props) {
   const [habitName, setHabitName] = useState<string | null>(null);
@@ -92,6 +95,7 @@ export default function CollectionView({
             <div style={ST.empty}>nothing logged</div>
           )}
           <ul style={ST.list}>{entries.map((e) => renderEntry(e))}</ul>
+          {threadedHere}
         </>
       )}
 

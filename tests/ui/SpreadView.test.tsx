@@ -37,6 +37,7 @@ const setup = (over: Partial<Parameters<typeof SpreadView>[0]> = {}) => {
   const props = {
     renderEntry: vi.fn((e: Entry) => <li key={e.id}>{e.text}</li>),
     renderScheduledRow: vi.fn(() => null),
+    renderThreadedHere: vi.fn(() => null),
     pastOpen: [] as { pk: string; entry: Entry }[],
     dueItems: [] as { pk: string; entry: Entry }[],
     days: { [nowKeys.day]: [entry] } as Record<string, Entry[]>,

@@ -5,6 +5,7 @@
 
 import { SCOPES, keyScope, pageLabel } from "./dates";
 import type { Scope } from "./dates";
+import { pageRefLabel } from "./threads";
 import { GLYPH, colPageKey } from "./types";
 import type { Collection, Entry, Habit } from "./types";
 
@@ -25,7 +26,7 @@ const fmtStamp = (ts: number): string =>
     minute: "2-digit",
   });
 
-const entryLine = (e: Entry): string => {
+const entryLine = (e: Entry, collections: Collection[]): string => {
   const glyph =
     e.state === "done"
       ? "×"
@@ -40,6 +41,13 @@ const entryLine = (e: Entry): string => {
   if (e.remindAt) text += ` _(remind ${fmtStamp(e.remindAt)})_`;
   const indent = e.parentId ? "  " : "";
   let line = `${indent}- ${text}`;
+  // Page references render as an indented sub-line, the export's equivalent of
+  // the margin page number (spec §4.4 Threading)
+  if (e.threads?.length) {
+    line += `\n${indent}  _threaded to ${e.threads
+      .map((pk) => pageRefLabel(pk, collections))
+      .join(", ")}_`;
+  }
   // Free-form details render as an indented sub-line so links survive export
   if (e.details) {
     const detailIndent = indent + "  ";
@@ -83,7 +91,7 @@ export const buildMarkdown = (
     lines.push(`## ${SCOPE_HEADING[sc]}`, "");
     for (const k of groups[sc].sort()) {
       lines.push(`### ${pageLabel(k)} (${k})`, "");
-      days[k].forEach((e) => lines.push(entryLine(e)));
+      days[k].forEach((e) => lines.push(entryLine(e, collections)));
       lines.push("");
     }
   }
@@ -98,7 +106,7 @@ export const buildMarkdown = (
       if (c.kind === "list") {
         const entries = days[colPageKey(c.id)] ?? [];
         if (entries.length === 0) lines.push("_(empty)_");
-        else entries.forEach((e) => lines.push(entryLine(e)));
+        else entries.forEach((e) => lines.push(entryLine(e, collections)));
       } else {
         const hs = habits.filter((h) => h.collectionId === c.id);
         if (hs.length === 0) lines.push("_(no habits)_");

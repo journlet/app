@@ -15,6 +15,8 @@ The app is well past the initial shell. What works today:
 
 **Collections and navigation.** Index view, custom collection creation, a Collection view, the Future Log, and a back-stack for moving between views.
 
+**Threading.** An entry can carry references to other pages — any collection or period page — from the ⋯ sheet's "Thread to a page" group. This is the Carroll method's margin page number, not a move: the entry stays where it happened, keeps its glyph, and nothing is copied. The reference reads as plain words on the entry's line, and the target page lists what points at it under "Threaded here from other pages". References are inherited by a migrated copy and survive Markdown export.
+
 **Recurrence and reminders.** Recurrence rules that materialise occurrences (with single-occurrence skip and next-occurrence logic), plus local notification reminders fired once per occurrence with permission handling.
 
 **Sync and encryption.** End-to-end encryption — a data key wrapped by a keeper key, encrypted Yjs updates, and an exportable/importable journal key code. Supabase auth is email magic links (no passwords), with multi-device key sharing via the journal key or QR code. The app tracks sync status, shows a "not syncing" banner when signed out, supports lost-device recovery, and wipes the local journal and keys on sign-out. Everything works fully offline before any account exists.

@@ -28,6 +28,8 @@ import {
   toggleDone,
   toggleHabitMark,
   toggleStruck,
+  toggleThread,
+  restoreCollection,
 } from "../src/store/journal";
 
 const reset = () =>
@@ -229,5 +231,87 @@ describe("collections and habits", () => {
     expect(readCollections()).toHaveLength(0);
     expect(readHabits()).toHaveLength(0);
     expect(readAll().map((e) => e.pageKey)).toEqual(["2026-07-24"]);
+  });
+});
+
+// Threading (spec §4.4): page references on an entry — the margin page number
+// of the paper method. Never a move, never a copy, never a glyph change.
+describe("toggleThread (page references)", () => {
+  test("adds and removes a reference without touching page, state or type", () => {
+    const c = addCollection("list", "Reading list");
+    const e = addEntry("2026-07-24", "note", "Sam recommended Dark Matter", false);
+
+    toggleThread(e.id, colPageKey(c.id));
+    let stored = readAll()[0];
+    expect(stored.threads).toEqual([colPageKey(c.id)]);
+    expect(stored.pageKey).toBe("2026-07-24");
+    expect(stored.state).toBe("open");
+    expect(stored.type).toBe("note");
+
+    toggleThread(e.id, colPageKey(c.id));
+    stored = readAll()[0];
+    expect(stored.threads).toBeUndefined();
+    expect(stored.pageKey).toBe("2026-07-24");
+  });
+
+  test("holds several references, deduplicated and stably ordered", () => {
+    const e = addEntry("2026-07-24", "task", "quotes", false);
+    toggleThread(e.id, "2026-W30");
+    toggleThread(e.id, "col:abc");
+    toggleThread(e.id, "col:abc"); // same page again: toggles off, not duplicated
+    toggleThread(e.id, "col:abc");
+    expect(readAll()[0].threads).toEqual(["2026-W30", "col:abc"]);
+  });
+
+  test("refuses to reference the page the entry lives on", () => {
+    const e = addEntry("2026-07-24", "task", "x", false);
+    toggleThread(e.id, "2026-07-24");
+    expect(readAll()[0].threads).toBeUndefined();
+  });
+
+  test("references are inherited by a migrated copy, and the original keeps its own", () => {
+    const e = addEntry("2026-07-24", "task", "Get three quotes", false);
+    toggleThread(e.id, "col:flat");
+    migrateEntry(e.id, "2026-07-25");
+    const original = readAll().find((x) => x.id === e.id);
+    const copy = readAll().find((x) => x.migratedFrom === e.id);
+    expect(original?.threads).toEqual(["col:flat"]);
+    expect(original?.state).toBe("migrated");
+    expect(copy?.threads).toEqual(["col:flat"]);
+    expect(copy?.state).toBe("open");
+  });
+
+  test("references survive a move, except one pointing at the destination", () => {
+    const e = addEntry("2026-07-24", "task", "x", false);
+    toggleThread(e.id, "col:flat");
+    toggleThread(e.id, "2026-W30");
+    moveTo(e.id, "2026-W30");
+    const stored = readAll()[0];
+    expect(stored.pageKey).toBe("2026-W30");
+    expect(stored.threads).toEqual(["col:flat"]);
+  });
+
+  test("delete and undo of an entry keeps its references", () => {
+    const e = addEntry("2026-07-24", "task", "x", false);
+    toggleThread(e.id, "col:flat");
+    const snap = removeEntry(e.id);
+    expect(snap?.threads).toEqual(["col:flat"]);
+    restoreEntry(snap!);
+    expect(readAll()[0].threads).toEqual(["col:flat"]);
+  });
+
+  test("deleting a collection clears references to it, and undo puts them back", () => {
+    const c = addCollection("list", "Reading list");
+    const e = addEntry("2026-07-24", "note", "Dark Matter", false);
+    toggleThread(e.id, colPageKey(c.id));
+
+    const snap = removeCollection(c.id);
+    expect(snap?.threadedFrom).toEqual([e.id]);
+    expect(readAll().find((x) => x.id === e.id)?.threads).toBeUndefined();
+
+    restoreCollection(snap!);
+    expect(readAll().find((x) => x.id === e.id)?.threads).toEqual([
+      colPageKey(c.id),
+    ]);
   });
 });
