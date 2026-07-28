@@ -21,11 +21,33 @@ import {
   verifyEmailCode,
 } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
+import {
+  forgetDevice,
+  listDevices,
+  onDevicesChange,
+  renameDevice,
+} from "./store/devices";
+import type { DeviceRecord } from "./store/devices";
 import { pendingJournalKey } from "./lib/pendingKey";
+
+// Coarse on purpose: "3 days ago" is what you need to judge whether a row is
+// yours, and an exact timestamp would only invite reading precision into a
+// last-seen that updates on connect rather than continuously.
+const relativeTime = (ms: number): string => {
+  if (!ms) return "never";
+  const mins = Math.floor((Date.now() - ms) / 60000);
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins} minutes ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours === 1 ? "an hour ago" : `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+};
 
 const STATUS_LABEL: Record<SyncStatus, string> = {
   disabled: "sync not configured in this build",
   "signed-out": "not signed in",
+  revoked: "signed out — a lost device was reported",
   connecting: "connecting…",
   "needs-key": "journal key needed",
   synced: "synced",
@@ -52,6 +74,15 @@ export default function SyncView() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => onSyncStatus(setStatus), []);
+
+  const [deviceList, setDeviceList] = useState<DeviceRecord[]>(() =>
+    listDevices()
+  );
+  useEffect(() => {
+    const refresh = () => setDeviceList(listDevices());
+    refresh();
+    return onDevicesChange(refresh);
+  }, []);
 
   useEffect(() => {
     if (!keyCode) {
@@ -234,7 +265,24 @@ export default function SyncView() {
         </p>
       )}
 
-      {status === "signed-out" && isConfigured() && (
+      {status === "revoked" && (
+        <div style={ST.keyBox}>
+          <div style={ST.keyLabel}>This device was signed out</div>
+          <p style={{ ...ST.p, marginTop: 0 }}>
+            A lost device was reported on another of your devices, so the
+            journal key was changed and every other device signed out — this
+            one included. Nothing has been deleted: everything written here is
+            still on this device.
+          </p>
+          <p style={ST.p}>
+            To start syncing again, sign in below and enter the new journal key
+            when asked. You will find it on the device where you reported the
+            loss, under Sync → show journal key.
+          </p>
+        </div>
+      )}
+
+      {(status === "signed-out" || status === "revoked") && isConfigured() && (
         <>
           <p style={ST.p}>
             Sign in to sync your journal across devices. Everything is
@@ -419,22 +467,90 @@ export default function SyncView() {
             same email, then enter this journal key when asked.
           </p>
           <div style={ST.keyBox}>
+            <div style={ST.keyLabel}>Devices holding this journal</div>
+            <p style={{ ...ST.p, marginTop: 0 }}>
+              This list is stored inside your encrypted journal, so the server
+              never sees it. It is here so you can spot a device you do not
+              recognise — it is a record, not a lock. Removing a row only tidies
+              the list; use "lost a device" below to actually sign one out.
+            </p>
+            {deviceList.length === 0 ? (
+              <p style={ST.p}>No devices recorded yet.</p>
+            ) : (
+              <ul style={ST.devList}>
+                {deviceList.map((d) => (
+                  <li key={d.id} style={ST.devRow}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>
+                        {d.label}
+                        {d.isThisDevice && (
+                          <span style={ST.devHere}> this device</span>
+                        )}
+                      </div>
+                      <div style={ST.devMeta}>
+                        last synced {relativeTime(d.lastSeen)}
+                        {d.firstSeen ? ` · added ${relativeTime(d.firstSeen)}` : ""}
+                      </div>
+                    </div>
+                    <div style={ST.row}>
+                      <button
+                        className="miniBtn"
+                        onClick={() => {
+                          const next = window.prompt(
+                            "Name for this device",
+                            d.label
+                          );
+                          if (next) renameDevice(d.id, next);
+                        }}
+                      >
+                        rename
+                      </button>
+                      {!d.isThisDevice && (
+                        <button
+                          className="miniBtn"
+                          onClick={() => forgetDevice(d.id)}
+                        >
+                          remove from list
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div style={ST.keyBox}>
             <div style={ST.keyLabel}>Lost a device?</div>
             {lostDone ? (
-              <p style={{ ...ST.p, marginTop: 0 }}>
-                Done. Every other device has been signed out and your journal
-                key has changed — the new one is shown above. Save it, and
-                use it to re-link the devices you still have.
-              </p>
+              <>
+                <p style={{ ...ST.p, marginTop: 0 }}>
+                  Done. Every other device has been signed out and your journal
+                  key has changed — the new one is shown above. Save it, and
+                  use it to re-link the devices you still have.
+                </p>
+                <p style={ST.p}>
+                  Your devices drop their sign-in as soon as they hear about
+                  this, which is immediate for any that are open now, and on
+                  next opening for the rest. The lost device can still reach
+                  the server until its sign-in token expires, which is a matter
+                  of minutes, so if it is genuinely in someone else's hands,
+                  change your email password too.
+                </p>
+              </>
             ) : lostOpen ? (
               <>
                 <p style={{ ...ST.p, marginTop: 0 }}>
                   This signs out every device except this one and issues a
-                  new journal key. The lost device keeps what it already
-                  holds — no one can remotely erase it — but it can never
-                  download anything new, and the old key stops working.
-                  Afterwards, re-link your remaining devices with the new
-                  key.
+                  new journal key. Afterwards, re-link your remaining devices
+                  with the new key.
+                </p>
+                <p style={ST.p}>
+                  What it does not do: the lost device keeps the copy it
+                  already holds, because nothing can reach out and erase a
+                  device. It also keeps working for the few minutes its
+                  existing sign-in token remains valid, so entries it writes in
+                  that window can still arrive. After that it is locked out for
+                  good, and the old journal key stops opening the account.
                 </p>
                 <div style={ST.row}>
                   <button
@@ -702,6 +818,26 @@ const ST: Record<string, CSSProperties> = {
     color: INK_SOFT,
     marginBottom: 4,
   },
+  devList: { listStyle: "none", padding: 0, margin: "6px 0 0" },
+  devRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    padding: "8px 0",
+    borderTop: `1px solid ${LINE}`,
+    fontSize: 13.5,
+  },
+  devHere: {
+    fontWeight: 400,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: INK_SOFT,
+    marginLeft: 6,
+  },
+  devMeta: { fontSize: 12, color: INK_SOFT, marginTop: 2 },
   code: {
     display: "block",
     fontSize: 13,

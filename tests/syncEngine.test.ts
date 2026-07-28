@@ -94,17 +94,31 @@ vi.mock("@supabase/supabase-js", () => ({
       return updatesTable();
     },
     removeChannel: () => {},
-    channel: () => ({
-      on: (_evt: string, _cfg: unknown, handler: (msg: { new: Row }) => void) => {
-        realtimeHandler = handler;
-        return {
-          subscribe: (cb: (s: string) => void) => {
-            subscribeCallback = cb;
-            cb("SUBSCRIBED");
-          },
-        };
-      },
-    }),
+    // Chainable, because the channel now carries two subscriptions: inserts to
+    // journal_updates and updates to journals (the lost-device signal). A mock
+    // whose .on() returned a different shape than the real client's would have
+    // let a broken chain pass here and fail only in the browser.
+    channel: () => {
+      const ch = {
+        on: (
+          _evt: string,
+          cfg: { table?: string },
+          handler: (msg: { new: Row }) => void
+        ) => {
+          // Only the journal_updates handler is driven from here; the journals
+          // handler (lost-device revocation) has its own file. Discarded rather
+          // than captured, so this file has no unused hook pretending to.
+          if (cfg?.table !== "journals") realtimeHandler = handler;
+          return ch;
+        },
+        subscribe: (cb: (s: string) => void) => {
+          subscribeCallback = cb;
+          cb("SUBSCRIBED");
+          return ch;
+        },
+      };
+      return ch;
+    },
   }),
 }));
 
@@ -114,6 +128,11 @@ vi.mock("../src/store/journal", () => ({
   },
   REMOTE_ORIGIN: "remote",
   wipeLocalJournal: async () => {},
+  // The device register lives in the doc, so it follows the doc fixture and is
+  // recreated with it between tests rather than leaking rows across them.
+  get devices() {
+    return doc.getMap("devices");
+  },
 }));
 
 vi.mock("../src/lib/keystore", () => ({
@@ -147,6 +166,26 @@ const snapshotRow = async (id: number, from: Y.Doc): Promise<Row> => {
   return { id, payload: b64encode(payload), volume: "v1" };
 };
 
+// The device register writes into the same doc, so it is part of what these
+// tests see. Pinning the id makes that deterministic across module resets.
+const DEVICE_ID = "test-device";
+
+/**
+ * Pre-register this device with a recent last-seen, so touchThisDevice() on
+ * connect is a no-op. Needed wherever a test asserts the engine stays
+ * completely quiet: registering is a genuine local change and pushing it is
+ * correct, so without this the "no rows at all" assertions would be measuring
+ * the register rather than the delete-set behaviour they exist to protect.
+ */
+const withDeviceRegistered = (d: Y.Doc): void => {
+  const rec = new Y.Map<unknown>();
+  d.getMap<Y.Map<unknown>>("devices").set(DEVICE_ID, rec);
+  rec.set("id", DEVICE_ID);
+  rec.set("label", "Test device");
+  rec.set("firstSeen", Date.now());
+  rec.set("lastSeen", Date.now());
+};
+
 /** Fresh engine, fresh local journal, given server rows, signed in. */
 const boot = async (opts: {
   local?: string[];
@@ -155,6 +194,7 @@ const boot = async (opts: {
   server: Row[];
 }) => {
   vi.resetModules();
+  localStorage.setItem("journlet-device-id", DEVICE_ID);
   doc = new Y.Doc();
   if (opts.local) doc.getArray("entries").push(opts.local);
   opts.prepare?.(doc);
@@ -382,6 +422,7 @@ describe("a journal that has had entries deleted", () => {
     const entries = staged.getArray("entries");
     entries.push(["kept", "struck", "also kept"]);
     entries.delete(1, 1);
+    withDeviceRegistered(staged);
     return staged;
   };
 

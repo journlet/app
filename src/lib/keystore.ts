@@ -19,6 +19,13 @@ export interface KeyRing {
   dataKey: CryptoKey;
   wrapped: WrappedDataKey;
   createdAt: number;
+  // Account whose remote journal this keeper key has actually unwrapped at
+  // least once. This is what separates "never linked" from "was linked and
+  // has been locked out": a fresh device and a revoked device both fail to
+  // unwrap the server blob, and only this field tells them apart. Absent on
+  // rings written before it existed, which reads as never-verified and so
+  // degrades to the ordinary needs-key prompt — the safe direction.
+  verifiedUserId?: string;
 }
 
 const openDb = (): Promise<IDBDatabase> =>

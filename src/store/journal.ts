@@ -43,6 +43,21 @@ export const habits = doc.getArray<Y.Map<unknown>>("habits");
 // recurrenceId, materialised client-side (no server-side code)
 export const recurrences = doc.getArray<Y.Map<unknown>>("recurrences");
 
+// Device register (decision 28 Jul, Gary). Deliberately inside the journal
+// doc rather than a Supabase table: as a table it would be plaintext device
+// labels, platforms and last-seen times sitting beside the ciphertext, which
+// is the metadata §6.4 says we do not hold — activity times and device count
+// are not nothing. In the doc it is encrypted like everything else and the
+// server learns none of it.
+//
+// Informational only, never a security boundary. It cannot be otherwise: a
+// device holding the data key can write to this map as freely as any other,
+// so a compromised device can remove or rename its own row. Its actual worth
+// is that you can see three devices when you expected two, which is how you
+// would learn you had been compromised at all. A Y.Map keyed by device id
+// means two devices registering at once cannot collide.
+export const devices = doc.getMap<Y.Map<unknown>>("devices");
+
 export const persistence = new IndexeddbPersistence(DOC_NAME, doc);
 
 /**

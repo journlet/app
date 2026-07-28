@@ -42,7 +42,11 @@ vi.mock("@supabase/supabase-js", () => ({
       }),
     }),
     removeChannel: () => {},
-    channel: () => ({ on: () => ({ subscribe: () => {} }) }),
+    // Chainable: the channel registers more than one subscription now.
+    channel: () => {
+      const ch = { on: () => ch, subscribe: () => ch };
+      return ch;
+    },
   }),
 }));
 
