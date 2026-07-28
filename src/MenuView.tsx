@@ -100,14 +100,25 @@ export default function MenuView({
     setPerm(result);
   };
 
-  const notifState =
+  // One complete sentence per permission state, rather than a status fragment
+  // glued onto a lead-in. The granted state says the quiet part out loud:
+  // delivery needs the app open or recently backgrounded (spec §4.6, and §11
+  // open question 6 for closed-app push), so the Due list is the real safety
+  // net and shouldn't be a surprise.
+  const notifDesc =
     !supported
-      ? "not available in this browser"
+      ? "This browser can’t show notifications. Timed entries still appear " +
+        "under Due on your daily page."
       : perm === "granted"
-        ? "on — reminders will notify you"
+        ? "Notifications are allowed. Timed entries will nudge you while " +
+          "Journlet is open or recently in the background. Anything missed " +
+          "stays under Due on your daily page."
         : perm === "denied"
-          ? "blocked in your browser settings"
-          : "off";
+          ? "Notifications are blocked, so nothing will nudge you. Re-enable " +
+            "them for journlet.com in your browser or system settings. Timed " +
+            "entries still appear under Due on your daily page."
+          : "Notifications are off. Turn them on and timed entries will nudge " +
+            "you while Journlet is open or recently in the background.";
 
   // Install-to-home-screen row (spec §3, §12 step 9). Always available while
   // running in a browser; hidden once installed (mode "hidden").
@@ -184,11 +195,7 @@ export default function MenuView({
         <div style={ST.row}>
           <div style={ST.rowText}>
             <div style={ST.rowLabel}>Reminders</div>
-            <div style={ST.rowDesc}>
-              Local reminders for timed entries. {notifState}.
-              {perm === "denied" &&
-                " Re-enable them in your browser or system settings."}
-            </div>
+            <div style={ST.rowDesc}>{notifDesc}</div>
           </div>
           {supported && perm === "default" && (
             <div style={ST.rowBtn}>
