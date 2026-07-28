@@ -155,12 +155,68 @@ const serialised = <T>(fn: () => Promise<T>): Promise<T> => {
   return run;
 };
 
+// Push diagnostics. Duplicate rows have been chased twice on timing and length
+// alone, which cannot distinguish one update sent twice from two different
+// updates that happen to be the same size. This records what was actually sent,
+// content-addressed, so the question is answerable rather than inferable.
+// Readable on a phone via window.__journletPushLog.
+interface PushRecord {
+  at: string;
+  source: string;
+  bytes: number;
+  hash: string;
+}
+
+const pushLog: PushRecord[] = [];
+
+const shortHash = async (bytes: Uint8Array): Promise<string> => {
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+    return Array.from(new Uint8Array(digest).slice(0, 5))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    return "unhashable";
+  }
+};
+
+const recordPush = async (
+  source: string,
+  update: Uint8Array
+): Promise<void> => {
+  const rec: PushRecord = {
+    at: new Date().toISOString(),
+    source,
+    bytes: update.length,
+    hash: await shortHash(update),
+  };
+  pushLog.push(rec);
+  if (pushLog.length > 50) pushLog.shift();
+  console.info(
+    `journlet push [${rec.source}] ${rec.bytes}b ${rec.hash} ${rec.at}`
+  );
+  (window as unknown as { __journletPushLog?: PushRecord[] })
+    .__journletPushLog = pushLog;
+};
+
+/** Why a reconcile ran, for the diagnostics above. */
+type SyncTrigger =
+  | "connect"
+  | "visibility"
+  | "online"
+  | "socket-rejoin"
+  | "live-edit";
+
 // The raw insert. Only ever called from inside the write queue — call
 // pushPayload instead, or serialise it yourself alongside the diff that
 // produced it.
-const insertPayload = async (update: Uint8Array): Promise<boolean> => {
+const insertPayload = async (
+  update: Uint8Array,
+  source: SyncTrigger
+): Promise<boolean> => {
   if (!supabase || !session || !ring) return false;
   try {
+    await recordPush(source, update);
     // One read of the active volume, used for both the AAD and the row, so the
     // binding can never disagree with where the row actually lands.
     const volume = getActiveVolume();
@@ -185,14 +241,16 @@ const insertPayload = async (update: Uint8Array): Promise<boolean> => {
   }
 };
 
-const pushPayload = (update: Uint8Array): Promise<boolean> =>
-  serialised(() => insertPayload(update));
+const pushPayload = (
+  update: Uint8Array,
+  source: SyncTrigger
+): Promise<boolean> => serialised(() => insertPayload(update, source));
 
 // Live local edits (origin null = our own transactions; y-indexeddb loads
 // and remote applies carry their own origins and must not echo back)
 doc.on("update", (update: Uint8Array, origin: unknown) => {
   if (origin !== null || !session || !connectedUserId) return;
-  void pushPayload(update).then((ok) => {
+  void pushPayload(update, "live-edit").then((ok) => {
     if (ok && !dirty) setStatus("synced");
   });
 });
@@ -346,7 +404,7 @@ const applyRemotePayload = async (payloadB64: string): Promise<void> => {
 
 let reconciling = false;
 
-const reconcile = async (): Promise<boolean> => {
+const reconcile = async (trigger: SyncTrigger): Promise<boolean> => {
   if (!supabase || !ring || reconciling) return false;
   reconciling = true;
   const sh = ensureShadow();
@@ -388,7 +446,7 @@ const reconcile = async (): Promise<boolean> => {
     const ok = await serialised(async () => {
       const diff = Y.encodeStateAsUpdate(doc, Y.encodeStateVector(sh));
       if (diff.length <= 2) return true;
-      return insertPayload(diff);
+      return insertPayload(diff, trigger);
     });
     if (!ok) return false;
     reportTally(tally);
@@ -429,7 +487,7 @@ const subscribe = () => {
       if (state === "SUBSCRIBED") {
         // A re-join after a dropped socket means events were missed while
         // down (realtime has no replay) — reconcile to catch up
-        if (everSubscribed) void reconcile();
+        if (everSubscribed) void reconcile("socket-rejoin");
         everSubscribed = true;
       }
       if (state === "CHANNEL_ERROR" || state === "TIMED_OUT")
@@ -462,7 +520,7 @@ const connect = async (): Promise<void> => {
     return;
   }
   clearPendingKey(); // linked without needing it
-  if (!(await reconcile())) return;
+  if (!(await reconcile("connect"))) return;
   connectedUserId = session.user.id;
   subscribe();
   setStatus("synced");
@@ -488,7 +546,7 @@ export const startSync = (): void => {
   });
 
   window.addEventListener("online", () => {
-    if (session) void connect().then(() => dirty && reconcile());
+    if (session) void connect().then(() => dirty && reconcile("online"));
   });
   window.addEventListener("offline", () => {
     if (session) setStatus("offline");
@@ -498,7 +556,7 @@ export const startSync = (): void => {
   // replay — catch up whenever the app comes back to the foreground
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !session) return;
-    if (connectedUserId) void reconcile();
+    if (connectedUserId) void reconcile("visibility");
     else void connect();
   });
 };
