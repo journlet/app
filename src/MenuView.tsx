@@ -93,7 +93,7 @@ export default function MenuView({
             ? "You’re offline — reconnect to check for updates."
             : checkState === "unavailable"
               ? "Update checks aren’t available in this build."
-              : `Journlet updates itself in the background. Current build ${__BUILD_TIME__}.`;
+              : "Journlet updates itself in the background.";
 
   const enableNotifications = async () => {
     const result = await requestNotificationPermission();
@@ -225,6 +225,9 @@ export default function MenuView({
           <div style={ST.rowText}>
             <div style={ST.rowLabel}>Check for updates</div>
             <div style={ST.rowDesc}>{updateDesc}</div>
+            <div style={ST.rowDesc}>
+              This build: {__BUILD_TIME__} · commit {__BUILD_COMMIT__}
+            </div>
           </div>
           <div style={ST.rowBtn}>
             <button

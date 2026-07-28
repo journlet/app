@@ -648,9 +648,6 @@ export default function SyncView() {
       {getSyncError() && (
         <p style={ST.error}>Last sync problem: {getSyncError()}</p>
       )}
-      <p style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 16 }}>
-        build {__BUILD_TIME__}
-      </p>
     </section>
   );
 }

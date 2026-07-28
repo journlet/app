@@ -1,12 +1,38 @@
+import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+
+// Which commit this build came from, so a reported bug can be traced to exact
+// source. In CI the checkout is a single known commit (GITHUB_SHA). Locally we
+// ask git, and mark the stamp "-dirty" when the tree has uncommitted changes —
+// the hash alone would otherwise describe a build that never existed.
+function buildCommit(): string {
+  const ci = process.env.GITHUB_SHA;
+  if (ci) return ci.slice(0, 7);
+  try {
+    const sha = execSync("git rev-parse --short=7 HEAD", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const dirty = execSync("git status --porcelain", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return dirty ? `${sha}-dirty` : sha;
+  } catch {
+    // No git available (e.g. building from a source tarball or Docker context
+    // without .git) — say so plainly rather than showing a misleading hash.
+    return "unknown";
+  }
+}
 
 // journlet.com is served from the domain root, so base stays "/"
 export default defineConfig({
   base: "/",
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16) + "Z"),
+    __BUILD_COMMIT__: JSON.stringify(buildCommit()),
   },
   plugins: [
     react(),
