@@ -330,8 +330,40 @@ const handleRevoked = async (): Promise<void> => {
   setStatus("revoked");
 };
 
+/**
+ * Key operations run one at a time.
+ *
+ * Rotating the keeper key is a read-modify-write spanning the local keystore and
+ * the server, and it deliberately persists locally *first* (see lostDevice for
+ * why). That leaves a window in which the two disagree by design: the server
+ * still holds a blob the newly rotated keeper key cannot open. A key check
+ * landing inside that window sees exactly the signature of revocation, so the
+ * device doing the reporting concluded it had been revoked and signed itself
+ * out — both devices logged out from one press of the button.
+ *
+ * Serialising removes the window rather than special-casing it: a check runs
+ * either wholly before or wholly after a rotation, never inside one. Worth
+ * preferring over an "am I rotating" flag, which would have to be consulted
+ * correctly by every future caller to work.
+ */
+let keyOps: Promise<unknown> = Promise.resolve();
+
+const serialisedKeyOp = <T>(fn: () => Promise<T>): Promise<T> => {
+  const next = keyOps.then(fn, fn);
+  // Swallowed on the chain only: a failed key op must not wedge every later
+  // one, while the caller still sees its own rejection through `next`.
+  keyOps = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+};
+
 // Returns true when this device's keys are good for the remote journal
-const ensureJournalKeys = async (): Promise<boolean> => {
+const ensureJournalKeys = (): Promise<boolean> =>
+  serialisedKeyOp(checkJournalKeys);
+
+const checkJournalKeys = async (): Promise<boolean> => {
   if (!supabase || !ring) return false;
   const { data, error } = await supabase
     .from("journals")
@@ -789,7 +821,17 @@ export const signIn = async (email: string): Promise<void> => {
 // lost device keeps its local copy — nothing can remotely erase that — but
 // it can never download anything new, and the old journal key code stops
 // unlocking the account. Returns the new journal key code to save.
-export const lostDevice = async (): Promise<string> => {
+export const lostDevice = (): Promise<string> => serialisedKeyOp(rotateForLoss);
+
+/**
+ * Held inside serialisedKeyOp for its whole length, which is load-bearing rather
+ * than tidy. The rotation below leaves the local keyring and the server
+ * disagreeing for as long as the publish takes, and to a key check that gap is
+ * indistinguishable from having been locked out — so an unserialised check
+ * landing in it made the reporting device sign itself out, taking every device
+ * down from one press of the button.
+ */
+const rotateForLoss = async (): Promise<string> => {
   if (!supabase || !session) throw new Error("Not signed in");
   const previous = (ring ??= await ensureKeys());
   const { error: soErr } = await supabase.auth.signOut({ scope: "others" });
