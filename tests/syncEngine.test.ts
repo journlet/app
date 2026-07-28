@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 //
-// The migration off the retired payload format has no dedicated code: it falls
-// out of reconcile, because the shadow doc only learns about rows that actually
-// decrypted. This drives the real sync engine against a fake table to prove it,
-// since the claim is load-bearing and entirely implicit.
+// Integration tests for the sync engine, driven against a fake table.
+//
+// Two things here are worth testing at this level rather than in units. The
+// migration off the retired payload format has no dedicated code — it falls out
+// of reconcile, because the shadow doc only learns about rows that actually
+// decrypted — and the shadow's bookkeeping is exactly the kind of thing that
+// goes wrong silently, as the duplicate-push bug below did.
 //
 // The engine holds module-level state (the connected user, the shadow doc, the
 // high-water mark), so each case resets the module registry and re-imports
@@ -37,6 +40,10 @@ let doc = new Y.Doc();
 let rows: Row[] = [];
 let inserted: { payload: string; volume: string }[] = [];
 let authCallback: ((event: string, session: unknown) => void) | null = null;
+// The realtime INSERT handler, captured so a test can deliver a row the way
+// another device's edit would arrive.
+let realtimeHandler: ((msg: { new: Row }) => void) | null = null;
+let subscribeCallback: ((state: string) => void) | null = null;
 
 const b64encode = (bytes: Uint8Array): string =>
   btoa(String.fromCharCode(...bytes));
@@ -83,7 +90,15 @@ vi.mock("@supabase/supabase-js", () => ({
     },
     removeChannel: () => {},
     channel: () => ({
-      on: () => ({ subscribe: (cb: (s: string) => void) => cb("SUBSCRIBED") }),
+      on: (_evt: string, _cfg: unknown, handler: (msg: { new: Row }) => void) => {
+        realtimeHandler = handler;
+        return {
+          subscribe: (cb: (s: string) => void) => {
+            subscribeCallback = cb;
+            cb("SUBSCRIBED");
+          },
+        };
+      },
     }),
   }),
 }));
@@ -126,6 +141,8 @@ const boot = async (opts: { local: string[]; server: Row[] }) => {
   rows = opts.server;
   inserted = [];
   authCallback = null;
+  realtimeHandler = null;
+  subscribeCallback = null;
 
   const sync = await import("../src/store/sync");
   sync.startSync();
@@ -188,6 +205,70 @@ describe("first sync after the payload format changed", () => {
     await vi.waitFor(() => expect(inserted.length).toBeGreaterThan(0));
 
     expect(doc.getArray("entries").toArray()).toEqual(["local copy"]);
+  });
+});
+
+// Regression: the shadow doc tracks what the server holds, but realtime-
+// delivered rows were applied to the live doc only. The next reconcile then saw
+// another device's edit as a local diff and pushed it straight back, so every
+// remote edit cost a duplicate row. Spotted in the wild as two 492-byte rows
+// 119ms apart.
+describe("another device's edit arriving over realtime", () => {
+  const remoteEdit = async () => {
+    const scratch = new Y.Doc();
+    scratch.getArray("entries").push(["written on the other device"]);
+    const payload = await encryptUpdate(
+      dataKey,
+      Y.encodeStateAsUpdate(scratch),
+      { userId: USER_ID, volume: "v1" }
+    );
+    return { id: 2000, payload: b64encode(payload), volume: "v1" };
+  };
+
+  test("is applied to the local journal", async () => {
+    await boot({ local: ["mine"], server: [] });
+    await vi.waitFor(() => expect(realtimeHandler).toBeTruthy());
+
+    realtimeHandler?.({ new: await remoteEdit() });
+    await vi.waitFor(() =>
+      expect(doc.getArray("entries").toArray()).toContain(
+        "written on the other device"
+      )
+    );
+  });
+
+  test("is not pushed back to the server on the next reconcile", async () => {
+    await boot({ local: ["mine"], server: [] });
+    await vi.waitFor(() => expect(inserted.length).toBe(1)); // initial snapshot
+
+    realtimeHandler?.({ new: await remoteEdit() });
+    await vi.waitFor(() =>
+      expect(doc.getArray("entries").toArray()).toContain(
+        "written on the other device"
+      )
+    );
+
+    // A dropped socket rejoining is one of several things that reconciles; any
+    // of them would have re-pushed the remote edit.
+    subscribeCallback?.("SUBSCRIBED");
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(inserted).toHaveLength(1);
+  });
+
+  test("a genuine local edit afterwards still pushes", async () => {
+    await boot({ local: ["mine"], server: [] });
+    await vi.waitFor(() => expect(inserted.length).toBe(1));
+
+    realtimeHandler?.({ new: await remoteEdit() });
+    await vi.waitFor(() =>
+      expect(doc.getArray("entries").toArray()).toContain(
+        "written on the other device"
+      )
+    );
+
+    doc.getArray("entries").push(["and now mine again"]);
+    await vi.waitFor(() => expect(inserted.length).toBe(2));
   });
 });
 

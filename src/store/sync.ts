@@ -307,7 +307,17 @@ const reportTally = (tally: SkipTally): void => {
 const applyRemotePayload = async (payloadB64: string): Promise<void> => {
   const tally = newTally();
   const update = await decryptRow(payloadB64, tally);
-  if (update) Y.applyUpdate(doc, update, REMOTE_ORIGIN);
+  if (update) {
+    // The shadow tracks what the server holds, and a row delivered by realtime
+    // is by definition already there. Without this the shadow never learns
+    // about other devices' edits, so the next reconcile computes them as a
+    // local diff and pushes them straight back — one duplicate row per remote
+    // edit, forever. It terminates rather than storming (the originating
+    // device's shadow does have the update, so it will not echo again), which
+    // is why it went unnoticed: the log just quietly grew at twice the rate.
+    Y.applyUpdate(ensureShadow(), update);
+    Y.applyUpdate(doc, update, REMOTE_ORIGIN);
+  }
   reportTally(tally);
 };
 
