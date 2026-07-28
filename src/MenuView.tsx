@@ -28,6 +28,7 @@ const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
 const SYNC_LABEL: Record<SyncStatus, string> = {
   disabled: "not configured in this build",
   "signed-out": "not signed in",
+  revoked: "signed out — a lost device was reported",
   connecting: "connecting…",
   "needs-key": "journal key needed",
   synced: "synced",

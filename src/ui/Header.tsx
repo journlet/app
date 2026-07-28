@@ -11,6 +11,10 @@ import { S } from "./styles";
 const SYNC_BADGE: Record<SyncStatus, string> = {
   disabled: "sync",
   "signed-out": "sync · signed out",
+  // Not "signed out": that is what it looks like from the outside and the
+  // reason the original report was confusing. This says what to do about it,
+  // and the Sync screen gives the reason a tap away.
+  revoked: "sync · re-link needed",
   connecting: "sync · connecting…",
   "needs-key": "sync · key needed",
   synced: "sync · synced",
@@ -18,8 +22,12 @@ const SYNC_BADGE: Record<SyncStatus, string> = {
   offline: "sync · offline",
 };
 
+// A list rather than a Record, so adding a status does not fail the build here
+// the way a missing badge label does. Revocation is the strongest case there
+// is for wanting the user: nothing syncs again until they act.
 const SYNC_ATTENTION: SyncStatus[] = [
   "signed-out",
+  "revoked",
   "needs-key",
   "pending",
   "offline",
