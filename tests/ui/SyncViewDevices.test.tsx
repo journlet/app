@@ -113,39 +113,59 @@ describe("a device that has been locked out", () => {
     expect(screen.getByText(/Nothing has been deleted/i)).toBeTruthy();
   });
 
-  test("tells you how to get back: sign in, then the new key", () => {
+  test("offers exactly two ways on, and nothing else yet", () => {
+    // Decision 28 Jul: a fork with two ways out, not a list of everything that
+    // might need doing. The screen previously showed the explanation, a camera,
+    // a sign-in form and an erase box all at once.
     render(<SyncView />);
 
-    expect(
-      screen.getByText(/enter the new journal key\s+when asked/i)
-    ).toBeTruthy();
+    expect(screen.getByText(/^Re-link this device$/)).toBeTruthy();
+    expect(screen.getByText(/^Erase and start over$/)).toBeTruthy();
+    // No sign-in form and no camera until a choice is made.
+    expect(screen.queryByLabelText(/Email address/i)).toBeNull();
+    expect(screen.queryByText(/scan the new journal key/i)).toBeNull();
+  });
+
+  test("says what each choice costs before you pick", () => {
+    render(<SyncView />);
+
+    expect(screen.getByText(/Re-linking keeps what is on this device/i))
+      .toBeTruthy();
+  });
+
+  test("re-linking asks for the key first, by camera or by typing", () => {
+    // The key is on another device's screen, and on an installed iOS app the QR
+    // is the only route that avoids retyping forty characters.
+    render(<SyncView />);
+    fireEvent.click(screen.getByText(/^Re-link this device$/));
+
+    expect(screen.getByText(/Step 1: scan the new journal key/i)).toBeTruthy();
+    expect(screen.getByLabelText(/New journal key/i)).toBeTruthy();
+  });
+
+  test("re-linking then asks for the email, in that order", () => {
+    render(<SyncView />);
+    fireEvent.click(screen.getByText(/^Re-link this device$/));
+
     expect(screen.getByLabelText(/Email address/i)).toBeTruthy();
   });
 
-  test("offers the camera, not just typing the key in", () => {
-    // The key is on another device's screen, and on an installed iOS app the
-    // QR is the only linking path that does not involve retyping 40 characters.
+  test("you can back out of a choice", () => {
     render(<SyncView />);
+    fireEvent.click(screen.getByText(/^Re-link this device$/));
+    fireEvent.click(screen.getByText(/^back$/i));
 
-    expect(
-      screen.getByText(/Scan the new journal key with the camera/i)
-    ).toBeTruthy();
+    expect(screen.getByText(/^Erase and start over$/)).toBeTruthy();
+    expect(screen.queryByLabelText(/Email address/i)).toBeNull();
   });
 
-  test("offers erasing this device, but does not push you towards it", () => {
-    // Keeping the device costs nothing: entries still save locally and merge on
-    // re-link. Erasing is the exception, so it sits behind its own step.
-    render(<SyncView />);
-
-    expect(screen.getByText(/erase this device and start over/i)).toBeTruthy();
-    expect(screen.queryByText(/^Erase this device and start over$/)).toBeNull();
-  });
-
-  test("erasing warns that unsynced writing goes with it, and gates on that", () => {
+  test("erasing goes straight to what it costs, and gates on that", () => {
     // "A re-link would bring it back" is only true of what reached the server.
-    // Anything this device wrote offline and never pushed is here alone.
+    // Anything this device wrote offline and never pushed is here alone. And
+    // choosing the option IS the intent, so it must not ask twice before
+    // saying what the cost is.
     render(<SyncView />);
-    fireEvent.click(screen.getByText(/erase this device and start over/i));
+    fireEvent.click(screen.getByText(/^Erase and start over$/));
 
     // The warning wraps "not" in <em>, so match around it.
     expect(screen.getByText(/cannot be recovered/i)).toBeTruthy();
@@ -155,6 +175,13 @@ describe("a device that has been locked out", () => {
 
     fireEvent.click(screen.getByRole("checkbox"));
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  test("erasing does not offer the sign-in form as well", () => {
+    render(<SyncView />);
+    fireEvent.click(screen.getByText(/^Erase and start over$/));
+
+    expect(screen.queryByLabelText(/Email address/i)).toBeNull();
   });
 });
 
@@ -168,6 +195,8 @@ describe("getting back in on a device that was signed out", () => {
   });
 
   const requestCode = () => {
+    // Re-linking is now a choice on the revoked screen, so pick it first.
+    fireEvent.click(screen.getByText(/^Re-link this device$/));
     fireEvent.change(screen.getByLabelText(/Email address/i), {
       target: { value: "gary@example.com" },
     });

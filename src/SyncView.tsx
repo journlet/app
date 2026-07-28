@@ -65,7 +65,10 @@ export default function SyncView() {
   const [lostDone, setLostDone] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
-  const [resetOpen, setResetOpen] = useState(false);
+  // Which way out of the revoked screen the user has chosen: re-link, or erase
+  // and start over. Null until they pick, so the screen is a fork rather than a
+  // list of everything they might have to do.
+  const [choice, setChoice] = useState<"relink" | "erase" | null>(null);
   const [resetAck, setResetAck] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
@@ -156,6 +159,25 @@ export default function SyncView() {
     a.download = "journlet-journal-key.txt";
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+
+  /**
+   * Take a typed journal key on a signed-out device: it cannot be applied yet,
+   * so acceptJournalKey holds it and the sign-in that follows applies it. Same
+   * route as the camera, so typing and scanning behave identically.
+   */
+  const holdTypedKey = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const outcome = await acceptJournalKey(keyEntry.trim());
+      setScanHeld(outcome === "held");
+      setKeyEntry("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That key did not work");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submitKey = async () => {
@@ -322,41 +344,96 @@ export default function SyncView() {
         </p>
       )}
 
+      {/* One explanation and two choices, nothing else until one is picked
+          (decision 28 Jul, Gary). The screen previously laid the whole
+          recovery out at once — an explanation, a camera, a sign-in form and an
+          erase box — which read as four things to work through rather than a
+          fork with two ways out. */}
       {status === "revoked" && (
         <div style={ST.keyBox}>
           <div style={ST.keyLabel}>This device was signed out</div>
           <p style={{ ...ST.p, marginTop: 0 }}>
-            A lost device was reported on another of your devices, so the
-            journal key was changed and every other device signed out — this
-            one included. Nothing has been deleted: everything written here is
-            still on this device.
+            A lost device was reported on another of your devices. The journal
+            key was changed, which signs out every other device including this
+            one. Nothing has been deleted: everything written here is still on
+            this device, and you can carry on writing.
           </p>
-          <p style={ST.p}>
-            To start syncing again, sign in below and enter the new journal key
-            when asked. You will find it on the device where you reported the
-            loss, under Sync → show journal key.
-          </p>
-          {scanHeld ? (
-            <p style={{ ...ST.p, fontWeight: 600 }}>
-              New journal key scanned and held. Sign in below and this device
-              re-links itself.
-            </p>
-          ) : (
+          {choice === null && (
+            <>
+              <p style={ST.p}>There are two ways on from here.</p>
+              <div style={ST.row}>
+                <button
+                  className="sheetBtn"
+                  style={{ width: "auto" }}
+                  onClick={() => setChoice("relink")}
+                >
+                  Re-link this device
+                </button>
+                <button
+                  className="sheetBtn isQuiet"
+                  style={{ width: "auto" }}
+                  onClick={() => setChoice("erase")}
+                >
+                  Erase and start over
+                </button>
+              </div>
+              <p style={{ ...ST.devMeta, marginTop: 8 }}>
+                Re-linking keeps what is on this device and reconnects it.
+                Erasing clears it and starts from what the server holds.
+              </p>
+            </>
+          )}
+          {choice === "relink" && (
             <>
               <p style={ST.p}>
-                Quickest: scan the QR code shown beside that key.
+                Two steps. First the new journal key, from the device where you
+                reported the loss (Sync → show journal key). Then your email, to
+                sign back in.
               </p>
-              {scanner("Scan the new journal key with the camera")}
+              {scanHeld || pendingJournalKey() ? (
+                <p style={{ ...ST.p, fontWeight: 600 }}>
+                  Step 1 done: the new journal key is held. Sign in below and
+                  this device re-links itself.
+                </p>
+              ) : (
+                <>
+                  {scanner("Step 1: scan the new journal key")}
+                  <input
+                    style={{ ...ST.input, width: "100%", marginBottom: 8 }}
+                    value={keyEntry}
+                    placeholder="or type it: J1-XXXX-XXXX-…"
+                    onChange={(ev) => setKeyEntry(ev.target.value)}
+                    onKeyDown={(ev) => ev.key === "Enter" && holdTypedKey()}
+                    aria-label="New journal key"
+                  />
+                  <button
+                    className="miniBtn"
+                    disabled={busy || keyEntry.trim().length < 10}
+                    onClick={holdTypedKey}
+                  >
+                    use this journal key
+                  </button>
+                </>
+              )}
+              <button
+                className="miniBtn"
+                style={{ marginTop: 10 }}
+                onClick={() => setChoice(null)}
+              >
+                back
+              </button>
             </>
           )}
         </div>
       )}
 
-      {status === "revoked" && (
+      {/* Choosing "Erase and start over" IS the intent, so this goes straight
+          to the warning and the acknowledgement rather than making the user ask
+          twice before being told what it costs. */}
+      {status === "revoked" && choice === "erase" && (
         <div style={ST.keyBox}>
-          <div style={ST.keyLabel}>Or start over on this device</div>
-          {resetOpen ? (
-            <>
+          <div style={ST.keyLabel}>Erase and start over</div>
+          <>
               <p style={{ ...ST.p, marginTop: 0 }}>
                 This erases the journal and keys held here, leaving the device
                 as it was before you first signed in. What reached the server
@@ -408,37 +485,32 @@ export default function SyncView() {
                   style={{ width: "auto" }}
                   disabled={busy}
                   onClick={() => {
-                    setResetOpen(false);
+                    setChoice(null);
                     setResetAck(false);
                   }}
                 >
                   Cancel
                 </button>
               </div>
-            </>
-          ) : (
-            <>
-              <p style={{ ...ST.p, marginTop: 0 }}>
-                Keeping this device as it is costs nothing: entries still save
-                here and merge in when you re-link. Erasing is for a device you
-                are handing on, or one you would rather start clean.
-              </p>
-              <button className="miniBtn" onClick={() => setResetOpen(true)}>
-                erase this device and start over
-              </button>
-            </>
-          )}
+          </>
         </div>
       )}
 
-      {(status === "signed-out" || status === "revoked") && isConfigured() && (
+      {(status === "signed-out" ||
+        (status === "revoked" && choice === "relink")) &&
+        isConfigured() && (
         <>
-          <p style={ST.p}>
-            Sign in to sync your journal across devices. Everything is
-            end-to-end encrypted — the server only ever stores ciphertext.
-            Linking this device to an existing journal also happens after you
-            sign in: enter your journal key when asked.
-          </p>
+          {/* Suppressed on the revoked screen: the box above has already said
+              what happened and what the two steps are, and repeating the
+              general pitch there was most of what made it feel like a wall. */}
+          {status === "signed-out" && (
+            <p style={ST.p}>
+              Sign in to sync your journal across devices. Everything is
+              end-to-end encrypted — the server only ever stores ciphertext.
+              Linking this device to an existing journal also happens after you
+              sign in: enter your journal key when asked.
+            </p>
+          )}
           {pendingJournalKey() && (
             <p style={{ ...ST.p, fontWeight: 600 }}>
               Journal key received from the QR scan — sign in below and this
