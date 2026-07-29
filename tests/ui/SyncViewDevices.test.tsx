@@ -129,6 +129,76 @@ describe("getting back in after the other devices were signed out", () => {
   });
 });
 
+describe("signing out of this device", () => {
+  const openSignOut = () => {
+    render(<SyncView />);
+    fireEvent.click(screen.getByText(/sign out of this device/i));
+  };
+
+  test("when synced, says nothing is lost and does not gate", () => {
+    // The gate exists for unrecoverable loss. When the server already has
+    // everything, asking someone to tick a box teaches them to tick boxes.
+    status = "synced";
+    openSignOut();
+
+    expect(screen.getByText(/signing out loses\s+nothing/i)).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    const go = screen.getByText(
+      /Sign out and remove journal from this device/i
+    ) as HTMLButtonElement;
+    expect(go.disabled).toBe(false);
+  });
+
+  test("when not synced, warns and refuses until acknowledged", () => {
+    // The case that matters: signing out on a device that has been offline.
+    // Those entries exist nowhere else and nothing can bring them back.
+    status = "offline";
+    openSignOut();
+
+    expect(screen.getByText(/has not finished syncing/i)).toBeTruthy();
+    const go = screen.getByText(
+      /Sign out and remove journal from this device/i
+    ) as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(go.disabled).toBe(false);
+  });
+
+  test("suggests waiting rather than only warning", () => {
+    status = "pending";
+    openSignOut();
+
+    expect(screen.getByText(/wait until this says synced/i)).toBeTruthy();
+  });
+
+  test("treats every unsettled state as risky, not just pending", () => {
+    for (const s of ["pending", "offline", "connecting"] as const) {
+      cleanup();
+      status = s;
+      openSignOut();
+      expect(screen.getByRole("checkbox")).toBeTruthy();
+    }
+  });
+
+  test("says the journal key is readable from another device", () => {
+    // The old wording said the key "cannot be recovered afterwards", which is
+    // true on a lone device and misleading on an account with others.
+    status = "synced";
+    openSignOut();
+
+    expect(screen.getByText(/read from another device/i)).toBeTruthy();
+    expect(screen.getByText(/only device, save it first/i)).toBeTruthy();
+  });
+
+  test("does not gate on the journal key, since another device has it", () => {
+    status = "synced";
+    openSignOut();
+
+    expect(screen.queryByText(/I have saved my journal key/i)).toBeNull();
+  });
+});
+
 describe("the device register", () => {
   test("lists the devices and marks which one you are on", () => {
     render(<SyncView />);

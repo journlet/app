@@ -83,7 +83,9 @@ export default function SyncView() {
   const [linkSent, setLinkSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [signOutOpen, setSignOutOpen] = useState(false);
-  const [keySaved, setKeySaved] = useState(false);
+  // Acknowledgement that unsynced entries will be lost. Only asked for when
+  // there are any: see the sign-out box.
+  const [lossAck, setLossAck] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [keyCode, setKeyCode] = useState<string | null>(null);
@@ -293,6 +295,16 @@ export default function SyncView() {
 
   const signedIn =
     status !== "signed-out" && status !== "disabled" && getSessionEmail();
+
+  /**
+   * Might this device be holding writing the server has never seen?
+   *
+   * Anything other than "synced" could be: "pending" says so outright, and
+   * "offline" or "connecting" mean nothing has confirmed. Treating only
+   * "pending" as risky would miss the case that matters most, which is signing
+   * out on a device that has been offline for a while.
+   */
+  const unsynced = status !== "synced";
 
   // Deleting an account is the one genuinely irreversible action in the app,
   // so it is the documented exception to the undo-toast rule (spec §4.1a):
@@ -544,37 +556,56 @@ export default function SyncView() {
             {signOutOpen ? (
               <>
                 <p style={{ ...ST.p, marginTop: 0 }}>
-                  Signing out removes this journal and its key from this
-                  device. Anything not yet synced, and the journal key itself,
-                  cannot be recovered afterwards — the server holds ciphertext
-                  only. You can sign back in and re-enter your journal key to
-                  restore what did sync.
+                  Signing out removes this journal from this device. What
+                  reached the server comes back when you sign in and unlock it
+                  again.
                 </p>
-                <label
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "flex-start",
-                    fontSize: 13.5,
-                    lineHeight: 1.5,
-                    color: INK,
-                    maxWidth: 480,
-                    margin: "6px 0 10px",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={keySaved}
-                    onChange={(ev) => setKeySaved(ev.target.checked)}
-                    style={{ marginTop: 3 }}
-                  />
-                  <span>I have saved my journal key somewhere safe.</span>
-                </label>
+                {/* The two risks are different in kind and only one of them is
+                    conditional. The journal key is recoverable from any other
+                    signed-in device, so it is stated rather than gated. Unsynced
+                    entries exist nowhere else, so that is what the tick-box is
+                    for — and only when there are some. */}
+                <p style={ST.p}>
+                  Your journal key can be read from another device you are
+                  signed in on, under Sync → show journal key. If this is your
+                  only device, save it first: the server holds ciphertext only,
+                  so nobody can reissue it, including whoever runs Journlet.
+                </p>
+                {unsynced ? (
+                  <>
+                    <p style={{ ...ST.p, fontWeight: 600 }}>
+                      This device has not finished syncing ({STATUS_LABEL[status]}).
+                      Anything written here that has not reached the server will
+                      be lost, and nothing can bring it back.
+                    </p>
+                    <p style={ST.p}>
+                      If you can, wait until this says synced and sign out then.
+                      It happens on its own once you are back online.
+                    </p>
+                    <label style={ST.ackLabel}>
+                      <input
+                        type="checkbox"
+                        checked={lossAck}
+                        onChange={(ev) => setLossAck(ev.target.checked)}
+                        style={{ marginTop: 3 }}
+                      />
+                      <span>
+                        I understand entries not yet synced from this device will
+                        be lost.
+                      </span>
+                    </label>
+                  </>
+                ) : (
+                  <p style={ST.p}>
+                    Everything written here has synced, so signing out loses
+                    nothing.
+                  </p>
+                )}
                 <div style={ST.row}>
                   <button
                     className="sheetBtn isDanger"
                     style={{ width: "auto" }}
-                    disabled={busy || !keySaved}
+                    disabled={busy || (unsynced && !lossAck)}
                     onClick={async () => {
                       setError(null);
                       setBusy(true);
@@ -599,7 +630,7 @@ export default function SyncView() {
                     disabled={busy}
                     onClick={() => {
                       setSignOutOpen(false);
-                      setKeySaved(false);
+                      setLossAck(false);
                     }}
                   >
                     Cancel
