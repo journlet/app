@@ -41,6 +41,24 @@ export interface OnboardingInput {
 export const needsOnboarding = (i: OnboardingInput): boolean =>
   i.configured && i.loaded && i.status === "signed-out" && !i.hasLocalContent;
 
+/**
+ * A device that is signed in, holds nothing, and cannot open the account's
+ * journal: it needs the journal key before it has anything to show.
+ *
+ * Without this it rendered an empty spread with a small "key needed" badge in
+ * the header and no prompt at all, which looks exactly like a journal that has
+ * lost its contents. That is the same failure this module is careful to avoid
+ * for signed-out devices, and it was walked into for locked ones: the reasoning
+ * that a device part-way through linking must not be thrown back to the email
+ * step is right, but it does not follow that it should be shown a blank journal.
+ *
+ * Gated on hasLocalContent for the same reason as needsOnboarding. A device that
+ * holds entries and has *become* unlockable — an account whose key was changed
+ * elsewhere, say — keeps showing them rather than hiding them behind a form.
+ */
+export const needsJournalKey = (i: OnboardingInput): boolean =>
+  i.configured && i.loaded && i.status === "needs-key" && !i.hasLocalContent;
+
 export interface RecoveryGateInput {
   configured: boolean;
   status: SyncStatus;

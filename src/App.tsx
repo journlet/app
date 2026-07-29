@@ -83,8 +83,13 @@ import Header from "./ui/Header";
 import CaptureLauncher from "./ui/CaptureLauncher";
 import OnboardingView from "./ui/OnboardingView";
 import RecoveryCodeView from "./ui/RecoveryCodeView";
+import UnlockView from "./ui/UnlockView";
 import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
-import { needsOnboarding, needsRecoveryCode } from "./lib/onboarding";
+import {
+  needsJournalKey,
+  needsOnboarding,
+  needsRecoveryCode,
+} from "./lib/onboarding";
 import { acknowledgeRecovery, recoveryPending } from "./lib/recoveryAck";
 import { buildSpreadData } from "./ui/spreadData";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
@@ -444,6 +449,16 @@ export default function App() {
   // all (decision 3, spec device-identity-design.md). Deliberately not applied
   // to a signed-out device that already holds content — see lib/onboarding.
   const onboarding = needsOnboarding({
+    configured: isConfigured(),
+    status: syncStatus,
+    loaded,
+    hasLocalContent,
+  });
+
+  // Signed in but unable to open the journal: ask for the key rather than
+  // rendering an empty spread, which reads as a journal that has lost its
+  // contents (see lib/onboarding).
+  const unlocking = needsJournalKey({
     configured: isConfigured(),
     status: syncStatus,
     loaded,
@@ -864,8 +879,8 @@ export default function App() {
   return (
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <Header
-        showBack={!onboarding && !showRecovery && view !== "spread"}
-        showMenu={!onboarding && !showRecovery && view === "spread"}
+        showBack={!onboarding && !unlocking && !showRecovery && view !== "spread"}
+        showMenu={!onboarding && !unlocking && !showRecovery && view === "spread"}
         onBack={goBack}
         onMenu={() => setView("menu")}
         saving={saveState === "saving"}
@@ -888,7 +903,7 @@ export default function App() {
             chooses. This is also the deliberate answer to journalling for
             weeks into a device that is not syncing: capture keeps working
             (§6.1b), so the state has to be impossible to miss instead. */}
-        {!onboarding && !showRecovery && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
+        {!onboarding && !unlocking && !showRecovery && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner onSignIn={() => setView("sync")} />
         )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
@@ -897,7 +912,12 @@ export default function App() {
             <SyncView />
           </OnboardingView>
         )}
-        {!onboarding && showRecovery && recoveryCode && (
+        {!onboarding && unlocking && (
+          <UnlockView>
+            <SyncView />
+          </UnlockView>
+        )}
+        {!onboarding && !unlocking && showRecovery && recoveryCode && (
           <RecoveryCodeView
             code={recoveryCode}
             onContinue={() => {
@@ -906,7 +926,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !showRecovery && loaded && view === "index" && (
+        {!onboarding && !unlocking && !showRecovery && loaded && view === "index" && (
           <IndexView
             days={days}
             nowKeys={nowKeys}
@@ -924,10 +944,10 @@ export default function App() {
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
         )}
-        {!onboarding && !showRecovery && loaded && view === "sync" && (
+        {!onboarding && !unlocking && !showRecovery && loaded && view === "sync" && (
           <SyncView />
         )}
-        {!onboarding && !showRecovery && loaded && view === "menu" && (
+        {!onboarding && !unlocking && !showRecovery && loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
             theme={themePref}
@@ -948,7 +968,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !showRecovery && loaded && activeCol && (
+        {!onboarding && !unlocking && !showRecovery && loaded && activeCol && (
           <CollectionView
             collection={activeCol}
             entries={days[colPageKey(activeCol.id)] || []}
@@ -962,7 +982,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !showRecovery && loaded && view === "spread" && (
+        {!onboarding && !unlocking && !showRecovery && loaded && view === "spread" && (
           <SpreadView
             renderEntry={renderEntry}
             renderScheduledRow={renderScheduledRow}
@@ -980,7 +1000,7 @@ export default function App() {
             onOpenFutureLog={() => setView("future")}
           />
         )}
-        {!onboarding && !showRecovery && loaded && view === "future" && (
+        {!onboarding && !unlocking && !showRecovery && loaded && view === "future" && (
           <FutureLogView
             count={futureLogCount}
             groups={futureLogGroups}
@@ -996,6 +1016,7 @@ export default function App() {
           without this an entry could be written into a journal that has no
           account behind it yet, which is the very thing sign-in-first removes. */}
       {!onboarding &&
+        !unlocking &&
         !showRecovery &&
         activeCol?.kind !== "habits" &&
         view !== "sync" &&
@@ -1027,7 +1048,7 @@ export default function App() {
       {/* Also gated: /?capture opens this form on launch without touching the
           launcher, so an app-icon shortcut would otherwise walk straight past
           onboarding into an entry form. */}
-      {!onboarding && !showRecovery && captureOpen && (
+      {!onboarding && !unlocking && !showRecovery && captureOpen && (
         <CaptureForm
           inputRef={inputRef}
           input={input}

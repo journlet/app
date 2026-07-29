@@ -6,7 +6,11 @@
 // journal behind a sign-in screen would look exactly like losing it.
 
 import { describe, expect, test } from "vitest";
-import { needsOnboarding, needsRecoveryCode } from "../src/lib/onboarding";
+import {
+  needsJournalKey,
+  needsOnboarding,
+  needsRecoveryCode,
+} from "../src/lib/onboarding";
 import type {
   OnboardingInput,
   RecoveryGateInput,
@@ -65,6 +69,59 @@ describe("what must never be gated", () => {
       "disabled",
     ] as const) {
       expect(needsOnboarding({ ...fresh, status })).toBe(false);
+    }
+  });
+});
+
+describe("a signed-in device that cannot open the journal", () => {
+  /** Wiped and signed back in, or a new device linking to an existing journal. */
+  const locked: OnboardingInput = { ...fresh, status: "needs-key" };
+
+  test("is asked for the journal key", () => {
+    // Without this it rendered an empty spread with only a small "key needed"
+    // badge in the header, which looks exactly like a journal that has lost its
+    // contents — the failure this module avoids for signed-out devices and had
+    // walked into for locked ones.
+    expect(needsJournalKey(locked)).toBe(true);
+  });
+
+  test("is not asked while it still holds content", () => {
+    // A device with entries that has somehow become unlockable keeps showing
+    // them rather than hiding them behind a form.
+    expect(needsJournalKey({ ...locked, hasLocalContent: true })).toBe(false);
+  });
+
+  test("is not asked before the journal has loaded", () => {
+    expect(needsJournalKey({ ...locked, loaded: false })).toBe(false);
+  });
+
+  test("no other state asks for a key", () => {
+    for (const status of [
+      "signed-out",
+      "connecting",
+      "synced",
+      "pending",
+      "offline",
+      "disabled",
+    ] as const) {
+      expect(needsJournalKey({ ...locked, status })).toBe(false);
+    }
+  });
+
+  test("the sign-in gate and the unlock gate are never both true", () => {
+    // They render different screens in the same place, so overlapping would be
+    // a bug whichever won.
+    for (const status of [
+      "signed-out",
+      "needs-key",
+      "connecting",
+      "synced",
+      "pending",
+      "offline",
+      "disabled",
+    ] as const) {
+      const i = { ...fresh, status };
+      expect(needsOnboarding(i) && needsJournalKey(i)).toBe(false);
     }
   });
 });
