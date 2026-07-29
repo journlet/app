@@ -12,7 +12,7 @@ import * as Y from "yjs";
 import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
 import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
-import { touchThisDevice } from "./devices";
+import { markThisDeviceSignedOut, touchThisDevice } from "./devices";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -241,7 +241,8 @@ type SyncTrigger =
   | "visibility"
   | "online"
   | "socket-rejoin"
-  | "live-edit";
+  | "live-edit"
+  | "sign-out";
 
 // The raw insert. Only ever called from inside the write queue — call
 // pushPayload instead, or serialise it yourself alongside the diff that
@@ -752,6 +753,17 @@ const wipeThisDevice = async (): Promise<void> => {
 };
 
 export const signOutAndWipe = async (): Promise<void> => {
+  // Tell the other devices this one is leaving before tearing sync down. The
+  // register lives inside the journal, so this is the only moment it can be
+  // said: no other device can detect a sign-out, and after teardown there is no
+  // channel to say it on. Best effort — offline, the push fails and the row goes
+  // stale instead, which is the old behaviour rather than a new failure.
+  try {
+    markThisDeviceSignedOut();
+    await reconcile("sign-out");
+  } catch {
+    // Never block leaving on being able to announce it.
+  }
   teardown();
   clearPendingKey();
   if (supabase) {

@@ -287,6 +287,68 @@ describe("registering a device", () => {
   });
 });
 
+describe("a device that signs out", () => {
+  test("says so in its own row, before it goes", async () => {
+    // The register lives in the journal, so the departing device is the only one
+    // that can report this: no other device can detect a sign-out. Without it a
+    // row goes on claiming to hold a journal it has just erased.
+    const d = await load();
+    d.touchThisDevice();
+
+    d.markThisDeviceSignedOut();
+
+    expect(d.listDevices()[0].signedOutAt).toBeGreaterThan(0);
+  });
+
+  test("keeps its row, its name and its added date", async () => {
+    // Marking rather than removing: the row's history is worth more than the
+    // tidiness, and "a device deliberately left" is more useful than silence.
+    const d = await load();
+    d.touchThisDevice();
+    const before = d.listDevices()[0];
+
+    d.markThisDeviceSignedOut();
+
+    const after = d.listDevices()[0];
+    expect(after.id).toBe(before.id);
+    expect(after.name).toBe(before.name);
+    expect(after.firstSeen).toBe(before.firstSeen);
+  });
+
+  test("clears the mark when it comes back", async () => {
+    const d = await load();
+    d.touchThisDevice();
+    d.markThisDeviceSignedOut();
+
+    d.touchThisDevice(); // as the next connect would
+
+    expect(d.listDevices()[0].signedOutAt).toBeUndefined();
+  });
+
+  test("clears the mark even when it returns within the hour", async () => {
+    // The interval guard skips the last-seen write, so clearing has to happen
+    // before it or a device back within the hour would keep claiming to have
+    // left. Signing out and straight back in is the obvious way to hit this.
+    const d = await load();
+    d.touchThisDevice();
+    d.markThisDeviceSignedOut();
+    const rec = doc.getMap<Y.Map<unknown>>("devices").get(d.thisDeviceId());
+    rec?.set("lastSeen", Date.now()); // recent, so the guard will return early
+
+    d.touchThisDevice();
+
+    expect(rec?.get("signedOutAt")).toBeUndefined();
+  });
+
+  test("marking an unregistered device does nothing rather than throwing", async () => {
+    // Signing out of a device that never got as far as registering.
+    const d = await load();
+
+    expect(() => d.markThisDeviceSignedOut()).not.toThrow();
+    expect(d.listDevices()).toHaveLength(0);
+  });
+});
+
 describe("observing", () => {
   test("a change notifies listeners, so the screen tracks other devices", async () => {
     const d = await load();

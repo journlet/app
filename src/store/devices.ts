@@ -25,6 +25,14 @@ export interface DeviceRecord {
   name: string;
   firstSeen: number;
   lastSeen: number;
+  /**
+   * When this device signed out and erased its copy, if it said so before going.
+   *
+   * Best effort by nature: only the departing device knows, and it can only say
+   * so while it still has a connection, so a device signed out while offline
+   * leaves no mark and simply goes stale instead.
+   */
+  signedOutAt?: number;
   isThisDevice: boolean;
 }
 
@@ -151,6 +159,10 @@ export const touchThisDevice = (): void => {
     // "Installed app and Chrome" with an empty bracket, since only the device
     // itself can say what it is running on. Written once, then quiet.
     if (!existing.get("platform")) existing.set("platform", platformName());
+    // Back from a sign-out: this device holds the journal again, so the mark no
+    // longer describes it. Cleared before the interval check below, or a device
+    // returning within the hour would keep claiming to have left.
+    if (existing.get("signedOutAt")) existing.delete("signedOutAt");
     noteClient(existing);
     const last = (existing.get("lastSeen") as number) || 0;
     if (now - last < TOUCH_INTERVAL_MS) return;
@@ -216,6 +228,7 @@ export const listDevices = (): DeviceRecord[] => {
       name: describe(rec) || "Unknown device",
       firstSeen: (rec.get("firstSeen") as number) || 0,
       lastSeen: (rec.get("lastSeen") as number) || 0,
+      signedOutAt: (rec.get("signedOutAt") as number) || undefined,
       isThisDevice: id === here,
     });
   });
@@ -237,6 +250,20 @@ export const listDevices = (): DeviceRecord[] => {
   return out.sort(
     (a, b) => a.firstSeen - b.firstSeen || a.id.localeCompare(b.id)
   );
+};
+
+/**
+ * Note that this device is signing out and erasing its copy.
+ *
+ * The register lives inside the journal, so the departing device is the only one
+ * that can report this, and only in the moment before it tears sync down: no
+ * other device can detect a sign-out. Without it a row goes on claiming to hold
+ * a journal it has just erased, until its last-seen ages into obviously stale.
+ */
+export const markThisDeviceSignedOut = (): void => {
+  const rec = devices.get(thisDeviceId());
+  if (!rec) return;
+  rec.set("signedOutAt", Date.now());
 };
 
 export const onDevicesChange = (fn: () => void): (() => void) => {

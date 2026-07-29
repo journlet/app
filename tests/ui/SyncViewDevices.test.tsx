@@ -38,6 +38,7 @@ interface Row {
   name: string;
   firstSeen: number;
   lastSeen: number;
+  signedOutAt?: number;
   isThisDevice: boolean;
 }
 
@@ -301,6 +302,26 @@ describe("the device register", () => {
 
     expect(screen.queryByText(/syncing now/)).toBeNull();
     expect(screen.getByText(/last synced 2 days ago/)).toBeTruthy();
+  });
+
+  test("a device that signed out is reported as such, not as last synced", () => {
+    // "last synced within the last hour" would be technically true and quite
+    // wrong: that device has erased its copy, so saying when it last synced
+    // implies it still holds one.
+    deviceRows = [
+      {
+        id: "b",
+        name: "Installed app (iOS)",
+        firstSeen: Date.now() - 172_800_000,
+        lastSeen: Date.now() - 10 * 60_000,
+        signedOutAt: Date.now() - 10 * 60_000,
+        isThisDevice: false,
+      },
+    ];
+    render(<SyncView />);
+
+    expect(screen.getByText(/signed out within the last hour/i)).toBeTruthy();
+    expect(screen.queryByText(/last synced/i)).toBeNull();
   });
 
   test("an empty register says so rather than rendering nothing", () => {

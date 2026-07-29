@@ -534,13 +534,19 @@ export default function SyncView() {
                         )}
                       </div>
                       <div style={ST.devMeta}>
-                        {/* This device's state is known live, so say it rather
-                            than quoting a timestamp recorded up to an hour
-                            ago. Added is written once and is exact, so it can
-                            keep its finer wording. */}
-                        {d.isThisDevice && status === "synced"
-                          ? "syncing now"
-                          : `last synced ${coarseTime(d.lastSeen)}`}
+                        {/* Three cases, in order of what is actually known. A
+                            device that said it was leaving is reported as
+                            leaving, because "last synced" would imply it still
+                            holds a copy it has erased. This device's state is
+                            known live, so it is said rather than read back from
+                            a timestamp recorded up to an hour ago. Everything
+                            else falls to the recorded time. Added is written
+                            once and is exact, so it keeps its finer wording. */}
+                        {d.signedOutAt
+                          ? `signed out ${coarseTime(d.signedOutAt)}`
+                          : d.isThisDevice && status === "synced"
+                            ? "syncing now"
+                            : `last synced ${coarseTime(d.lastSeen)}`}
                         {d.firstSeen
                           ? ` · added ${relativeTime(d.firstSeen)}`
                           : ""}
