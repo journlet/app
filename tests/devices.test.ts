@@ -202,20 +202,73 @@ describe("registering a device", () => {
     expect(second.listDevices()).toHaveLength(1);
   });
 
-  test("another device's row is kept, and shown as not this device", async () => {
+  test("another device's row is kept, and marked as not this device", async () => {
     const d = await load();
     d.touchThisDevice();
     const other = new Y.Map<unknown>();
     doc.getMap<Y.Map<unknown>>("devices").set("other-id", other);
     other.set("id", "other-id");
     other.set("label", "iPhone");
+    other.set("firstSeen", Date.now() + 1000); // added after this device
     other.set("lastSeen", Date.now() - 60_000);
 
     const list = d.listDevices();
     expect(list).toHaveLength(2);
-    expect(list[0].isThisDevice).toBe(true); // this device sorts first
-    expect(list[1].name).toBe("iPhone");
-    expect(list[1].isThisDevice).toBe(false);
+    expect(list.filter((r) => r.isThisDevice)).toHaveLength(1);
+    const row = list.find((r) => r.id === "other-id");
+    expect(row?.name).toBe("iPhone");
+    expect(row?.isThisDevice).toBe(false);
+  });
+
+  test("orders by when devices were added, not by which one you are on", async () => {
+    // Every device sorted itself to the top, so one journal read differently
+    // depending where you looked and the top row changed meaning with it. It
+    // misled in practice: a phone showing its own row first was taken to be
+    // claiming the Mac was syncing.
+    const d = await load();
+    const older = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set("older", older);
+    older.set("id", "older");
+    older.set("firstSeen", 1000);
+    d.touchThisDevice(); // added now, so it must come second
+
+    const list = d.listDevices();
+    expect(list[0].id).toBe("older");
+    expect(list[1].isThisDevice).toBe(true);
+  });
+
+  test("the order is the same whichever device is reading", async () => {
+    // The property that matters: two devices reading one journal see one list.
+    const d = await load();
+    const a = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set("aaa", a);
+    a.set("id", "aaa");
+    a.set("firstSeen", 2000);
+    const b = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set("bbb", b);
+    b.set("id", "bbb");
+    b.set("firstSeen", 1000);
+
+    const fromA = d.listDevices().map((r) => r.id);
+    localStorage.setItem("journlet-device-id", "bbb"); // read as the other one
+    const other = await load();
+    const fromB = other.listDevices().map((r) => r.id);
+
+    expect(fromB).toEqual(fromA);
+    expect(fromA).toEqual(["bbb", "aaa"]);
+  });
+
+  test("rows with no added time still have one settled order", async () => {
+    // Rows from the first version of the register have no firstSeen, so the id
+    // has to break the tie or the list could shuffle between reads.
+    const d = await load();
+    for (const id of ["zzz", "aaa", "mmm"]) {
+      const rec = new Y.Map<unknown>();
+      doc.getMap<Y.Map<unknown>>("devices").set(id, rec);
+      rec.set("id", id);
+    }
+
+    expect(d.listDevices().map((r) => r.id)).toEqual(["aaa", "mmm", "zzz"]);
   });
 
   test("nothing removes a stale row on its own", async () => {

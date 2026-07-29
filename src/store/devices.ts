@@ -219,12 +219,24 @@ export const listDevices = (): DeviceRecord[] => {
       isThisDevice: id === here,
     });
   });
-  // This device first, then most recently seen — the order in which someone
-  // scanning the list for something unfamiliar would want to read it.
-  return out.sort((a, b) => {
-    if (a.isThisDevice !== b.isThisDevice) return a.isThisDevice ? -1 : 1;
-    return b.lastSeen - a.lastSeen;
-  });
+  // Oldest first, by when the device was added.
+  //
+  // Deliberately not "this device first" (fixed 28 Jul, Gary): that gave every
+  // device a different list, so the same journal read differently depending on
+  // where you looked, and the row at the top changed meaning with it. It
+  // actively misled — a phone showing its own row first was taken to be
+  // claiming the Mac was syncing. The "this device" badge says where you are;
+  // the order does not need to repeat it.
+  //
+  // And not by last-seen either, though that is shared and so would agree
+  // across devices: it changes as devices sync, so rows would shuffle under you
+  // over time. `firstSeen` never changes once written, which makes the list
+  // stable as well as consistent, and reads as the order you added them in.
+  // The id breaks ties, so rows written in the same millisecond, or older rows
+  // with no firstSeen at all, still have one settled order everywhere.
+  return out.sort(
+    (a, b) => a.firstSeen - b.firstSeen || a.id.localeCompare(b.id)
+  );
 };
 
 export const onDevicesChange = (fn: () => void): (() => void) => {
