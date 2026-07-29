@@ -692,31 +692,6 @@ export const signIn = async (email: string): Promise<void> => {
   if (error) throw new Error(error.message);
 };
 
-/**
- * Lost-device response: end every other device's session. That is the whole
- * operation (simplified 28 July, after the elaborate version caused worse
- * problems than it solved — spec §6.1b).
- *
- * This is the only thing that actually stops a device you no longer hold. Its
- * session is what lets it reach the server, and it already has the data key
- * locally, so nothing done to the *key* takes anything away from it. Rotating
- * the journal key alongside this was the previous behaviour, and all it added
- * for the common case was making every surviving device re-link.
- *
- * What it does not do, and cannot: reach the lost device. It keeps the copy it
- * holds, and it keeps working until its access token expires, because a signed
- * JWT cannot be revoked. That window is the real boundary, which is why the
- * project's JWT expiry setting matters (§6.2).
- *
- * The surviving devices keep their journal key, so getting one back is an
- * ordinary sign-in with nothing to re-enter.
- */
-export const signOutOtherDevices = async (): Promise<void> => {
-  if (!supabase || !session) throw new Error("Not signed in");
-  const { error } = await supabase.auth.signOut({ scope: "others" });
-  if (error) throw new Error(error.message);
-};
-
 // Sign in by typing the 6-digit code from the email — the only way to get
 // a session INSIDE an iOS home-screen app, since email links always open
 // in the default browser (whose storage is a different container).

@@ -13,7 +13,6 @@ import {
   getSessionEmail,
   getSyncError,
   getSyncStatus,
-  signOutOtherDevices,
   isConfigured,
   onSyncStatus,
   provideJournalKey,
@@ -60,8 +59,6 @@ export default function SyncView() {
   const [email, setEmail] = useState("");
   const [linkSent, setLinkSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
-  const [lostOpen, setLostOpen] = useState(false);
-  const [lostDone, setLostDone] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -498,7 +495,7 @@ export default function SyncView() {
               This list is stored inside your encrypted journal, so the server
               never sees it. It is here so you can spot a device you do not
               recognise — it is a record, not a lock. Removing a row only tidies
-              the list; use "lost a device" below to actually sign one out.
+              the list, and a device still syncing will add itself back.
             </p>
             {deviceList.length === 0 ? (
               <p style={ST.p}>No devices recorded yet.</p>
@@ -544,6 +541,10 @@ export default function SyncView() {
                           )}
                         </div>
                         <div style={ST.devMeta}>
+                          {/* The detected client only earns its own line once
+                              you have renamed the row; otherwise it IS the
+                              name and repeating it is noise. */}
+                          {d.renamed ? `${d.client} · ` : ""}
                           last synced {relativeTime(d.lastSeen)}
                           {d.firstSeen
                             ? ` · added ${relativeTime(d.firstSeen)}`
@@ -573,71 +574,6 @@ export default function SyncView() {
                   )
                 )}
               </ul>
-            )}
-          </div>
-          <div style={ST.keyBox}>
-            <div style={ST.keyLabel}>Lost a device?</div>
-            {lostDone ? (
-              <p style={{ ...ST.p, marginTop: 0 }}>
-                Done. Every other device has been signed out. They will ask you
-                to sign in again with your email; your journal key is unchanged,
-                so there is nothing to re-enter. The lost device can still reach
-                the server for a few minutes until its sign-in expires, so if it
-                is genuinely in someone else's hands, change your email password
-                too.
-              </p>
-            ) : lostOpen ? (
-              <>
-                <p style={{ ...ST.p, marginTop: 0 }}>
-                  This ends the sign-in on every device except this one. They
-                  keep their journals and their journal key, so getting one back
-                  is an ordinary sign-in with nothing to re-enter.
-                </p>
-                <p style={ST.p}>
-                  What it does not do: the lost device keeps the copy it already
-                  holds, because nothing can reach out and erase a device. It
-                  also keeps working for the few minutes its existing sign-in
-                  remains valid, so entries it writes in that window can still
-                  arrive.
-                </p>
-                <div style={ST.row}>
-                  <button
-                    className="sheetBtn isDanger"
-                    style={{ width: "auto" }}
-                    disabled={busy}
-                    onClick={async () => {
-                      setError(null);
-                      setBusy(true);
-                      try {
-                        await signOutOtherDevices();
-                        setLostDone(true);
-                        setLostOpen(false);
-                      } catch (e) {
-                        setError(
-                          e instanceof Error
-                            ? e.message
-                            : "Could not sign the other devices out"
-                        );
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    Sign out all other devices
-                  </button>
-                  <button
-                    className="sheetBtn isQuiet"
-                    style={{ width: "auto" }}
-                    onClick={() => setLostOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </>
-            ) : (
-              <button className="miniBtn" onClick={() => setLostOpen(true)}>
-                lost a device? sign it out
-              </button>
             )}
           </div>
           <div style={ST.keyBox}>

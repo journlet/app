@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
 //
-// The Sync screen: reporting a lost device, getting a signed-out device back,
-// and the device register.
+// The Sync screen: the device register, and getting a signed-out device back.
 //
-// These pin the wording, not the styling, because the wording is the fix. A
-// screen that claims a lost phone can no longer reach the server is worse than
-// one that says nothing: it is untrue for as long as that device's sign-in
-// lives. So: say what the action does, and say what it does not do.
+// These pin the wording, not the styling, because the wording is the fix. The
+// register in particular must not imply a power it does not have: it cannot
+// sign anything out, so it says "a record, not a lock".
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -15,7 +13,6 @@ const EMAIL = "gary@example.com";
 
 let status = "synced";
 let signedIn = true;
-const signOutOtherDevices = vi.fn(async () => {});
 const signIn = vi.fn(async () => {});
 
 vi.mock("../../src/store/sync", () => ({
@@ -27,7 +24,6 @@ vi.mock("../../src/store/sync", () => ({
   getSyncError: () => null,
   getSyncStatus: () => status,
   isConfigured: () => true,
-  signOutOtherDevices: (...a: unknown[]) => signOutOtherDevices(...(a as [])),
   onSyncStatus: (fn: (s: string) => void) => {
     fn(status);
     return () => {};
@@ -40,6 +36,8 @@ vi.mock("../../src/store/sync", () => ({
 interface Row {
   id: string;
   label: string;
+  client: string;
+  renamed: boolean;
   firstSeen: number;
   lastSeen: number;
   isThisDevice: boolean;
@@ -50,14 +48,18 @@ interface Row {
 const twoDevices = (): Row[] => [
   {
     id: "a",
-    label: "Mac",
+    label: "Chrome (macOS)",
+    client: "Chrome (macOS)",
+    renamed: false,
     firstSeen: Date.now() - 86_400_000,
     lastSeen: Date.now() - 60_000,
     isThisDevice: true,
   },
   {
     id: "b",
-    label: "iPhone",
+    label: "work phone",
+    client: "Installed app (iOS)",
+    renamed: true,
     firstSeen: Date.now() - 172_800_000,
     lastSeen: Date.now() - 7_200_000,
     isThisDevice: false,
@@ -137,58 +139,12 @@ describe("getting back in after the other devices were signed out", () => {
   });
 });
 
-describe("reporting a lost device", () => {
-  test("does not claim the lost device is cut off immediately", () => {
-    // The old copy said it "can never download anything new", which was untrue
-    // for as long as its access token remained valid. Overstating this is worse
-    // than understating it: someone might skip changing their email password.
-    render(<SyncView />);
-    fireEvent.click(screen.getByText(/lost a device\? sign it out/i));
-
-    expect(screen.getByText(/few minutes/i)).toBeTruthy();
-    expect(screen.getByText(/keeps the copy it/i)).toBeTruthy();
-  });
-
-  test("says the other devices keep their journal key", () => {
-    // The whole point of the simplification: nothing to re-enter, so getting a
-    // device back is an ordinary sign-in.
-    render(<SyncView />);
-    fireEvent.click(screen.getByText(/lost a device\? sign it out/i));
-
-    expect(screen.getByText(/nothing to re-enter/i)).toBeTruthy();
-  });
-
-  test("still explains that the device cannot be erased remotely", () => {
-    render(<SyncView />);
-    fireEvent.click(screen.getByText(/lost a device\? sign it out/i));
-
-    expect(screen.getByText(/nothing can reach out and erase a device/i)).toBeTruthy();
-  });
-
-  test("afterwards, tells you to change your email password too", async () => {
-    render(<SyncView />);
-    fireEvent.click(screen.getByText(/lost a device\? sign it out/i));
-    fireEvent.click(screen.getByText(/^Sign out all other devices$/));
-
-    expect(await screen.findByText(/change your email password/i)).toBeTruthy();
-    expect(signOutOtherDevices).toHaveBeenCalled();
-  });
-
-  test("and says there is nothing to re-enter afterwards", async () => {
-    render(<SyncView />);
-    fireEvent.click(screen.getByText(/lost a device\? sign it out/i));
-    fireEvent.click(screen.getByText(/^Sign out all other devices$/));
-
-    expect(await screen.findByText(/journal key is unchanged/i)).toBeTruthy();
-  });
-});
-
 describe("the device register", () => {
   test("lists the devices and marks which one you are on", () => {
     render(<SyncView />);
 
-    expect(screen.getByText("Mac")).toBeTruthy();
-    expect(screen.getByText("iPhone")).toBeTruthy();
+    expect(screen.getByText("Chrome (macOS)")).toBeTruthy();
+    expect(screen.getByText("work phone")).toBeTruthy();
     // "this device" also appears in the surrounding prose, so match the badge
     // by its exact text rather than a substring.
     expect(screen.getByText(/^\s*this device\s*$/i)).toBeTruthy();
@@ -229,14 +185,14 @@ describe("the device register", () => {
     fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
 
     expect(prompt).not.toHaveBeenCalled();
-    expect(screen.getByLabelText(/Name for Mac/i)).toBeTruthy();
+    expect(screen.getByLabelText(/Name for Chrome \(macOS\)/i)).toBeTruthy();
   });
 
   test("saving the new name commits it", () => {
     render(<SyncView />);
     fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
 
-    fireEvent.change(screen.getByLabelText(/Name for Mac/i), {
+    fireEvent.change(screen.getByLabelText(/Name for Chrome \(macOS\)/i), {
       target: { value: "work laptop" },
     });
     fireEvent.click(screen.getByText(/save name/i));
@@ -247,7 +203,7 @@ describe("the device register", () => {
   test("Enter saves, so it behaves like the rest of the app's inputs", () => {
     render(<SyncView />);
     fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
-    const input = screen.getByLabelText(/Name for Mac/i);
+    const input = screen.getByLabelText(/Name for Chrome \(macOS\)/i);
 
     fireEvent.change(input, { target: { value: "desk Mac" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -258,14 +214,14 @@ describe("the device register", () => {
   test("cancelling leaves the name alone", () => {
     render(<SyncView />);
     fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
-    fireEvent.change(screen.getByLabelText(/Name for Mac/i), {
+    fireEvent.change(screen.getByLabelText(/Name for Chrome \(macOS\)/i), {
       target: { value: "discarded" },
     });
 
     fireEvent.click(screen.getByText(/^cancel$/i));
 
     expect(renameDevice).not.toHaveBeenCalled();
-    expect(screen.getByText("Mac")).toBeTruthy();
+    expect(screen.getByText("Chrome (macOS)")).toBeTruthy();
   });
 
   test("a blank name is refused rather than saved", () => {
@@ -273,11 +229,11 @@ describe("the device register", () => {
     // a wrong one: an unrecognised device is the thing you are looking for.
     render(<SyncView />);
     fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
-    fireEvent.change(screen.getByLabelText(/Name for Mac/i), {
+    fireEvent.change(screen.getByLabelText(/Name for Chrome \(macOS\)/i), {
       target: { value: "   " },
     });
 
-    fireEvent.keyDown(screen.getByLabelText(/Name for Mac/i), {
+    fireEvent.keyDown(screen.getByLabelText(/Name for Chrome \(macOS\)/i), {
       key: "Enter",
     });
 
@@ -288,8 +244,31 @@ describe("the device register", () => {
     render(<SyncView />);
     fireEvent.click(screen.getAllByText(/^rename$/i)[0]);
 
-    expect(screen.getByText("iPhone")).toBeTruthy();
-    expect(screen.queryByLabelText(/Name for iPhone/i)).toBeNull();
+    expect(screen.getByText("work phone")).toBeTruthy();
+    expect(screen.queryByLabelText(/Name for work phone/i)).toBeNull();
+  });
+
+  test("names a row by its client, so two installs on one machine differ", () => {
+    // The installed app and a browser tab on the same Mac have separate
+    // storage, so they are separate rows. "Mac" twice would be unreadable.
+    render(<SyncView />);
+
+    expect(screen.getByText("Chrome (macOS)")).toBeTruthy();
+  });
+
+  test("keeps showing the client once a row has been renamed", () => {
+    // Renaming should not hide what the row actually is, or an unfamiliar
+    // device could be disguised by a friendly name.
+    render(<SyncView />);
+
+    expect(screen.getByText(/Installed app \(iOS\)/)).toBeTruthy();
+  });
+
+  test("does not repeat the client when it is also the name", () => {
+    render(<SyncView />);
+
+    // Once as the row's name, and not again in the metadata line beneath it.
+    expect(screen.getAllByText(/Chrome \(macOS\)/)).toHaveLength(1);
   });
 
   test("an empty register says so rather than rendering nothing", () => {

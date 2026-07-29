@@ -42,6 +42,43 @@ describe("registering a device", () => {
     expect(list[0].firstSeen).toBeGreaterThan(0);
   });
 
+  test("names the row after the client and platform, not just the device", async () => {
+    // One machine can hold the journal twice, as an installed app and as a
+    // browser tab with separate storage, so the client is what tells them apart.
+    const d = await load();
+    d.touchThisDevice();
+
+    // jsdom matches no browser or platform, so both fall back, which still
+    // proves the shape.
+    expect(d.listDevices()[0].client).toBe("Browser (unknown platform)");
+    expect(d.listDevices()[0].renamed).toBe(false);
+  });
+
+  test("a renamed row keeps the detected client alongside the name", async () => {
+    const d = await load();
+    d.touchThisDevice();
+
+    d.renameDevice(d.thisDeviceId(), "work laptop");
+
+    const row = d.listDevices()[0];
+    expect(row.label).toBe("work laptop");
+    expect(row.client).toBe("Browser (unknown platform)");
+    expect(row.renamed).toBe(true);
+  });
+
+  test("a row written before clients were recorded still reads sensibly", async () => {
+    // Rows from the first version of the register have only a label.
+    const d = await load();
+    const old = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set("legacy", old);
+    old.set("id", "legacy");
+    old.set("label", "Mac");
+
+    const row = d.listDevices().find((r) => r.id === "legacy");
+    expect(row?.label).toBe("Mac");
+    expect(row?.client).toBe("Mac");
+  });
+
   test("repeated connects do not write again", async () => {
     // Every write here becomes a row in the append-only log. A device syncing
     // several times an hour would otherwise generate more register traffic than

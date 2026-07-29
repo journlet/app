@@ -11,7 +11,12 @@ const ID_KEY = "journlet-device-id";
 
 export interface DeviceRecord {
   id: string;
+  /** What to show: the name you gave it, or the detected client and platform. */
   label: string;
+  /** The detected description, kept even when renamed so it can sit beneath. */
+  client: string;
+  /** True when `label` is your own name for it rather than the detected one. */
+  renamed: boolean;
   firstSeen: number;
   lastSeen: number;
   isThisDevice: boolean;
@@ -41,17 +46,50 @@ export const thisDeviceId = (): string => {
 };
 
 // Coarse and deliberately non-unique — enough to recognise which of your own
-// devices a row is ("iPhone", "Mac") without building a fingerprint. No
-// version numbers, no screen dimensions, no user-agent string verbatim.
-const guessLabel = (): string => {
+// devices a row is without building a fingerprint. No version numbers, no
+// screen dimensions, no user-agent string verbatim.
+//
+// Both halves are recorded, because one device can hold the journal more than
+// once: the installed app and a browser tab on the same Mac are separate
+// installs with separate storage, so they are separate rows, and "Mac" twice
+// would be unreadable. Named after the client, as WhatsApp's linked-device
+// list does: "Chrome (macOS)", "Installed app (iOS)".
+const platformName = (): string => {
   const ua = navigator.userAgent;
-  if (/iPhone/.test(ua)) return "iPhone";
-  if (/iPad/.test(ua)) return "iPad";
-  if (/Android/.test(ua)) return "Android device";
-  if (/Macintosh/.test(ua)) return "Mac";
-  if (/Windows/.test(ua)) return "Windows PC";
-  if (/Linux/.test(ua)) return "Linux computer";
-  return "Unknown device";
+  if (/iPhone/.test(ua)) return "iOS";
+  if (/iPad/.test(ua)) return "iPadOS";
+  if (/Android/.test(ua)) return "Android";
+  if (/Macintosh/.test(ua)) return "macOS";
+  if (/Windows/.test(ua)) return "Windows";
+  if (/Linux/.test(ua)) return "Linux";
+  return "unknown platform";
+};
+
+// Installed home-screen apps report standalone display mode; iOS Safari uses a
+// non-standard navigator flag instead. Worth distinguishing because on iOS the
+// installed app and the browser have separate storage, so they behave as two
+// devices and someone looking at this list needs to see why.
+const isInstalled = (): boolean => {
+  try {
+    if (window.matchMedia("(display-mode: standalone)").matches) return true;
+  } catch {
+    // matchMedia unavailable; fall through
+  }
+  return (
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+};
+
+// Order matters: Edge and Opera both claim Chrome, and Chrome claims Safari.
+const clientName = (): string => {
+  if (isInstalled()) return "Installed app";
+  const ua = navigator.userAgent;
+  if (/Edg\//.test(ua)) return "Edge";
+  if (/OPR\//.test(ua)) return "Opera";
+  if (/Firefox\//.test(ua)) return "Firefox";
+  if (/Chrome\//.test(ua)) return "Chrome";
+  if (/Safari\//.test(ua)) return "Safari";
+  return "Browser";
 };
 
 // Last-seen is not refreshed more often than this. Every write here becomes a
@@ -73,6 +111,11 @@ export const touchThisDevice = (): void => {
   const now = Date.now();
   const existing = devices.get(id);
   if (existing) {
+    // Refresh the detected client too: the same install can change from a
+    // browser tab to a home-screen app, and a stale description is exactly the
+    // kind of thing that makes someone doubt the list.
+    const detected = `${clientName()} (${platformName()})`;
+    if (existing.get("client") !== detected) existing.set("client", detected);
     const last = (existing.get("lastSeen") as number) || 0;
     if (now - last < TOUCH_INTERVAL_MS) return;
     existing.set("lastSeen", now);
@@ -82,7 +125,7 @@ export const touchThisDevice = (): void => {
     const rec = new Y.Map<unknown>();
     devices.set(id, rec);
     rec.set("id", id);
-    rec.set("label", guessLabel());
+    rec.set("client", `${clientName()} (${platformName()})`);
     rec.set("firstSeen", now);
     rec.set("lastSeen", now);
   });
@@ -93,9 +136,15 @@ export const listDevices = (): DeviceRecord[] => {
   const out: DeviceRecord[] = [];
   devices.forEach((rec, id) => {
     if (!(rec instanceof Y.Map)) return;
+    // `client` is detected, `label` is yours. Rows written before `client`
+    // existed have only a label, which stands in for both.
+    const client = (rec.get("client") as string) || "";
+    const named = (rec.get("label") as string) || "";
     out.push({
       id,
-      label: (rec.get("label") as string) || "Unknown device",
+      label: named || client || "Unknown device",
+      client: client || named || "Unknown device",
+      renamed: Boolean(named),
       firstSeen: (rec.get("firstSeen") as number) || 0,
       lastSeen: (rec.get("lastSeen") as number) || 0,
       isThisDevice: id === here,
@@ -109,7 +158,7 @@ export const listDevices = (): DeviceRecord[] => {
   });
 };
 
-/** Rename a device, so "iPhone" can become "work phone". */
+/** Give a device your own name, e.g. "Chrome (macOS)" becomes "work laptop". */
 export const renameDevice = (id: string, label: string): void => {
   const rec = devices.get(id);
   const trimmed = label.trim();
@@ -119,8 +168,8 @@ export const renameDevice = (id: string, label: string): void => {
 
 /**
  * Remove a row. Tidying only: it does not revoke anything, and a device still
- * syncing will re-add itself on its next connect. The UI must not imply
- * otherwise — reporting a lost device is the action that has teeth.
+ * syncing will re-add itself on its next connect. Nothing in the app currently
+ * signs another device out, so the UI must not imply that this does.
  */
 export const forgetDevice = (id: string): void => {
   if (id === thisDeviceId()) return; // removing your own row is never meant
