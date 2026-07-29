@@ -27,6 +27,8 @@ let authCallback: ((e: string, s: unknown) => void) | null = null;
 /** Every payload the engine pushed, decrypted later to see what it said. */
 let inserted: string[] = [];
 let wiped = false;
+/** Rows the server already holds, for a device re-linking to a live journal. */
+let serverRows: { id: number; payload: string }[] = [];
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: () => ({
@@ -60,7 +62,7 @@ vi.mock("@supabase/supabase-js", () => ({
         eq: () => b,
         gt: () => b,
         order: () => b,
-        limit: async () => ({ data: [], error: null }),
+        limit: async () => ({ data: serverRows, error: null }),
         insert: async (row: { payload: string }) => {
           inserted.push(row.payload);
           return { error: null };
@@ -115,6 +117,17 @@ const boot = async () => {
   return sync;
 };
 
+/** Boot a wiped device against a server that already holds `state`. */
+const bootWith = async (state: Y.Doc) => {
+  const { encryptUpdate } = await import("../src/lib/crypto");
+  const payload = await encryptUpdate(dataKey, Y.encodeStateAsUpdate(state), {
+    userId: USER_ID,
+    volume: "v1",
+  });
+  serverRows = [{ id: 1, payload: b64encode(payload) }];
+  return boot();
+};
+
 /** Rebuild what the server would hold from everything that was pushed. */
 const asServerSees = async (): Promise<Y.Doc> => {
   const { decryptUpdate } = await import("../src/lib/crypto");
@@ -132,6 +145,54 @@ const asServerSees = async (): Promise<Y.Doc> => {
 
 beforeEach(() => {
   localStorage.clear();
+  serverRows = [];
+});
+
+describe("coming back after signing out", () => {
+  test("clears the mark, so the other devices stop showing it as gone", async () => {
+    // The reported bug. touchThisDevice used to run before the reconcile, so on
+    // a device that had been wiped the local doc was empty and it created a
+    // fresh row rather than finding its own. The server's row, carrying the
+    // mark, then merged in on top, and the phone showed as signed out on the
+    // Mac while it was sitting there syncing.
+    const sync = await boot();
+    // The account's journal as it is after this device signed out: its row is
+    // present and marked.
+    const server = new Y.Doc();
+    const rec = new Y.Map<unknown>();
+    server.getMap<Y.Map<unknown>>("devices").set("phone", rec);
+    rec.set("id", "phone");
+    rec.set("platform", "iOS");
+    rec.set("firstSeen", 1000);
+    rec.set("signedOutAt", Date.now() - 60_000);
+    server.getArray("entries").push(["written before signing out"]);
+    await sync.signOutAndWipe();
+
+    // Re-linking: a wiped device, and the server holding that state.
+    const relinked = await bootWith(server);
+    await vi.waitFor(() => expect(relinked.getSyncStatus()).toBe("synced"));
+
+    const row = doc.getMap<Y.Map<unknown>>("devices").get("phone");
+    expect(row?.get("signedOutAt")).toBeUndefined();
+  });
+
+  test("keeps the row's original added date rather than resetting it", async () => {
+    // The same conflict churned firstSeen, so a device that had been on the
+    // account for months looked as though it had just appeared.
+    const server = new Y.Doc();
+    const rec = new Y.Map<unknown>();
+    server.getMap<Y.Map<unknown>>("devices").set("phone", rec);
+    rec.set("id", "phone");
+    rec.set("platform", "iOS");
+    rec.set("firstSeen", 1000);
+    rec.set("signedOutAt", Date.now() - 60_000);
+
+    const sync = await bootWith(server);
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
+
+    const row = doc.getMap<Y.Map<unknown>>("devices").get("phone");
+    expect(row?.get("firstSeen")).toBe(1000);
+  });
 });
 
 describe("signing out", () => {

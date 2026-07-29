@@ -178,6 +178,11 @@ const DEVICE_ID = "test-device";
  * the register rather than the delete-set behaviour they exist to protect.
  */
 const withDeviceRegistered = (d: Y.Doc): void => {
+  // Idempotent: boot() registers by default, and some fixtures also put the row
+  // into the server snapshot. Setting the key twice would be a local change the
+  // server lacks, which is a push, which is exactly what the quiet tests are
+  // measuring.
+  if (d.getMap("devices").has(DEVICE_ID)) return;
   const rec = new Y.Map<unknown>();
   d.getMap<Y.Map<unknown>>("devices").set(DEVICE_ID, rec);
   rec.set("id", DEVICE_ID);
@@ -204,6 +209,11 @@ const boot = async (opts: {
   doc = new Y.Doc();
   if (opts.local) doc.getArray("entries").push(opts.local);
   opts.prepare?.(doc);
+  // Registered by default. touchThisDevice runs after the reconcile now (see
+  // doConnect), so an unregistered device writes its row as a separate live
+  // push, which would show up in every assertion about how many rows a journal
+  // change produced. Tests about the register itself live in devices.test.ts.
+  withDeviceRegistered(doc);
   rows = opts.server;
   inserted = [];
   authCallback = null;

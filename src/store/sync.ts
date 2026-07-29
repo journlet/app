@@ -634,15 +634,30 @@ const doConnect = async (): Promise<void> => {
     setStatus("connecting");
   }
   clearPendingKey(); // linked without needing it
-  // Register this device (see store/devices.ts) BEFORE reconciling, so the row
-  // rides the reconcile diff instead of becoming a second push straight after
-  // it. Only reached once the keys check out, so a device that has just been
-  // locked out does not announce itself on the way out.
-  touchThisDevice();
   if (!(await reconcile("connect"))) return;
   syncedOnce = true;
+  // Register this device (see store/devices.ts) only once the journal has been
+  // pulled, so it is looking at the register the account actually has.
+  //
+  // This ran before the reconcile until 29 July, to save a second push. On a
+  // device that had been wiped and re-linked the local doc is empty at that
+  // point, so it never found its existing row: it created a fresh one, the
+  // server's row merged in on top, and whichever won the Y.Map conflict decided
+  // whether the row kept its history and whether the "signed out" mark was ever
+  // cleared. In practice the mark stuck, and a phone that was back and syncing
+  // still showed as signed out on the other device.
+  //
+  // The push it saved was only ever saved when there was nothing to write, and
+  // in that case touchThisDevice makes no change and produces no push anyway.
+  // So this costs a row exactly when a row is warranted: registering a new
+  // device, or an hourly refresh.
+  //
+  // After connectedUserId is set, which is what lets the live-edit handler push
+  // it. Before that assignment the handler ignores every local change, so the
+  // row would sit unpushed until some later reconcile happened to notice it.
   connectedUserId = session.user.id;
   subscribe();
+  touchThisDevice();
   setStatus("synced");
 };
 
