@@ -121,6 +121,18 @@ let channel: RealtimeChannel | null = null;
 let connectedUserId: string | null = null;
 let dirty = false;
 let started = false;
+/**
+ * Has this device ever pulled the account's journal successfully?
+ *
+ * The difference between "your journal is empty" and "I could not fetch your
+ * journal" is invisible from the doc alone: both are an empty local journal.
+ * Without this the app showed four empty sections and a "waiting" badge when a
+ * transient server error stopped the first reconcile, which reads as having lost
+ * everything (reported 29 Jul, after a "JWT issued at future" clock error).
+ */
+let syncedOnce = false;
+
+export const hasSyncedOnce = (): boolean => syncedOnce;
 
 // Persistent shadow of the server's state this session: what the server
 // has (by id high-water mark) and its CRDT state vector, so catch-ups
@@ -628,6 +640,7 @@ const doConnect = async (): Promise<void> => {
   // locked out does not announce itself on the way out.
   touchThisDevice();
   if (!(await reconcile("connect"))) return;
+  syncedOnce = true;
   connectedUserId = session.user.id;
   subscribe();
   setStatus("synced");
@@ -646,10 +659,57 @@ const doConnect = async (): Promise<void> => {
 // than a proven diagnosis — see spec §6.1 notes.
 let connecting: Promise<void> | null = null;
 
+/**
+ * Retry a failed connect on a backoff.
+ *
+ * Before this, a connect that failed left the app in "pending" until something
+ * incidental happened — a foreground, or the network dropping and returning. A
+ * transient server error therefore became a stuck app with a working fix nobody
+ * could reach: restarting the app was the only way out, which is exactly how the
+ * clock-skew error was resolved on 29 Jul.
+ *
+ * Backoff rather than a fixed interval, capped, and only while signed in, so a
+ * server having a bad minute is not hammered by every device at once.
+ */
+const RETRY_START_MS = 2_000;
+const RETRY_MAX_MS = 60_000;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryDelay = RETRY_START_MS;
+
+const cancelRetry = () => {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+  retryDelay = RETRY_START_MS;
+};
+
+const scheduleRetry = () => {
+  // Only for states a retry can actually mend. "needs-key" waits on the user,
+  // and retrying it would re-read the journal row every minute for nothing.
+  if (retryTimer || !session) return;
+  if (status !== "pending" && status !== "offline") return;
+  const delay = retryDelay;
+  retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void connect();
+  }, delay);
+};
+
 const connect = (): Promise<void> =>
-  (connecting ??= doConnect().finally(() => {
-    connecting = null;
-  }));
+  (connecting ??= doConnect()
+    .then(() => {
+      if (connectedUserId) cancelRetry();
+      else scheduleRetry();
+    })
+    .finally(() => {
+      connecting = null;
+    }));
+
+/** Ask again now, for a "try again" button. */
+export const retryConnect = async (): Promise<void> => {
+  cancelRetry();
+  await connect();
+};
 
 // ---------- public API ----------
 
@@ -753,6 +813,8 @@ const wipeThisDevice = async (): Promise<void> => {
 };
 
 export const signOutAndWipe = async (): Promise<void> => {
+  cancelRetry();
+  syncedOnce = false;
   // Tell the other devices this one is leaving before tearing sync down. The
   // register lives inside the journal, so this is the only moment it can be
   // said: no other device can detect a sign-out, and after teardown there is no

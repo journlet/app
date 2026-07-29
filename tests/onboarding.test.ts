@@ -7,11 +7,13 @@
 
 import { describe, expect, test } from "vitest";
 import {
+  cannotLoadYet,
   needsJournalKey,
   needsOnboarding,
   needsRecoveryCode,
 } from "../src/lib/onboarding";
 import type {
+  LoadGateInput,
   OnboardingInput,
   RecoveryGateInput,
 } from "../src/lib/onboarding";
@@ -171,6 +173,75 @@ describe("the recovery code gate", () => {
     // showing it.
     for (const status of ["connecting", "pending", "offline", "needs-key"] as const) {
       expect(needsRecoveryCode({ ...justCreated, status })).toBe(true);
+    }
+  });
+});
+
+/** Signed in, nothing local, and the first fetch never landed. */
+const stuck: LoadGateInput = {
+  configured: true,
+  status: "pending",
+  loaded: true,
+  hasLocalContent: false,
+  syncedOnce: false,
+};
+
+describe("a device that cannot load the journal", () => {
+  test("says so rather than rendering an empty journal", () => {
+    // Reported 29 July: a transient "JWT issued at future" clock error stopped
+    // the first reconcile, and the app showed four empty sections with a small
+    // "waiting" badge. Indistinguishable from having lost everything.
+    expect(cannotLoadYet(stuck)).toBe(true);
+  });
+
+  test("covers offline as well as a failed fetch", () => {
+    expect(cannotLoadYet({ ...stuck, status: "offline" })).toBe(true);
+  });
+
+  test("does not fire once a fetch has ever succeeded", () => {
+    // This is what separates it from a genuinely empty new journal: a first
+    // device that has just created one holds nothing either.
+    expect(cannotLoadYet({ ...stuck, syncedOnce: true })).toBe(false);
+  });
+
+  test("does not fire on a device that holds a journal", () => {
+    // Sync trouble on a device with entries is the banner's job, not a takeover
+    // of the whole screen.
+    expect(cannotLoadYet({ ...stuck, hasLocalContent: true })).toBe(false);
+  });
+
+  test("does not fire while merely connecting", () => {
+    // Normal and brief on every launch. Showing this screen there would flash a
+    // scare at someone whose journal is about to appear.
+    expect(cannotLoadYet({ ...stuck, status: "connecting" })).toBe(false);
+  });
+
+  test("leaves needs-key and signed-out to their own screens", () => {
+    expect(cannotLoadYet({ ...stuck, status: "needs-key" })).toBe(false);
+    expect(cannotLoadYet({ ...stuck, status: "signed-out" })).toBe(false);
+  });
+
+  test("does not fire before the journal has loaded, or without sync", () => {
+    expect(cannotLoadYet({ ...stuck, loaded: false })).toBe(false);
+    expect(cannotLoadYet({ ...stuck, configured: false })).toBe(false);
+  });
+
+  test("never overlaps the other gates", () => {
+    // Four screens compete for one slot, so any overlap is a bug whichever wins.
+    for (const status of [
+      "signed-out",
+      "needs-key",
+      "connecting",
+      "synced",
+      "pending",
+      "offline",
+      "disabled",
+    ] as const) {
+      const base = { configured: true, loaded: true, hasLocalContent: false };
+      const load = cannotLoadYet({ ...base, status, syncedOnce: false });
+      const onboard = needsOnboarding({ ...base, status });
+      const key = needsJournalKey({ ...base, status });
+      expect([load, onboard, key].filter(Boolean).length).toBeLessThan(2);
     }
   });
 });

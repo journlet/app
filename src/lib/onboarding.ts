@@ -59,6 +59,40 @@ export const needsOnboarding = (i: OnboardingInput): boolean =>
 export const needsJournalKey = (i: OnboardingInput): boolean =>
   i.configured && i.loaded && i.status === "needs-key" && !i.hasLocalContent;
 
+export interface LoadGateInput {
+  configured: boolean;
+  status: SyncStatus;
+  loaded: boolean;
+  hasLocalContent: boolean;
+  /** Has this device ever pulled the account's journal successfully? */
+  syncedOnce: boolean;
+}
+
+/**
+ * A signed-in device that holds nothing and has never managed to fetch the
+ * journal. Say so, rather than rendering an empty one.
+ *
+ * Reported 29 July: a transient "JWT issued at future" clock error stopped the
+ * first reconcile, and the app showed four empty sections with a small "waiting"
+ * badge. Nothing was lost and nothing was wrong with the journal, but there is
+ * no way to tell that apart from having lost everything by looking, which is the
+ * worst thing this app can imply.
+ *
+ * `syncedOnce` is what separates this from a genuinely empty new journal: a first
+ * device that has just created one has no content either, and it has reconciled.
+ *
+ * Only for states a fetch has actually been attempted and not reached: "pending"
+ * and "offline". Not "connecting", which is normal and brief and would flash this
+ * screen on every launch; not "needs-key", which has its own screen; not
+ * "synced", where an empty journal really is empty.
+ */
+export const cannotLoadYet = (i: LoadGateInput): boolean =>
+  i.configured &&
+  i.loaded &&
+  !i.hasLocalContent &&
+  !i.syncedOnce &&
+  (i.status === "pending" || i.status === "offline");
+
 export interface RecoveryGateInput {
   configured: boolean;
   status: SyncStatus;

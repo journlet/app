@@ -26,9 +26,12 @@ import type { ThemePref } from "./lib/theme";
 import {
   countUpdates,
   getJournalKeyCode,
+  getSyncError,
   getSyncStatus,
+  hasSyncedOnce,
   isConfigured,
   onSyncStatus,
+  retryConnect,
 } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
 import { logVolumeMetrics } from "./store/metrics";
@@ -84,8 +87,10 @@ import CaptureLauncher from "./ui/CaptureLauncher";
 import OnboardingView from "./ui/OnboardingView";
 import RecoveryCodeView from "./ui/RecoveryCodeView";
 import UnlockView from "./ui/UnlockView";
+import CannotLoadView from "./ui/CannotLoadView";
 import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
 import {
+  cannotLoadYet,
   needsJournalKey,
   needsOnboarding,
   needsRecoveryCode,
@@ -463,6 +468,20 @@ export default function App() {
     status: syncStatus,
     loaded,
     hasLocalContent,
+  });
+
+  // Signed in, holding nothing, and has never managed to fetch the journal.
+  // Rendering an empty journal here reads as data loss (reported 29 Jul), so it
+  // says what is happening and offers a retry instead.
+  const [syncedOnce, setSyncedOnce] = useState(hasSyncedOnce());
+  const [retrying, setRetrying] = useState(false);
+  useEffect(() => setSyncedOnce(hasSyncedOnce()), [syncStatus]);
+  const stuck = cannotLoadYet({
+    configured: isConfigured(),
+    status: syncStatus,
+    loaded,
+    hasLocalContent,
+    syncedOnce,
   });
 
   // Second stage of first run: the recovery code, shown once before the journal
@@ -879,8 +898,12 @@ export default function App() {
   return (
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <Header
-        showBack={!onboarding && !unlocking && !showRecovery && view !== "spread"}
-        showMenu={!onboarding && !unlocking && !showRecovery && view === "spread"}
+        showBack={
+          !onboarding && !unlocking && !showRecovery && !stuck && view !== "spread"
+        }
+        showMenu={
+          !onboarding && !unlocking && !showRecovery && !stuck && view === "spread"
+        }
         onBack={goBack}
         onMenu={() => setView("menu")}
         saving={saveState === "saving"}
@@ -903,7 +926,7 @@ export default function App() {
             chooses. This is also the deliberate answer to journalling for
             weeks into a device that is not syncing: capture keeps working
             (§6.1b), so the state has to be impossible to miss instead. */}
-        {!onboarding && !unlocking && !showRecovery && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner onSignIn={() => setView("sync")} />
         )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
@@ -911,6 +934,17 @@ export default function App() {
           <OnboardingView>
             <SyncView />
           </OnboardingView>
+        )}
+        {!onboarding && !unlocking && stuck && (
+          <CannotLoadView
+            error={getSyncError()}
+            offline={syncStatus === "offline"}
+            busy={retrying}
+            onRetry={() => {
+              setRetrying(true);
+              void retryConnect().finally(() => setRetrying(false));
+            }}
+          />
         )}
         {!onboarding && unlocking && (
           <UnlockView>
@@ -926,7 +960,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && loaded && view === "index" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "index" && (
           <IndexView
             days={days}
             nowKeys={nowKeys}
@@ -944,10 +978,10 @@ export default function App() {
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && loaded && view === "sync" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "sync" && (
           <SyncView />
         )}
-        {!onboarding && !unlocking && !showRecovery && loaded && view === "menu" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
             theme={themePref}
@@ -968,7 +1002,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && loaded && activeCol && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && activeCol && (
           <CollectionView
             collection={activeCol}
             entries={days[colPageKey(activeCol.id)] || []}
@@ -982,7 +1016,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && loaded && view === "spread" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "spread" && (
           <SpreadView
             renderEntry={renderEntry}
             renderScheduledRow={renderScheduledRow}
@@ -1000,7 +1034,7 @@ export default function App() {
             onOpenFutureLog={() => setView("future")}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && loaded && view === "future" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "future" && (
           <FutureLogView
             count={futureLogCount}
             groups={futureLogGroups}
@@ -1018,6 +1052,7 @@ export default function App() {
       {!onboarding &&
         !unlocking &&
         !showRecovery &&
+        !stuck &&
         activeCol?.kind !== "habits" &&
         view !== "sync" &&
         view !== "menu" && (
@@ -1048,7 +1083,7 @@ export default function App() {
       {/* Also gated: /?capture opens this form on launch without touching the
           launcher, so an app-icon shortcut would otherwise walk straight past
           onboarding into an entry form. */}
-      {!onboarding && !unlocking && !showRecovery && captureOpen && (
+      {!onboarding && !unlocking && !showRecovery && !stuck && captureOpen && (
         <CaptureForm
           inputRef={inputRef}
           input={input}

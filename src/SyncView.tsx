@@ -328,6 +328,13 @@ export default function SyncView() {
         <span style={ST.sub}>{STATUS_LABEL[status]}</span>
       </div>
 
+      {/* At the top, not the bottom. It used to sit below Delete account, which
+          meant the one thing worth reading on a device that could not load was
+          the last thing anyone would find (reported 29 Jul). */}
+      {getSyncError() && (
+        <p style={ST.error}>Last sync problem: {getSyncError()}</p>
+      )}
+
       {status === "disabled" && (
         <p style={ST.p}>
           This build has no Supabase configuration, so the journal is
@@ -744,9 +751,6 @@ export default function SyncView() {
       )}
 
       {error && <p style={ST.error}>{error}</p>}
-      {getSyncError() && (
-        <p style={ST.error}>Last sync problem: {getSyncError()}</p>
-      )}
     </section>
   );
 }
