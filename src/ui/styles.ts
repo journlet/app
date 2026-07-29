@@ -127,6 +127,20 @@ export const S: Record<string, CSSProperties> = {
     marginBottom: -3,
   },
   list: { listStyle: "none", margin: 0, padding: 0 },
+  onboardLede: {
+    fontSize: 15,
+    lineHeight: 1.65,
+    color: INK,
+    margin: "0 0 12px",
+    maxWidth: 480,
+  },
+  onboardNote: {
+    fontSize: 13.5,
+    lineHeight: 1.6,
+    color: INK_SOFT,
+    margin: "0 0 16px",
+    maxWidth: 480,
+  },
   empty: {
     color: INK_SOFT,
     fontSize: 14,

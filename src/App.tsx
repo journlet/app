@@ -23,7 +23,12 @@ import {
   saveTheme,
 } from "./lib/theme";
 import type { ThemePref } from "./lib/theme";
-import { countUpdates, getSyncStatus, onSyncStatus } from "./store/sync";
+import {
+  countUpdates,
+  getSyncStatus,
+  isConfigured,
+  onSyncStatus,
+} from "./store/sync";
 import type { SyncStatus } from "./store/sync";
 import { logVolumeMetrics } from "./store/metrics";
 import { colPageKey } from "./lib/types";
@@ -75,7 +80,9 @@ import UndoToast from "./ui/UndoToast";
 import SpreadView from "./ui/SpreadView";
 import Header from "./ui/Header";
 import CaptureLauncher from "./ui/CaptureLauncher";
+import OnboardingView from "./ui/OnboardingView";
 import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
+import { needsOnboarding } from "./lib/onboarding";
 import { buildSpreadData } from "./ui/spreadData";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
@@ -429,6 +436,17 @@ export default function App() {
 
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatus());
   useEffect(() => onSyncStatus(setSyncStatus), []);
+
+  // Fresh install with sync configured: sign in before there is a journal at
+  // all (decision 3, spec device-identity-design.md). Deliberately not applied
+  // to a signed-out device that already holds content — see lib/onboarding.
+  const onboarding = needsOnboarding({
+    configured: isConfigured(),
+    status: syncStatus,
+    loaded,
+    hasLocalContent,
+  });
+
 
   // Volume-size instrumentation (remediation item 15): log the encoded doc
   // size and the update-log row count once the journal has opened, and again
@@ -818,8 +836,8 @@ export default function App() {
   return (
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <Header
-        showBack={view !== "spread"}
-        showMenu={view === "spread"}
+        showBack={!onboarding && view !== "spread"}
+        showMenu={!onboarding && view === "spread"}
         onBack={goBack}
         onMenu={() => setView("menu")}
         saving={saveState === "saving"}
@@ -842,11 +860,16 @@ export default function App() {
             chooses. This is also the deliberate answer to journalling for
             weeks into a device that is not syncing: capture keeps working
             (§6.1b), so the state has to be impossible to miss instead. */}
-        {isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
+        {!onboarding && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner onSignIn={() => setView("sync")} />
         )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
-        {loaded && view === "index" && (
+        {onboarding && (
+          <OnboardingView>
+            <SyncView />
+          </OnboardingView>
+        )}
+        {!onboarding && loaded && view === "index" && (
           <IndexView
             days={days}
             nowKeys={nowKeys}
@@ -864,10 +887,10 @@ export default function App() {
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
         )}
-        {loaded && view === "sync" && (
+        {!onboarding && loaded && view === "sync" && (
           <SyncView />
         )}
-        {loaded && view === "menu" && (
+        {!onboarding && loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
             theme={themePref}
@@ -888,7 +911,7 @@ export default function App() {
             }}
           />
         )}
-        {loaded && activeCol && (
+        {!onboarding && loaded && activeCol && (
           <CollectionView
             collection={activeCol}
             entries={days[colPageKey(activeCol.id)] || []}
@@ -902,7 +925,7 @@ export default function App() {
             }}
           />
         )}
-        {loaded && view === "spread" && (
+        {!onboarding && loaded && view === "spread" && (
           <SpreadView
             renderEntry={renderEntry}
             renderScheduledRow={renderScheduledRow}
@@ -920,7 +943,7 @@ export default function App() {
             onOpenFutureLog={() => setView("future")}
           />
         )}
-        {loaded && view === "future" && (
+        {!onboarding && loaded && view === "future" && (
           <FutureLogView
             count={futureLogCount}
             groups={futureLogGroups}
@@ -932,7 +955,13 @@ export default function App() {
         </div>
       </main>
 
-      {activeCol?.kind !== "habits" && view !== "sync" && view !== "menu" && (
+      {/* No capture during onboarding: the launcher sits outside <main>, so
+          without this an entry could be written into a journal that has no
+          account behind it yet, which is the very thing sign-in-first removes. */}
+      {!onboarding &&
+        activeCol?.kind !== "habits" &&
+        view !== "sync" &&
+        view !== "menu" && (
         <CaptureLauncher
           onOpen={() => setCaptureOpen(true)}
           activeCol={activeCol}
@@ -957,7 +986,10 @@ export default function App() {
           );
         })()}
 
-      {captureOpen && (
+      {/* Also gated: /?capture opens this form on launch without touching the
+          launcher, so an app-icon shortcut would otherwise walk straight past
+          onboarding into an entry form. */}
+      {!onboarding && captureOpen && (
         <CaptureForm
           inputRef={inputRef}
           input={input}
