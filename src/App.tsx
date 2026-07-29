@@ -91,6 +91,7 @@ import CannotLoadView from "./ui/CannotLoadView";
 import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
 import {
   cannotLoadYet,
+  isSettling,
   needsJournalKey,
   needsOnboarding,
   needsRecoveryCode,
@@ -476,6 +477,16 @@ export default function App() {
   const [syncedOnce, setSyncedOnce] = useState(hasSyncedOnce());
   const [retrying, setRetrying] = useState(false);
   useEffect(() => setSyncedOnce(hasSyncedOnce()), [syncStatus]);
+  const gateInput = {
+    configured: isConfigured(),
+    status: syncStatus,
+    loaded,
+    hasLocalContent,
+    syncedOnce,
+  };
+  // Still working out which screen applies. Without this the journal rendered
+  // empty for the second or so before the answer arrived.
+  const settling = isSettling(gateInput);
   const stuck = cannotLoadYet({
     configured: isConfigured(),
     status: syncStatus,
@@ -899,10 +910,20 @@ export default function App() {
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <Header
         showBack={
-          !onboarding && !unlocking && !showRecovery && !stuck && view !== "spread"
+          !onboarding &&
+          !unlocking &&
+          !showRecovery &&
+          !stuck &&
+          !settling &&
+          view !== "spread"
         }
         showMenu={
-          !onboarding && !unlocking && !showRecovery && !stuck && view === "spread"
+          !onboarding &&
+          !unlocking &&
+          !showRecovery &&
+          !stuck &&
+          !settling &&
+          view === "spread"
         }
         onBack={goBack}
         onMenu={() => setView("menu")}
@@ -926,7 +947,7 @@ export default function App() {
             chooses. This is also the deliberate answer to journalling for
             weeks into a device that is not syncing: capture keeps working
             (§6.1b), so the state has to be impossible to miss instead. */}
-        {!onboarding && !unlocking && !showRecovery && !stuck && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner onSignIn={() => setView("sync")} />
         )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
@@ -935,7 +956,10 @@ export default function App() {
             <SyncView />
           </OnboardingView>
         )}
-        {!onboarding && !unlocking && stuck && (
+        {!onboarding && !unlocking && settling && (
+          <div style={S.empty}>opening your journal…</div>
+        )}
+        {!onboarding && !unlocking && !settling && stuck && (
           <CannotLoadView
             error={getSyncError()}
             offline={syncStatus === "offline"}
@@ -960,7 +984,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "index" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "index" && (
           <IndexView
             days={days}
             nowKeys={nowKeys}
@@ -978,10 +1002,10 @@ export default function App() {
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "sync" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "sync" && (
           <SyncView />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "menu" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
             theme={themePref}
@@ -1002,7 +1026,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && activeCol && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && activeCol && (
           <CollectionView
             collection={activeCol}
             entries={days[colPageKey(activeCol.id)] || []}
@@ -1016,7 +1040,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "spread" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "spread" && (
           <SpreadView
             renderEntry={renderEntry}
             renderScheduledRow={renderScheduledRow}
@@ -1034,7 +1058,7 @@ export default function App() {
             onOpenFutureLog={() => setView("future")}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && loaded && view === "future" && (
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "future" && (
           <FutureLogView
             count={futureLogCount}
             groups={futureLogGroups}
@@ -1053,6 +1077,7 @@ export default function App() {
         !unlocking &&
         !showRecovery &&
         !stuck &&
+        !settling &&
         activeCol?.kind !== "habits" &&
         view !== "sync" &&
         view !== "menu" && (
@@ -1083,7 +1108,7 @@ export default function App() {
       {/* Also gated: /?capture opens this form on launch without touching the
           launcher, so an app-icon shortcut would otherwise walk straight past
           onboarding into an entry form. */}
-      {!onboarding && !unlocking && !showRecovery && !stuck && captureOpen && (
+      {!onboarding && !unlocking && !showRecovery && !stuck && !settling && captureOpen && (
         <CaptureForm
           inputRef={inputRef}
           input={input}

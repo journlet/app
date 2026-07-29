@@ -93,6 +93,27 @@ export const cannotLoadYet = (i: LoadGateInput): boolean =>
   !i.syncedOnce &&
   (i.status === "pending" || i.status === "offline");
 
+/**
+ * A device that holds nothing, has never synced, and is still finding out which
+ * of the other screens applies. Show that it is working, not an empty journal.
+ *
+ * This is the same failure as `cannotLoadYet`, one moment earlier. Connecting was
+ * excluded from that gate to avoid flashing an alarming screen on every launch,
+ * and the consequence was flashing an empty journal instead: reported 29 July as
+ * "an empty journal for about a second before the needs-key window appeared".
+ *
+ * Between them the two gates make the rule total: a device with nothing local and
+ * no successful sync never renders a journal. It is signing in, unlocking,
+ * failing to load, or still working it out. Only a device that has actually
+ * synced is allowed to show an empty journal, because then it really is empty.
+ */
+export const isSettling = (i: LoadGateInput): boolean =>
+  i.configured &&
+  i.loaded &&
+  !i.hasLocalContent &&
+  !i.syncedOnce &&
+  i.status === "connecting";
+
 export interface RecoveryGateInput {
   configured: boolean;
   status: SyncStatus;

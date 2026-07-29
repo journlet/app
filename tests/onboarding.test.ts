@@ -8,6 +8,7 @@
 import { describe, expect, test } from "vitest";
 import {
   cannotLoadYet,
+  isSettling,
   needsJournalKey,
   needsOnboarding,
   needsRecoveryCode,
@@ -226,6 +227,58 @@ describe("a device that cannot load the journal", () => {
     expect(cannotLoadYet({ ...stuck, configured: false })).toBe(false);
   });
 
+  test("the connecting moment shows working, not an empty journal", () => {
+    // Reported as "an empty journal for about a second before the needs-key
+    // window appeared". Connecting was excluded from cannotLoadYet to avoid
+    // flashing an alarming screen, which left the empty journal flashing
+    // instead — worse, since it is the one thing that reads as data loss.
+    expect(isSettling({ ...stuck, status: "connecting" })).toBe(true);
+    expect(cannotLoadYet({ ...stuck, status: "connecting" })).toBe(false);
+  });
+
+  test("settling gives way to the other screens once they apply", () => {
+    for (const status of [
+      "signed-out",
+      "needs-key",
+      "synced",
+      "pending",
+      "offline",
+      "disabled",
+    ] as const) {
+      expect(isSettling({ ...stuck, status })).toBe(false);
+    }
+  });
+
+  test("an established device is never held at a settling screen", () => {
+    // It has a journal to show, so it shows it while sync catches up.
+    expect(isSettling({ ...stuck, status: "connecting", hasLocalContent: true }))
+      .toBe(false);
+    expect(isSettling({ ...stuck, status: "connecting", syncedOnce: true }))
+      .toBe(false);
+  });
+
+  test("no state lets a never-synced empty device render a journal", () => {
+    // The property the four gates exist to guarantee, asserted directly rather
+    // than inferred from each of them. Every status is claimed by exactly one
+    // screen, except "synced", where an empty journal really is empty, and
+    // "disabled", which is the development build.
+    for (const status of [
+      "signed-out",
+      "needs-key",
+      "connecting",
+      "pending",
+      "offline",
+    ] as const) {
+      const base = { configured: true, loaded: true, hasLocalContent: false };
+      const claimed =
+        needsOnboarding({ ...base, status }) ||
+        needsJournalKey({ ...base, status }) ||
+        cannotLoadYet({ ...base, status, syncedOnce: false }) ||
+        isSettling({ ...base, status, syncedOnce: false });
+      expect(claimed).toBe(true);
+    }
+  });
+
   test("never overlaps the other gates", () => {
     // Four screens compete for one slot, so any overlap is a bug whichever wins.
     for (const status of [
@@ -241,7 +294,8 @@ describe("a device that cannot load the journal", () => {
       const load = cannotLoadYet({ ...base, status, syncedOnce: false });
       const onboard = needsOnboarding({ ...base, status });
       const key = needsJournalKey({ ...base, status });
-      expect([load, onboard, key].filter(Boolean).length).toBeLessThan(2);
+      const settle = isSettling({ ...base, status, syncedOnce: false });
+      expect([load, onboard, key, settle].filter(Boolean).length).toBeLessThan(2);
     }
   });
 });
