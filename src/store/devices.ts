@@ -146,6 +146,11 @@ export const touchThisDevice = (): void => {
   const now = Date.now();
   const existing = devices.get(id);
   if (existing) {
+    // Fill in the platform if the row predates that field, which rows written
+    // by earlier versions of the register do. Without this they render as
+    // "Installed app and Chrome" with an empty bracket, since only the device
+    // itself can say what it is running on. Written once, then quiet.
+    if (!existing.get("platform")) existing.set("platform", platformName());
     noteClient(existing);
     const last = (existing.get("lastSeen") as number) || 0;
     if (now - last < TOUCH_INTERVAL_MS) return;
@@ -169,13 +174,25 @@ const listSentence = (parts: string[]): string => {
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 };
 
+/**
+ * Recover the platform from an older row's single `client` string, which held
+ * it in brackets: "Installed app (iOS)". Only that device can fill the field in
+ * properly, and it may not connect for days, so read it out of what is already
+ * there rather than showing an empty bracket in the meantime.
+ */
+const platformFromLegacy = (rec: Y.Map<unknown>): string => {
+  const legacy = (rec.get("client") as string) || "";
+  return /\(([^)]+)\)\s*$/.exec(legacy)?.[1] ?? "";
+};
+
 /** How this row describes itself: every client that has opened it, plus the platform. */
 const describe = (rec: Y.Map<unknown>): string => {
   // Rows named by hand while renaming existed keep working: the name stands in
   // until that device next connects and records what it actually is.
   const named = rec.get("label") as string | undefined;
   const clients = rec.get("clients");
-  const platform = (rec.get("platform") as string) || "";
+  const platform =
+    (rec.get("platform") as string) || platformFromLegacy(rec) || "";
   if (clients instanceof Y.Map && clients.size > 0) {
     const names: { name: string; at: number }[] = [];
     clients.forEach((at, name) => names.push({ name, at: (at as number) || 0 }));

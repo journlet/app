@@ -112,7 +112,40 @@ describe("registering a device", () => {
 
     const row = d.listDevices().find((r) => r.id === "legacy");
     expect(row?.name).toBe("Mac");
-    expect(row?.name).toBe("Mac");
+  });
+
+  test("a row missing the platform gains it on the next connect", async () => {
+    // The bug this fixes: `platform` was only written when a row was created, so
+    // rows from earlier versions rendered as "Installed app and Chrome" with an
+    // empty bracket. Only the device itself can say what it runs on.
+    const d = await load();
+    const id = d.thisDeviceId();
+    const rec = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set(id, rec);
+    rec.set("id", id);
+    rec.set("client", "Chrome (macOS)"); // old single-string field, no platform
+
+    d.touchThisDevice();
+
+    expect(rec.get("platform")).toBe("unknown platform");
+    expect(d.listDevices()[0].name).toBe("Browser (unknown platform)");
+  });
+
+  test("another device's row shows its platform before it reconnects", async () => {
+    // Only that device can fill the field in, and it may not open the app for
+    // days. Reading the platform out of its old description beats a bare
+    // "Installed app" with nothing in brackets.
+    const d = await load();
+    const other = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set("phone", other);
+    other.set("id", "phone");
+    other.set("client", "Installed app (iOS)");
+    const clients = new Y.Map<unknown>();
+    other.set("clients", clients);
+    clients.set("Installed app", Date.now());
+
+    const row = d.listDevices().find((r) => r.id === "phone");
+    expect(row?.name).toBe("Installed app (iOS)");
   });
 
   test("a row from the single-client version keeps working", async () => {
@@ -124,7 +157,6 @@ describe("registering a device", () => {
     mid.set("client", "Chrome (macOS)");
 
     const row = d.listDevices().find((r) => r.id === "mid");
-    expect(row?.name).toBe("Chrome (macOS)");
     expect(row?.name).toBe("Chrome (macOS)");
   });
 
