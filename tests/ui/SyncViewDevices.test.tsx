@@ -174,6 +174,65 @@ describe("the device register", () => {
     expect(screen.getByText(/Installed app and Chrome/)).toBeTruthy();
   });
 
+  test("says this device is syncing now rather than quoting a stale time", () => {
+    // last-seen is recorded at most hourly, so a figure in minutes claims a
+    // precision that does not exist. It read as plainly wrong on a device that
+    // was syncing at that moment, which is how the problem was spotted.
+    render(<SyncView />);
+
+    expect(screen.getByText(/syncing now/)).toBeTruthy();
+    expect(screen.queryByText(/last synced .*minutes ago/)).toBeNull();
+  });
+
+  test("describes other devices only as coarsely as it knows", () => {
+    deviceRows = [
+      {
+        id: "b",
+        name: "Installed app (iOS)",
+        firstSeen: Date.now() - 172_800_000,
+        lastSeen: Date.now() - 3 * 86_400_000,
+        isThisDevice: false,
+      },
+    ];
+    render(<SyncView />);
+
+    expect(screen.getByText(/last synced 3 days ago/)).toBeTruthy();
+  });
+
+  test("a device seen in the last hour says so without pretending to minutes", () => {
+    deviceRows = [
+      {
+        id: "b",
+        name: "Installed app (iOS)",
+        firstSeen: Date.now() - 172_800_000,
+        lastSeen: Date.now() - 10 * 60_000,
+        isThisDevice: false,
+      },
+    ];
+    render(<SyncView />);
+
+    expect(screen.getByText(/within the last hour/)).toBeTruthy();
+  });
+
+  test("this device falls back to a time when it is not syncing", () => {
+    // Offline or waiting to sync: "syncing now" would be a lie, so it reverts
+    // to what was recorded.
+    status = "offline";
+    deviceRows = [
+      {
+        id: "a",
+        name: "Installed app and Chrome (macOS)",
+        firstSeen: Date.now() - 86_400_000,
+        lastSeen: Date.now() - 2 * 86_400_000,
+        isThisDevice: true,
+      },
+    ];
+    render(<SyncView />);
+
+    expect(screen.queryByText(/syncing now/)).toBeNull();
+    expect(screen.getByText(/last synced 2 days ago/)).toBeTruthy();
+  });
+
   test("an empty register says so rather than rendering nothing", () => {
     deviceRows = [];
     render(<SyncView />);

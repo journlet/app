@@ -25,9 +25,7 @@ import { listDevices, onDevicesChange } from "./store/devices";
 import type { DeviceRecord } from "./store/devices";
 import { pendingJournalKey } from "./lib/pendingKey";
 
-// Coarse on purpose: "3 days ago" is what you need to judge whether a row is
-// yours, and an exact timestamp would only invite reading precision into a
-// last-seen that updates on connect rather than continuously.
+// For a moment we know exactly, like when a device was added.
 const relativeTime = (ms: number): string => {
   if (!ms) return "never";
   const mins = Math.floor((Date.now() - ms) / 60000);
@@ -37,6 +35,36 @@ const relativeTime = (ms: number): string => {
   if (hours < 24) return hours === 1 ? "an hour ago" : `${hours} hours ago`;
   const days = Math.floor(hours / 24);
   return days === 1 ? "yesterday" : `${days} days ago`;
+};
+
+const startOfDay = (ms: number): number => {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+/**
+ * For last-synced, which the register records at most once an hour to keep it
+ * from writing to the append-only log on every launch (see store/devices.ts).
+ *
+ * So the stored moment can be an hour behind the truth, and a figure like "19
+ * minutes ago" claims a precision that does not exist — it read as wrong on a
+ * device that was syncing at that moment. This says only what is actually
+ * known, which is also all the question needs: do I recognise this device, and
+ * is it still in use?
+ */
+const coarseTime = (ms: number): string => {
+  if (!ms) return "never";
+  const now = Date.now();
+  if (now - ms < 60 * 60 * 1000) return "within the last hour";
+  const days = Math.round((startOfDay(now) - startOfDay(ms)) / 86_400_000);
+  if (days <= 0) return "earlier today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return weeks === 1 ? "a week ago" : `${weeks} weeks ago`;
+  const months = Math.floor(days / 30);
+  return months <= 1 ? "a month ago" : `${months} months ago`;
 };
 
 const STATUS_LABEL: Record<SyncStatus, string> = {
@@ -494,7 +522,13 @@ export default function SyncView() {
                         )}
                       </div>
                       <div style={ST.devMeta}>
-                        last synced {relativeTime(d.lastSeen)}
+                        {/* This device's state is known live, so say it rather
+                            than quoting a timestamp recorded up to an hour
+                            ago. Added is written once and is exact, so it can
+                            keep its finer wording. */}
+                        {d.isThisDevice && status === "synced"
+                          ? "syncing now"
+                          : `last synced ${coarseTime(d.lastSeen)}`}
                         {d.firstSeen
                           ? ` · added ${relativeTime(d.firstSeen)}`
                           : ""}
