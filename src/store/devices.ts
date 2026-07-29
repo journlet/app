@@ -11,16 +11,18 @@ const ID_KEY = "journlet-device-id";
 
 export interface DeviceRecord {
   id: string;
-  /** What to show: the name you gave it, or the detected description. */
-  label: string;
   /**
-   * Every client that has opened this copy, and the platform: "Chrome and
-   * installed app (macOS)". Plural because one row is one local journal, and a
-   * journal can be reached more than one way — see the note on `clients`.
+   * How the row describes itself: every client that has opened this copy, and
+   * the platform, as in "Installed app and Chrome (macOS)". Plural because one
+   * row is one local journal and a journal can be reached more than one way —
+   * see the note on `clients` below.
+   *
+   * Detected rather than chosen. Naming rows yourself was offered briefly and
+   * withdrawn (28 Jul, Gary): a name you have given a device is exactly what
+   * would disguise a device you do not recognise, which is the one thing this
+   * list exists to show you.
    */
-  client: string;
-  /** True when `label` is your own name for it rather than the detected one. */
-  renamed: boolean;
+  name: string;
   firstSeen: number;
   lastSeen: number;
   isThisDevice: boolean;
@@ -169,6 +171,9 @@ const listSentence = (parts: string[]): string => {
 
 /** How this row describes itself: every client that has opened it, plus the platform. */
 const describe = (rec: Y.Map<unknown>): string => {
+  // Rows named by hand while renaming existed keep working: the name stands in
+  // until that device next connects and records what it actually is.
+  const named = rec.get("label") as string | undefined;
   const clients = rec.get("clients");
   const platform = (rec.get("platform") as string) || "";
   if (clients instanceof Y.Map && clients.size > 0) {
@@ -181,7 +186,7 @@ const describe = (rec: Y.Map<unknown>): string => {
   }
   // Rows from earlier versions of the register: a single `client` string, or
   // nothing but the label they were named with.
-  return (rec.get("client") as string) || "";
+  return (rec.get("client") as string) || named || "";
 };
 
 export const listDevices = (): DeviceRecord[] => {
@@ -189,13 +194,9 @@ export const listDevices = (): DeviceRecord[] => {
   const out: DeviceRecord[] = [];
   devices.forEach((rec, id) => {
     if (!(rec instanceof Y.Map)) return;
-    const client = describe(rec);
-    const named = (rec.get("label") as string) || "";
     out.push({
       id,
-      label: named || client || "Unknown device",
-      client: client || named || "Unknown device",
-      renamed: Boolean(named),
+      name: describe(rec) || "Unknown device",
       firstSeen: (rec.get("firstSeen") as number) || 0,
       lastSeen: (rec.get("lastSeen") as number) || 0,
       isThisDevice: id === here,
@@ -207,24 +208,6 @@ export const listDevices = (): DeviceRecord[] => {
     if (a.isThisDevice !== b.isThisDevice) return a.isThisDevice ? -1 : 1;
     return b.lastSeen - a.lastSeen;
   });
-};
-
-/** Give a device your own name, e.g. "Chrome (macOS)" becomes "work laptop". */
-export const renameDevice = (id: string, label: string): void => {
-  const rec = devices.get(id);
-  const trimmed = label.trim();
-  if (!rec || !trimmed) return;
-  rec.set("label", trimmed);
-};
-
-/**
- * Remove a row. Tidying only: it does not revoke anything, and a device still
- * syncing will re-add itself on its next connect. Nothing in the app currently
- * signs another device out, so the UI must not imply that this does.
- */
-export const forgetDevice = (id: string): void => {
-  if (id === thisDeviceId()) return; // removing your own row is never meant
-  devices.delete(id);
 };
 
 export const onDevicesChange = (fn: () => void): (() => void) => {

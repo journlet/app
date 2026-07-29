@@ -21,12 +21,7 @@ import {
   verifyEmailCode,
 } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
-import {
-  forgetDevice,
-  listDevices,
-  onDevicesChange,
-  renameDevice,
-} from "./store/devices";
+import { listDevices, onDevicesChange } from "./store/devices";
 import type { DeviceRecord } from "./store/devices";
 import { pendingJournalKey } from "./lib/pendingKey";
 
@@ -80,18 +75,6 @@ export default function SyncView() {
     refresh();
     return onDevicesChange(refresh);
   }, []);
-
-  // Renaming happens in place in the row. The app has no native dialogs
-  // anywhere else, and window.prompt in particular looks foreign in an
-  // installed home-screen app and can be suppressed outright there.
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameText, setRenameText] = useState("");
-
-  const saveRename = (id: string) => {
-    if (!renameText.trim()) return;
-    renameDevice(id, renameText);
-    setRenaming(null);
-  };
 
   useEffect(() => {
     if (!keyCode) {
@@ -494,85 +477,31 @@ export default function SyncView() {
             <p style={{ ...ST.p, marginTop: 0 }}>
               This list is stored inside your encrypted journal, so the server
               never sees it. It is here so you can spot a device you do not
-              recognise — it is a record, not a lock. Removing a row only tidies
-              the list, and a device still syncing will add itself back.
+              recognise — it is a record, not a lock, and nothing here signs a
+              device out.
             </p>
             {deviceList.length === 0 ? (
               <p style={ST.p}>No devices recorded yet.</p>
             ) : (
               <ul style={ST.devList}>
-                {deviceList.map((d) =>
-                  renaming === d.id ? (
-                    <li key={d.id} style={ST.devRow}>
-                      <input
-                        style={{ ...ST.input, fontSize: 14, minWidth: 140 }}
-                        value={renameText}
-                        autoFocus
-                        aria-label={`Name for ${d.label}`}
-                        onChange={(ev) => setRenameText(ev.target.value)}
-                        onKeyDown={(ev) => {
-                          if (ev.key === "Enter") saveRename(d.id);
-                          if (ev.key === "Escape") setRenaming(null);
-                        }}
-                      />
-                      <div style={ST.row}>
-                        <button
-                          className="miniBtn"
-                          disabled={!renameText.trim()}
-                          onClick={() => saveRename(d.id)}
-                        >
-                          save name
-                        </button>
-                        <button
-                          className="miniBtn"
-                          onClick={() => setRenaming(null)}
-                        >
-                          cancel
-                        </button>
-                      </div>
-                    </li>
-                  ) : (
-                    <li key={d.id} style={ST.devRow}>
-                      <div>
-                        <div style={{ fontWeight: 600 }}>
-                          {d.label}
-                          {d.isThisDevice && (
-                            <span style={ST.devHere}> this device</span>
-                          )}
-                        </div>
-                        <div style={ST.devMeta}>
-                          {/* The detected client only earns its own line once
-                              you have renamed the row; otherwise it IS the
-                              name and repeating it is noise. */}
-                          {d.renamed ? `${d.client} · ` : ""}
-                          last synced {relativeTime(d.lastSeen)}
-                          {d.firstSeen
-                            ? ` · added ${relativeTime(d.firstSeen)}`
-                            : ""}
-                        </div>
-                      </div>
-                      <div style={ST.row}>
-                        <button
-                          className="miniBtn"
-                          onClick={() => {
-                            setRenaming(d.id);
-                            setRenameText(d.label);
-                          }}
-                        >
-                          rename
-                        </button>
-                        {!d.isThisDevice && (
-                          <button
-                            className="miniBtn"
-                            onClick={() => forgetDevice(d.id)}
-                          >
-                            remove from list
-                          </button>
+                {deviceList.map((d) => (
+                  <li key={d.id} style={ST.devRow}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>
+                        {d.name}
+                        {d.isThisDevice && (
+                          <span style={ST.devHere}> this device</span>
                         )}
                       </div>
-                    </li>
-                  )
-                )}
+                      <div style={ST.devMeta}>
+                        last synced {relativeTime(d.lastSeen)}
+                        {d.firstSeen
+                          ? ` · added ${relativeTime(d.firstSeen)}`
+                          : ""}
+                      </div>
+                    </div>
+                  </li>
+                ))}
               </ul>
             )}
           </div>

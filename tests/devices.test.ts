@@ -48,8 +48,7 @@ describe("registering a device", () => {
 
     // jsdom matches no browser or platform, so both fall back, which still
     // proves the shape.
-    expect(d.listDevices()[0].client).toBe("Browser (unknown platform)");
-    expect(d.listDevices()[0].renamed).toBe(false);
+    expect(d.listDevices()[0].name).toBe("Browser (unknown platform)");
   });
 
   test("a second client on the same copy is added, not substituted", async () => {
@@ -65,9 +64,9 @@ describe("registering a device", () => {
     clients.set("Installed app", Date.now() + 1);
 
     const row = d.listDevices()[0];
-    expect(row.client).toContain("Installed app");
-    expect(row.client).toContain("Browser");
-    expect(row.client).toContain("(unknown platform)");
+    expect(row.name).toContain("Installed app");
+    expect(row.name).toContain("Browser");
+    expect(row.name).toContain("(unknown platform)");
   });
 
   test("lists the most recently used client first", async () => {
@@ -79,7 +78,7 @@ describe("registering a device", () => {
     const clients = rec?.get("clients") as Y.Map<unknown>;
     clients.set("Installed app", Date.now() + 5000);
 
-    expect(d.listDevices()[0].client).toMatch(/^Installed app and Browser/);
+    expect(d.listDevices()[0].name).toMatch(/^Installed app and Browser/);
   });
 
   test("re-opening a known client does not write again", async () => {
@@ -100,19 +99,7 @@ describe("registering a device", () => {
     const d = await load();
     d.touchThisDevice();
 
-    expect(d.listDevices()[0].client).toBe("Browser (unknown platform)");
-  });
-
-  test("a renamed row keeps the detected client alongside the name", async () => {
-    const d = await load();
-    d.touchThisDevice();
-
-    d.renameDevice(d.thisDeviceId(), "work laptop");
-
-    const row = d.listDevices()[0];
-    expect(row.label).toBe("work laptop");
-    expect(row.client).toBe("Browser (unknown platform)");
-    expect(row.renamed).toBe(true);
+    expect(d.listDevices()[0].name).toBe("Browser (unknown platform)");
   });
 
   test("a row written before clients were recorded still reads sensibly", async () => {
@@ -124,8 +111,8 @@ describe("registering a device", () => {
     old.set("label", "Mac");
 
     const row = d.listDevices().find((r) => r.id === "legacy");
-    expect(row?.label).toBe("Mac");
-    expect(row?.client).toBe("Mac");
+    expect(row?.name).toBe("Mac");
+    expect(row?.name).toBe("Mac");
   });
 
   test("a row from the single-client version keeps working", async () => {
@@ -137,8 +124,8 @@ describe("registering a device", () => {
     mid.set("client", "Chrome (macOS)");
 
     const row = d.listDevices().find((r) => r.id === "mid");
-    expect(row?.client).toBe("Chrome (macOS)");
-    expect(row?.label).toBe("Chrome (macOS)");
+    expect(row?.name).toBe("Chrome (macOS)");
+    expect(row?.name).toBe("Chrome (macOS)");
   });
 
   test("repeated connects do not write again", async () => {
@@ -195,7 +182,7 @@ describe("registering a device", () => {
     const list = d.listDevices();
     expect(list).toHaveLength(2);
     expect(list[0].isThisDevice).toBe(true); // this device sorts first
-    expect(list[1].label).toBe("iPhone");
+    expect(list[1].name).toBe("iPhone");
     expect(list[1].isThisDevice).toBe(false);
   });
 
@@ -215,62 +202,6 @@ describe("registering a device", () => {
   });
 });
 
-describe("editing the register", () => {
-  test("renaming keeps the same row", async () => {
-    const d = await load();
-    d.touchThisDevice();
-    d.renameDevice(d.thisDeviceId(), "work phone");
-
-    expect(d.listDevices()).toHaveLength(1);
-    expect(d.listDevices()[0].label).toBe("work phone");
-  });
-
-  test("an empty name is ignored rather than blanking the row", async () => {
-    const d = await load();
-    d.touchThisDevice();
-    const before = d.listDevices()[0].label;
-
-    d.renameDevice(d.thisDeviceId(), "   ");
-
-    expect(d.listDevices()[0].label).toBe(before);
-  });
-
-  test("removing another row tidies the list", async () => {
-    const d = await load();
-    d.touchThisDevice();
-    const other = new Y.Map<unknown>();
-    doc.getMap<Y.Map<unknown>>("devices").set("other-id", other);
-    other.set("id", "other-id");
-    other.set("label", "iPad");
-
-    d.forgetDevice("other-id");
-
-    expect(d.listDevices().map((r) => r.id)).not.toContain("other-id");
-  });
-
-  test("removing your own row is refused", async () => {
-    // It is never what someone means, and this device would re-add itself on
-    // the next connect anyway — so it would read as a bug.
-    const d = await load();
-    d.touchThisDevice();
-
-    d.forgetDevice(d.thisDeviceId());
-
-    expect(d.listDevices()).toHaveLength(1);
-  });
-
-  test("removal is tidying, not revocation: a live device comes back", async () => {
-    const d = await load();
-    d.touchThisDevice();
-    const id = d.thisDeviceId();
-    doc.getMap("devices").delete(id);
-
-    d.touchThisDevice(); // as the next connect would
-
-    expect(d.listDevices().map((r) => r.id)).toContain(id);
-  });
-});
-
 describe("observing", () => {
   test("a change notifies listeners, so the screen tracks other devices", async () => {
     const d = await load();
@@ -283,7 +214,7 @@ describe("observing", () => {
 
     off();
     const after = calls;
-    d.renameDevice(d.thisDeviceId(), "renamed after unsubscribe");
+    d.touchThisDevice();
     expect(calls).toBe(after);
   });
 });
