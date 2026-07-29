@@ -25,6 +25,7 @@ import {
 import type { ThemePref } from "./lib/theme";
 import {
   countUpdates,
+  getJournalKeyCode,
   getSyncStatus,
   isConfigured,
   onSyncStatus,
@@ -81,8 +82,10 @@ import SpreadView from "./ui/SpreadView";
 import Header from "./ui/Header";
 import CaptureLauncher from "./ui/CaptureLauncher";
 import OnboardingView from "./ui/OnboardingView";
+import RecoveryCodeView from "./ui/RecoveryCodeView";
 import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
-import { needsOnboarding } from "./lib/onboarding";
+import { needsOnboarding, needsRecoveryCode } from "./lib/onboarding";
+import { acknowledgeRecovery, recoveryPending } from "./lib/recoveryAck";
 import { buildSpreadData } from "./ui/spreadData";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
@@ -447,6 +450,31 @@ export default function App() {
     hasLocalContent,
   });
 
+  // Second stage of first run: the recovery code, shown once before the journal
+  // on the device that created it (decision 4). Re-read on every status change
+  // so it clears as soon as it is acknowledged.
+  const [recoveryPend, setRecoveryPend] = useState(recoveryPending());
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  // The flag is written by the sync engine when it creates the journal, which
+  // happens well after this component mounts, so reading it once at mount would
+  // miss the only case it exists for: signing in on a fresh install.
+  useEffect(() => setRecoveryPend(recoveryPending()), [syncStatus]);
+  const showRecovery = needsRecoveryCode({
+    configured: isConfigured(),
+    status: syncStatus,
+    loaded,
+    pending: recoveryPend,
+  });
+  useEffect(() => {
+    if (!showRecovery || recoveryCode) return;
+    // If the code cannot be read there is nothing useful to show, so let the
+    // journal through rather than blocking on a screen with a gap in it. It
+    // stays readable later under Sync.
+    getJournalKeyCode().then(setRecoveryCode, () => {
+      acknowledgeRecovery();
+      setRecoveryPend(false);
+    });
+  }, [showRecovery, recoveryCode]);
 
   // Volume-size instrumentation (remediation item 15): log the encoded doc
   // size and the update-log row count once the journal has opened, and again
@@ -836,8 +864,8 @@ export default function App() {
   return (
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <Header
-        showBack={!onboarding && view !== "spread"}
-        showMenu={!onboarding && view === "spread"}
+        showBack={!onboarding && !showRecovery && view !== "spread"}
+        showMenu={!onboarding && !showRecovery && view === "spread"}
         onBack={goBack}
         onMenu={() => setView("menu")}
         saving={saveState === "saving"}
@@ -860,7 +888,7 @@ export default function App() {
             chooses. This is also the deliberate answer to journalling for
             weeks into a device that is not syncing: capture keeps working
             (§6.1b), so the state has to be impossible to miss instead. */}
-        {!onboarding && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
+        {!onboarding && !showRecovery && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner onSignIn={() => setView("sync")} />
         )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
@@ -869,7 +897,16 @@ export default function App() {
             <SyncView />
           </OnboardingView>
         )}
-        {!onboarding && loaded && view === "index" && (
+        {!onboarding && showRecovery && recoveryCode && (
+          <RecoveryCodeView
+            code={recoveryCode}
+            onContinue={() => {
+              acknowledgeRecovery();
+              setRecoveryPend(false);
+            }}
+          />
+        )}
+        {!onboarding && !showRecovery && loaded && view === "index" && (
           <IndexView
             days={days}
             nowKeys={nowKeys}
@@ -887,10 +924,10 @@ export default function App() {
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
         )}
-        {!onboarding && loaded && view === "sync" && (
+        {!onboarding && !showRecovery && loaded && view === "sync" && (
           <SyncView />
         )}
-        {!onboarding && loaded && view === "menu" && (
+        {!onboarding && !showRecovery && loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
             theme={themePref}
@@ -911,7 +948,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && loaded && activeCol && (
+        {!onboarding && !showRecovery && loaded && activeCol && (
           <CollectionView
             collection={activeCol}
             entries={days[colPageKey(activeCol.id)] || []}
@@ -925,7 +962,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && loaded && view === "spread" && (
+        {!onboarding && !showRecovery && loaded && view === "spread" && (
           <SpreadView
             renderEntry={renderEntry}
             renderScheduledRow={renderScheduledRow}
@@ -943,7 +980,7 @@ export default function App() {
             onOpenFutureLog={() => setView("future")}
           />
         )}
-        {!onboarding && loaded && view === "future" && (
+        {!onboarding && !showRecovery && loaded && view === "future" && (
           <FutureLogView
             count={futureLogCount}
             groups={futureLogGroups}
@@ -959,6 +996,7 @@ export default function App() {
           without this an entry could be written into a journal that has no
           account behind it yet, which is the very thing sign-in-first removes. */}
       {!onboarding &&
+        !showRecovery &&
         activeCol?.kind !== "habits" &&
         view !== "sync" &&
         view !== "menu" && (
@@ -989,7 +1027,7 @@ export default function App() {
       {/* Also gated: /?capture opens this form on launch without touching the
           launcher, so an app-icon shortcut would otherwise walk straight past
           onboarding into an entry form. */}
-      {!onboarding && captureOpen && (
+      {!onboarding && !showRecovery && captureOpen && (
         <CaptureForm
           inputRef={inputRef}
           input={input}

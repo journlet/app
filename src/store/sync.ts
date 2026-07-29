@@ -31,6 +31,7 @@ import {
   stashKeyFromUrl,
   sweepPendingKey,
 } from "../lib/pendingKey";
+import { markRecoveryPending } from "../lib/recoveryAck";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import { DEFAULT_VOLUME, getActiveVolume, setActiveVolume } from "../lib/volume";
 
@@ -315,6 +316,11 @@ const ensureJournalKeys = async (): Promise<boolean> => {
       setStatus(navigator.onLine ? "pending" : "offline");
       return false;
     }
+    // This device just brought a journal into existence, so its recovery code
+    // exists and nobody has seen it. Marked only here: a device that adopts an
+    // existing journal has just been handed the code and does not need telling
+    // (decision 4, spec device-identity-design.md).
+    markRecoveryPending();
     return true;
   }
   // Journal exists: can our keeper unwrap its data key?

@@ -40,3 +40,32 @@ export interface OnboardingInput {
  */
 export const needsOnboarding = (i: OnboardingInput): boolean =>
   i.configured && i.loaded && i.status === "signed-out" && !i.hasLocalContent;
+
+export interface RecoveryGateInput {
+  configured: boolean;
+  status: SyncStatus;
+  loaded: boolean;
+  /** Has this device created a journal whose code nobody has seen? */
+  pending: boolean;
+}
+
+/**
+ * Second stage of first run: show the recovery code once, before the journal
+ * (decision 4).
+ *
+ * Only ever true on a device that created the journal, so it can never hide
+ * content: at that moment there is none. It is deliberately a gate rather than
+ * a dismissible notice, because it is the only route back from losing every
+ * device and there is no better moment to interrupt someone later.
+ *
+ * Not shown while signed out, because the code is unreadable then: the keyring
+ * is there but the journal it belongs to has not been confirmed, and a code
+ * shown before the account exists could be the wrong one. In practice a device
+ * only becomes pending after a successful connect anyway.
+ */
+export const needsRecoveryCode = (i: RecoveryGateInput): boolean =>
+  i.configured &&
+  i.loaded &&
+  i.pending &&
+  i.status !== "signed-out" &&
+  i.status !== "disabled";

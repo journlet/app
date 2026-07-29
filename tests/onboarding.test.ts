@@ -6,8 +6,11 @@
 // journal behind a sign-in screen would look exactly like losing it.
 
 import { describe, expect, test } from "vitest";
-import { needsOnboarding } from "../src/lib/onboarding";
-import type { OnboardingInput } from "../src/lib/onboarding";
+import { needsOnboarding, needsRecoveryCode } from "../src/lib/onboarding";
+import type {
+  OnboardingInput,
+  RecoveryGateInput,
+} from "../src/lib/onboarding";
 
 /** A genuinely fresh install with sync configured. */
 const fresh: OnboardingInput = {
@@ -62,6 +65,55 @@ describe("what must never be gated", () => {
       "disabled",
     ] as const) {
       expect(needsOnboarding({ ...fresh, status })).toBe(false);
+    }
+  });
+});
+
+/** A device that has just created a journal, signed in and loaded. */
+const justCreated: RecoveryGateInput = {
+  configured: true,
+  status: "synced",
+  loaded: true,
+  pending: true,
+};
+
+describe("the recovery code gate", () => {
+  test("stops a device that has created a journal nobody has a code for", () => {
+    expect(needsRecoveryCode(justCreated)).toBe(true);
+  });
+
+  test("does not fire on a device that linked to an existing journal", () => {
+    // It was handed the code to get in, so it has one. Only the device that
+    // brings a journal into existence is marked.
+    expect(needsRecoveryCode({ ...justCreated, pending: false })).toBe(false);
+  });
+
+  test("does not fire while signed out", () => {
+    // The code cannot be trusted then: the keyring exists but the journal it
+    // belongs to has not been confirmed, so a code shown here could be for a
+    // journal the account does not have.
+    expect(needsRecoveryCode({ ...justCreated, status: "signed-out" })).toBe(
+      false
+    );
+  });
+
+  test("does not fire before the journal has loaded", () => {
+    expect(needsRecoveryCode({ ...justCreated, loaded: false })).toBe(false);
+  });
+
+  test("does not fire in a build without sync", () => {
+    expect(needsRecoveryCode({ ...justCreated, configured: false })).toBe(false);
+    expect(needsRecoveryCode({ ...justCreated, status: "disabled" })).toBe(
+      false
+    );
+  });
+
+  test("still fires while sync is unsettled, since the journal exists either way", () => {
+    // Created and then went offline, or is still catching up. The code is real
+    // and unseen in all of these, and waiting for "synced" could mean never
+    // showing it.
+    for (const status of ["connecting", "pending", "offline", "needs-key"] as const) {
+      expect(needsRecoveryCode({ ...justCreated, status })).toBe(true);
     }
   });
 });
