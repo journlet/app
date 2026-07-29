@@ -182,9 +182,12 @@ const withDeviceRegistered = (d: Y.Doc): void => {
   d.getMap<Y.Map<unknown>>("devices").set(DEVICE_ID, rec);
   rec.set("id", DEVICE_ID);
   // What clientName()/platformName() detect under jsdom, whose user agent
-  // matches no browser or platform. If this drifts, touchThisDevice will
-  // refresh the field and these "stays quiet" assertions will catch it.
-  rec.set("client", "Browser (unknown platform)");
+  // matches no browser or platform. If this drifts, touchThisDevice records the
+  // newly detected client and these "stays quiet" assertions will catch it.
+  rec.set("platform", "unknown platform");
+  const clients = new Y.Map<unknown>();
+  rec.set("clients", clients);
+  clients.set("Browser", Date.now());
   rec.set("firstSeen", Date.now());
   rec.set("lastSeen", Date.now());
 };

@@ -11,9 +11,13 @@ const ID_KEY = "journlet-device-id";
 
 export interface DeviceRecord {
   id: string;
-  /** What to show: the name you gave it, or the detected client and platform. */
+  /** What to show: the name you gave it, or the detected description. */
   label: string;
-  /** The detected description, kept even when renamed so it can sit beneath. */
+  /**
+   * Every client that has opened this copy, and the platform: "Chrome and
+   * installed app (macOS)". Plural because one row is one local journal, and a
+   * journal can be reached more than one way — see the note on `clients`.
+   */
   client: string;
   /** True when `label` is your own name for it rather than the detected one. */
   renamed: boolean;
@@ -101,6 +105,35 @@ const clientName = (): string => {
 const TOUCH_INTERVAL_MS = 60 * 60 * 1000;
 
 /**
+ * Note that this client has opened this copy of the journal.
+ *
+ * A row is one local journal — one storage container — not one client, because
+ * that is the unit that actually holds the keys and the sign-in. On macOS the
+ * installed app and the browser share that container, confirmed by the register
+ * itself: both resolved to the same device id and took turns overwriting a
+ * single `client` field, so the row's description changed depending on which one
+ * you had opened last, and each switch wrote to the append-only log. On iOS the
+ * home-screen app has its own container and is therefore its own row.
+ *
+ * So the clients are collected rather than replaced. Keyed by name in a Y.Map,
+ * with last-used as the value: two clients recorded concurrently on different
+ * devices both survive the merge, and re-opening a known client is a no-op
+ * unless enough time has passed to be worth recording.
+ */
+const noteClient = (rec: Y.Map<unknown>): void => {
+  const name = clientName();
+  let clients = rec.get("clients");
+  if (!(clients instanceof Y.Map)) {
+    clients = new Y.Map<unknown>();
+    rec.set("clients", clients);
+  }
+  const map = clients as Y.Map<unknown>;
+  const last = (map.get(name) as number) || 0;
+  if (Date.now() - last < TOUCH_INTERVAL_MS) return;
+  map.set(name, Date.now());
+};
+
+/**
  * Record this device in the register and refresh its last-seen time, called
  * once per connect. A device that stops syncing goes stale rather than
  * vanishing: a row you do not recognise is the entire point of the list, so
@@ -111,11 +144,7 @@ export const touchThisDevice = (): void => {
   const now = Date.now();
   const existing = devices.get(id);
   if (existing) {
-    // Refresh the detected client too: the same install can change from a
-    // browser tab to a home-screen app, and a stale description is exactly the
-    // kind of thing that makes someone doubt the list.
-    const detected = `${clientName()} (${platformName()})`;
-    if (existing.get("client") !== detected) existing.set("client", detected);
+    noteClient(existing);
     const last = (existing.get("lastSeen") as number) || 0;
     if (now - last < TOUCH_INTERVAL_MS) return;
     existing.set("lastSeen", now);
@@ -125,10 +154,34 @@ export const touchThisDevice = (): void => {
     const rec = new Y.Map<unknown>();
     devices.set(id, rec);
     rec.set("id", id);
-    rec.set("client", `${clientName()} (${platformName()})`);
+    rec.set("platform", platformName());
     rec.set("firstSeen", now);
     rec.set("lastSeen", now);
+    noteClient(rec);
   });
+};
+
+/** "Chrome", "Chrome and installed app", "Chrome, Safari and installed app". */
+const listSentence = (parts: string[]): string => {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+};
+
+/** How this row describes itself: every client that has opened it, plus the platform. */
+const describe = (rec: Y.Map<unknown>): string => {
+  const clients = rec.get("clients");
+  const platform = (rec.get("platform") as string) || "";
+  if (clients instanceof Y.Map && clients.size > 0) {
+    const names: { name: string; at: number }[] = [];
+    clients.forEach((at, name) => names.push({ name, at: (at as number) || 0 }));
+    // Most recently used first, so the one you are looking at leads.
+    names.sort((a, b) => b.at - a.at);
+    const sentence = listSentence(names.map((n) => n.name));
+    return platform ? `${sentence} (${platform})` : sentence;
+  }
+  // Rows from earlier versions of the register: a single `client` string, or
+  // nothing but the label they were named with.
+  return (rec.get("client") as string) || "";
 };
 
 export const listDevices = (): DeviceRecord[] => {
@@ -136,9 +189,7 @@ export const listDevices = (): DeviceRecord[] => {
   const out: DeviceRecord[] = [];
   devices.forEach((rec, id) => {
     if (!(rec instanceof Y.Map)) return;
-    // `client` is detected, `label` is yours. Rows written before `client`
-    // existed have only a label, which stands in for both.
-    const client = (rec.get("client") as string) || "";
+    const client = describe(rec);
     const named = (rec.get("label") as string) || "";
     out.push({
       id,

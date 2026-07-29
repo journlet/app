@@ -43,8 +43,6 @@ describe("registering a device", () => {
   });
 
   test("names the row after the client and platform, not just the device", async () => {
-    // One machine can hold the journal twice, as an installed app and as a
-    // browser tab with separate storage, so the client is what tells them apart.
     const d = await load();
     d.touchThisDevice();
 
@@ -52,6 +50,57 @@ describe("registering a device", () => {
     // proves the shape.
     expect(d.listDevices()[0].client).toBe("Browser (unknown platform)");
     expect(d.listDevices()[0].renamed).toBe(false);
+  });
+
+  test("a second client on the same copy is added, not substituted", async () => {
+    // The reported bug: on macOS the installed app and the browser share one
+    // storage container, so they are one row, and they took turns overwriting a
+    // single client field. The row's description changed depending on which one
+    // had been opened last, and every switch wrote to the append-only log.
+    const d = await load();
+    d.touchThisDevice();
+    const rec = doc.getMap<Y.Map<unknown>>("devices").get(d.thisDeviceId());
+    const clients = rec?.get("clients") as Y.Map<unknown>;
+    // As the installed app opening the same container would.
+    clients.set("Installed app", Date.now() + 1);
+
+    const row = d.listDevices()[0];
+    expect(row.client).toContain("Installed app");
+    expect(row.client).toContain("Browser");
+    expect(row.client).toContain("(unknown platform)");
+  });
+
+  test("lists the most recently used client first", async () => {
+    // The one you are looking at should lead, or the row reads as though it
+    // belongs to something else.
+    const d = await load();
+    d.touchThisDevice();
+    const rec = doc.getMap<Y.Map<unknown>>("devices").get(d.thisDeviceId());
+    const clients = rec?.get("clients") as Y.Map<unknown>;
+    clients.set("Installed app", Date.now() + 5000);
+
+    expect(d.listDevices()[0].client).toMatch(/^Installed app and Browser/);
+  });
+
+  test("re-opening a known client does not write again", async () => {
+    // Switching between the app and the browser several times a day would
+    // otherwise be a row in the log each time.
+    const d = await load();
+    d.touchThisDevice();
+    const updates: number[] = [];
+    doc.on("update", (u: Uint8Array) => updates.push(u.length));
+
+    d.touchThisDevice();
+    d.touchThisDevice();
+
+    expect(updates).toEqual([]);
+  });
+
+  test("still reads sensibly with a single client", async () => {
+    const d = await load();
+    d.touchThisDevice();
+
+    expect(d.listDevices()[0].client).toBe("Browser (unknown platform)");
   });
 
   test("a renamed row keeps the detected client alongside the name", async () => {
@@ -77,6 +126,19 @@ describe("registering a device", () => {
     const row = d.listDevices().find((r) => r.id === "legacy");
     expect(row?.label).toBe("Mac");
     expect(row?.client).toBe("Mac");
+  });
+
+  test("a row from the single-client version keeps working", async () => {
+    // The intermediate format: one `client` string rather than a set.
+    const d = await load();
+    const mid = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set("mid", mid);
+    mid.set("id", "mid");
+    mid.set("client", "Chrome (macOS)");
+
+    const row = d.listDevices().find((r) => r.id === "mid");
+    expect(row?.client).toBe("Chrome (macOS)");
+    expect(row?.label).toBe("Chrome (macOS)");
   });
 
   test("repeated connects do not write again", async () => {
