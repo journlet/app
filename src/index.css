@@ -113,6 +113,9 @@ html {
      Pin text to authored sizes. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* Drop the double-tap-to-zoom gesture (and with it the 300ms tap delay it
+     forces the browser to wait out). Panning still works; only zoom goes. */
+  touch-action: manipulation;
 }
 
 body {

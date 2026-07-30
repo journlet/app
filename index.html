@@ -24,9 +24,17 @@
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!--
+      maximum-scale + user-scalable=no: the app is a fixed-viewport shell, not
+      a scrolling document — pinch-zoom leaves it stranded off-centre with no
+      way back, and iOS auto-zooms on focusing any input under 16px. Honoured
+      by Chrome/Android; iOS Safari ignores it for accessibility, so the
+      gesture listeners in main.tsx cover pinch there. Browser-level zoom
+      (⌘+/-, desktop) is untouched and still works.
+    -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="theme-color" content="#F5F4EF" />
     <meta

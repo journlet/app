@@ -20,6 +20,25 @@ import { applyTheme, loadTheme } from "./lib/theme";
 // choice (CSP forbids an inline head script, so this is as early as it gets).
 applyTheme(loadTheme());
 
+// Pinch-zoom off. The viewport meta in index.html handles Chrome/Android, but
+// iOS Safari has ignored user-scalable=no since iOS 10 and zooms anyway; its
+// non-standard gesture events are the only hook left. The app is a fixed
+// viewport with its own type scale in Settings, so a stray two-finger pinch
+// only ever leaves the page stranded off-centre with no gesture to undo it.
+// touchmove with two or more touches catches the residual case (iOS fires
+// gesturestart on Safari but not in every installed-PWA/WebView context).
+// passive: false is required — a passive listener cannot preventDefault.
+for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
+  document.addEventListener(type, (e) => e.preventDefault());
+}
+document.addEventListener(
+  "touchmove",
+  (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+  },
+  { passive: false }
+);
+
 // Prompt-mode update flow (vite.config.ts registerType: "prompt"): a new build
 // waits until the user chooses to apply it. onNeedRefresh fires when one is
 // ready; App then shows a plainly labelled "Reload" banner (spec §4). The
