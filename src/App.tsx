@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   SCOPES,
   dkey,
@@ -82,6 +82,8 @@ import NewCollectionDialog from "./ui/NewCollectionDialog";
 import ReviewMigrateSheet from "./ui/ReviewMigrateSheet";
 import UndoToast from "./ui/UndoToast";
 import SpreadView from "./ui/SpreadView";
+import SearchView from "./ui/SearchView";
+import { EMPTY_RESULTS, searchJournal } from "./lib/search";
 import Header from "./ui/Header";
 import CaptureLauncher from "./ui/CaptureLauncher";
 import OnboardingView from "./ui/OnboardingView";
@@ -105,11 +107,26 @@ interface DeletedToast {
   colSnap?: CollectionSnapshot;
 }
 
-type View = "spread" | "index" | "sync" | "menu" | "future" | { col: string };
+type View =
+  | "spread"
+  | "index"
+  | "sync"
+  | "menu"
+  | "future"
+  | "search"
+  | { col: string };
 
 // Future log fold state is a device preference, not journal content —
 // kept local like sticky capture state, never synced
 const FOLDS_KEY = "journlet-futurelog-folds";
+
+// Honour the OS "reduce motion" setting for scripted scrolling, as the CSS
+// already does for its transitions
+const scrollBehaviour = (): ScrollBehavior =>
+  typeof matchMedia === "function" &&
+  matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
 
 export default function App() {
   const { loaded, saveState, days, collections, habits, recurrences } =
@@ -202,6 +219,28 @@ export default function App() {
     () => onSystemThemeChange(() => loadTheme() === "system" && applyTheme("system")),
     []
   );
+  // Search (spec §10). The query is view state, not journal content — it is
+  // deliberately not kept when you leave the screen, so search never becomes
+  // a filter you forgot you left on.
+  const [query, setQuery] = useState("");
+  // The entry a search result sent you to, marked on the page for a few
+  // seconds so you can see which line it meant among the ones around it.
+  const [foundEntry, setFoundEntry] = useState<string | null>(null);
+  const foundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The id last scrolled to, so a re-render doesn't yank the page back
+  const scrolledTo = useRef<string | null>(null);
+  // Drop the mark whenever you navigate: it answers "which line did I mean",
+  // and once you have left that page the question is gone. Without this it
+  // would still be waiting on the page days later if you came back inside
+  // the timeout.
+  const clearFound = useCallback(() => {
+    if (foundTimer.current) clearTimeout(foundTimer.current);
+    foundTimer.current = null;
+    scrolledTo.current = null;
+    setFoundEntry(null);
+  }, []);
+  useEffect(() => clearFound, [clearFound]);
+
   const [view, setViewRaw] = useState<View>("spread");
   // A small navigation stack so the header "back" returns to the screen you
   // came from (e.g. menu → index → back lands on the menu), not always the
@@ -209,13 +248,19 @@ export default function App() {
   const viewRef = useRef<View>("spread");
   viewRef.current = view;
   const navHistory = useRef<View[]>([]);
-  const setView = useCallback((next: View) => {
-    navHistory.current.push(viewRef.current);
-    setViewRaw(next);
-  }, []);
+  const setView = useCallback(
+    (next: View) => {
+      clearFound();
+      navHistory.current.push(viewRef.current);
+      setViewRaw(next);
+    },
+    [clearFound]
+  );
   const goBack = useCallback(() => {
+    clearFound();
     setViewRaw(navHistory.current.pop() ?? "spread");
-  }, []);
+  }, [clearFound]);
+
   const [newCol, setNewCol] = useState<{ name: string; kind: CollectionKind } | null>(null);
   // The current day key, kept fresh across midnight and app resume; every
   // "what is today" decision in render must use this, not todayKey()
@@ -660,8 +705,52 @@ export default function App() {
     setView("spread");
   };
 
+  // Every entry is already in memory here, so search is a filter rather than
+  // an index — see lib/search. Gated on the view as well as the query: every
+  // edit, habit mark and sync update replaces `days`, and without the gate a
+  // stale query would rescan the whole journal on each one for the rest of
+  // the session, from screens with no search on them.
+  const searchResults = useMemo(
+    () =>
+      view === "search"
+        ? searchJournal(query, days, collections, habits)
+        : EMPTY_RESULTS,
+    [view, query, days, collections, habits]
+  );
+
+  // Follow a search result to the page it lives on. The entry is never moved
+  // or copied: you are taken to where it was written, exactly as turning to a
+  // page number would, and it is marked there for a few seconds.
+  const openFoundEntry = (pk: string, id: string) => {
+    // openPage navigates, which clears any previous mark — so set this one
+    // afterwards
+    openPage(pk);
+    setFoundEntry(id);
+    foundTimer.current = setTimeout(() => setFoundEntry(null), 4000);
+  };
+
   const renderEntry = (e: Entry, pk: string, sc: Scope | null) => (
-    <li key={e.id} className={"entry" + (e.parentId ? " isSub" : "")}>
+    <li
+      key={e.id}
+      className={
+        "entry" +
+        (e.parentId ? " isSub" : "") +
+        (foundEntry === e.id ? " isFound" : "")
+      }
+      ref={(el) => {
+        // Bring a searched-for entry into view once, when the page it lives
+        // on renders. Guarded so later re-renders leave your scroll alone.
+        if (!el || foundEntry !== e.id || scrolledTo.current === e.id) return;
+        scrolledTo.current = e.id;
+        el.scrollIntoView({ block: "center", behavior: scrollBehaviour() });
+        // The yellow mark is no use to a screen reader, and following a
+        // result would otherwise drop focus onto <body> — leaving a keyboard
+        // user scrolled somewhere they have to tab back to from the top.
+        el.focus({ preventScroll: true });
+      }}
+      // Focusable only as a landing spot, never in the tab order
+      tabIndex={foundEntry === e.id ? -1 : undefined}
+    >
       <button
         className={
           "bullet" +
@@ -925,7 +1014,19 @@ export default function App() {
           !settling &&
           view === "spread"
         }
+        showSearch={
+          !onboarding &&
+          !unlocking &&
+          !showRecovery &&
+          !stuck &&
+          !settling &&
+          view !== "search"
+        }
         onBack={goBack}
+        onSearch={() => {
+          setQuery("");
+          setView("search");
+        }}
         onMenu={() => setView("menu")}
         saving={saveState === "saving"}
         syncStatus={syncStatus}
@@ -1002,6 +1103,15 @@ export default function App() {
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
         )}
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "search" && (
+          <SearchView
+            query={query}
+            setQuery={setQuery}
+            results={searchResults}
+            onOpenEntry={openFoundEntry}
+            onOpenCollection={(id) => setView({ col: id })}
+          />
+        )}
         {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "sync" && (
           <SyncView />
         )}
@@ -1014,6 +1124,10 @@ export default function App() {
             canPromptInstall={install.canPrompt}
             onInstall={() => void install.promptInstall()}
             onOpenIndex={() => setView("index")}
+            onOpenSearch={() => {
+              setQuery("");
+              setView("search");
+            }}
             onOpenSync={() => setView("sync")}
             onExport={() => {
               const md = buildMarkdown(days, collections, habits);
@@ -1080,7 +1194,10 @@ export default function App() {
         !settling &&
         activeCol?.kind !== "habits" &&
         view !== "sync" &&
-        view !== "menu" && (
+        view !== "menu" &&
+        // Search is a screen for finding, not writing: the launcher would sit
+        // over the results and the keyboard has the room instead.
+        view !== "search" && (
         <CaptureLauncher
           onOpen={() => setCaptureOpen(true)}
           activeCol={activeCol}

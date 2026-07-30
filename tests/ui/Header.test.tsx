@@ -9,7 +9,9 @@ afterEach(cleanup);
 const base = {
   showBack: false,
   showMenu: true,
+  showSearch: true,
   onBack: vi.fn(),
+  onSearch: vi.fn(),
   onMenu: vi.fn(),
   saving: false,
   syncStatus: "synced" as SyncStatus,
@@ -29,6 +31,15 @@ test("shows the back button on sub-views and fires onBack", () => {
   render(<Header {...base} showBack showMenu={false} onBack={onBack} />);
   fireEvent.click(screen.getByRole("button", { name: "back" }));
   expect(onBack).toHaveBeenCalledTimes(1);
+});
+
+test("search is reachable from every screen, and hidden on search itself", () => {
+  const onSearch = vi.fn();
+  const { rerender } = render(<Header {...base} showSearch onSearch={onSearch} />);
+  fireEvent.click(screen.getByRole("button", { name: "search" }));
+  expect(onSearch).toHaveBeenCalledTimes(1);
+  rerender(<Header {...base} showSearch={false} />);
+  expect(screen.queryByRole("button", { name: "search" })).toBeNull();
 });
 
 test("shows the saving cue only while saving", () => {

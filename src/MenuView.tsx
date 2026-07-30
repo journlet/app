@@ -43,6 +43,7 @@ interface Props {
   canPromptInstall: boolean;
   onInstall: () => void;
   onOpenIndex: () => void;
+  onOpenSearch: () => void;
   onOpenSync: () => void;
   onExport: () => void;
 }
@@ -55,6 +56,7 @@ export default function MenuView({
   canPromptInstall,
   onInstall,
   onOpenIndex,
+  onOpenSearch,
   onOpenSync,
   onExport,
 }: Props) {
@@ -152,6 +154,21 @@ export default function MenuView({
           <div style={ST.rowBtn}>
             <button className="miniBtn" onClick={onOpenIndex}>
               open index
+            </button>
+          </div>
+        </div>
+        <div style={ST.row}>
+          <div style={ST.rowText}>
+            <div style={ST.rowLabel}>Search</div>
+            <div style={ST.rowDesc}>
+              Find any entry by its words, including completed and migrated
+              ones. Runs on this device — your journal is encrypted, so the
+              server could not search it even if asked.
+            </div>
+          </div>
+          <div style={ST.rowBtn}>
+            <button className="miniBtn" onClick={onOpenSearch}>
+              open search
             </button>
           </div>
         </div>

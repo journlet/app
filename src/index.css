@@ -464,6 +464,70 @@ body {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
+/* A search result is a whole-row target: the entry's glyph and text sit
+   inside one button, so there is a single, plainly labelled thing to tap and
+   no guessing about which part of the row does what. Resets the button
+   chrome and inherits .entry's flex layout above. */
+.searchHit {
+  width: 100%;
+  background: none;
+  border: none;
+  /* the whole shorthand, not just the family: the UA button font also sets a
+     13.333px size that font-family alone would leave in place */
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 0 4px;
+}
+/* .entry.isSub indents by one dot column; take that back off the width so a
+   nested result doesn't overhang the row */
+.searchHit.isSub {
+  width: calc(100% - var(--grid));
+}
+.searchHit:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+/* Matched words. The same highlighter as the priority mark, with the same
+   dark text on it in both themes (--on-hilite) — one "look here" colour in
+   the app rather than a second one to learn. It sits on top of the text and
+   changes nothing about the notation underneath. */
+.searchMark {
+  background: var(--hilite);
+  color: var(--on-hilite);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+/* Where a search result landed you. An animation rather than a transition:
+   the class is removed at the same moment the mark should be going, and a
+   transition needs the element to still have the rule to run. The 4s here
+   must match the timeout in App.openFoundEntry. */
+.entry.isFound {
+  background: var(--banner-bg);
+  box-shadow: inset 0 0 0 1px var(--banner-line);
+  animation: foundFade 4s ease-out forwards;
+}
+.entry.isFound:focus {
+  /* focused only as a landing spot for the keyboard; the mark is the cue */
+  outline: none;
+}
+@keyframes foundFade {
+  0%,
+  80% {
+    background: var(--banner-bg);
+    box-shadow: inset 0 0 0 1px var(--banner-line);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry.isFound {
+    animation: none;
+  }
+}
 .typeTag {
   font-size: 10px;
   text-transform: uppercase;

@@ -30,7 +30,10 @@ const SYNC_ATTENTION: SyncStatus[] = [
 interface HeaderProps {
   showBack: boolean;
   showMenu: boolean;
+  /** search is reachable from every screen — see the button below */
+  showSearch: boolean;
   onBack: () => void;
+  onSearch: () => void;
   onMenu: () => void;
   saving: boolean;
   syncStatus: SyncStatus;
@@ -40,7 +43,9 @@ interface HeaderProps {
 export default function Header({
   showBack,
   showMenu,
+  showSearch,
   onBack,
+  onSearch,
   onMenu,
   saving,
   syncStatus,
@@ -54,6 +59,14 @@ export default function Header({
           {showBack && (
             <button className="miniBtn" onClick={onBack}>
               back
+            </button>
+          )}
+          {/* Search sits on every screen, not just the menu: looking for an
+              entry you can't find is not a thing to go hunting for. The word
+              rather than a magnifier — every action here is plainly named. */}
+          {showSearch && (
+            <button className="miniBtn" onClick={onSearch}>
+              search
             </button>
           )}
           {/* Menu opens from home only; every sub-screen uses "back" */}
