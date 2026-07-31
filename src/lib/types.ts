@@ -93,5 +93,17 @@ export const GLYPH: Record<EntryType, string> = {
 // future page) — spec §4.1
 export const STATE_GLYPH = { done: "×", migrated: ">", scheduled: "<" } as const;
 
+/** Plain words for the task states, for anywhere a glyph alone would be a
+ *  guess — pickers, read-only context rows, accessible labels (no-guessing
+ *  rule). The glyphs themselves stay purist (spec §4.1); this never replaces
+ *  one, it only ever accompanies it. */
+export const STATE_WORD: Record<EntryState, string> = {
+  open: "open",
+  done: "completed",
+  struck: "struck out",
+  migrated: "migrated",
+  scheduled: "scheduled",
+};
+
 export const uid = (): string =>
   Math.random().toString(36).slice(2, 10) + Date.now().toString(36);

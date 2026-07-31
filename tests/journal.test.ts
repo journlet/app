@@ -136,6 +136,140 @@ describe("toggleStruck (strikethrough)", () => {
   });
 });
 
+describe("setParent (nesting, one level deep — spec §4.1)", () => {
+  const pk = "2026-07-24";
+  const parentOf = (id: string) =>
+    readAll().find((e) => e.id === id)?.parentId;
+
+  test("nests under any top-level entry on the page, not just the one above", () => {
+    const first = addEntry(pk, "task", "first", false);
+    addEntry(pk, "task", "second", false);
+    const third = addEntry(pk, "task", "third", false);
+    // "second" sits between them, so this was previously impossible
+    expect(setParent(third.id, first.id)).toBe(true);
+    expect(parentOf(third.id)).toBe(first.id);
+  });
+
+  test("moves an existing sub-bullet to a different parent", () => {
+    const a = addEntry(pk, "task", "a", false);
+    const b = addEntry(pk, "task", "b", false);
+    const child = addEntry(pk, "task", "child", false);
+    setParent(child.id, a.id);
+    expect(setParent(child.id, b.id)).toBe(true);
+    expect(parentOf(child.id)).toBe(b.id);
+  });
+
+  test("null returns the entry to top level", () => {
+    const p = addEntry(pk, "task", "parent", false);
+    const c = addEntry(pk, "task", "child", false);
+    setParent(c.id, p.id);
+    expect(setParent(c.id, null)).toBe(true);
+    expect(parentOf(c.id)).toBeUndefined();
+  });
+
+  test("refuses a parent that is itself a sub-bullet (no third level)", () => {
+    const top = addEntry(pk, "task", "top", false);
+    const mid = addEntry(pk, "task", "mid", false);
+    const low = addEntry(pk, "task", "low", false);
+    setParent(mid.id, top.id);
+    expect(setParent(low.id, mid.id)).toBe(false);
+    expect(parentOf(low.id)).toBeUndefined();
+  });
+
+  test("refuses to nest an entry that already has sub-bullets", () => {
+    const a = addEntry(pk, "task", "a", false);
+    const b = addEntry(pk, "task", "b", false);
+    const kid = addEntry(pk, "task", "kid", false);
+    setParent(kid.id, b.id);
+    expect(setParent(b.id, a.id)).toBe(false);
+    expect(parentOf(b.id)).toBeUndefined();
+  });
+
+  test("refuses a parent on another page", () => {
+    const here = addEntry(pk, "task", "here", false);
+    const elsewhere = addEntry("2026-07-25", "task", "elsewhere", false);
+    expect(setParent(here.id, elsewhere.id)).toBe(false);
+    expect(parentOf(here.id)).toBeUndefined();
+  });
+
+  test("refuses to nest an entry under itself, or under a missing entry", () => {
+    const a = addEntry(pk, "task", "a", false);
+    expect(setParent(a.id, a.id)).toBe(false);
+    expect(setParent(a.id, "no-such-id")).toBe(false);
+    expect(parentOf(a.id)).toBeUndefined();
+  });
+
+  // The store's idea of the tree must match the drawn page, or the app offers
+  // actions it then refuses. Deleting or moving a parent leaves its sub-bullets
+  // pointing at an entry that is no longer on the page; the page draws those at
+  // top level, so the store must accept them as parents and as nestable.
+  test("accepts a parent whose own parent has left the page", () => {
+    const gone = addEntry(pk, "task", "gone", false);
+    const orphan = addEntry(pk, "task", "orphan", false);
+    const other = addEntry(pk, "task", "other", false);
+    setParent(orphan.id, gone.id);
+    removeEntry(gone.id); // orphan still stores parentId, but draws top level
+
+    expect(setParent(other.id, orphan.id)).toBe(true);
+    expect(parentOf(other.id)).toBe(orphan.id);
+  });
+
+  test("an entry whose sub-bullets have left the page can be nested again", () => {
+    const parent = addEntry(pk, "task", "parent", false);
+    const child = addEntry(pk, "task", "child", false);
+    setParent(child.id, parent.id);
+    moveTo(parent.id, "2026-07-25"); // child stays behind, still naming parent
+    const target = addEntry("2026-07-25", "task", "target", false);
+
+    // On its new page the moved entry has no sub-bullets, so this must work
+    expect(setParent(parent.id, target.id)).toBe(true);
+    expect(parentOf(parent.id)).toBe(target.id);
+  });
+
+  test("capture accepts a parent whose own parent has left the page", () => {
+    const gone = addEntry(pk, "task", "gone", false);
+    const orphan = addEntry(pk, "task", "orphan", false);
+    setParent(orphan.id, gone.id);
+    removeEntry(gone.id);
+
+    // The sheet offers "Add a sub-bullet" on it, so capture must honour that
+    const c = addEntry(pk, "task", "child", false, false, "", orphan.id);
+    expect(c.parentId).toBe(orphan.id);
+  });
+});
+
+describe("addEntry with a parent (capturing a sub-bullet)", () => {
+  const pk = "2026-07-24";
+
+  test("lands nested under the given parent", () => {
+    const p = addEntry(pk, "task", "parent", false);
+    const c = addEntry(pk, "note", "detail", false, false, "", p.id);
+    expect(c.parentId).toBe(p.id);
+    expect(readAll().find((e) => e.id === c.id)?.parentId).toBe(p.id);
+  });
+
+  test("ignores a parent on another page rather than losing the entry", () => {
+    const p = addEntry("2026-07-25", "task", "parent", false);
+    const c = addEntry(pk, "task", "child", false, false, "", p.id);
+    expect(c.parentId).toBeUndefined();
+    expect(readAll().find((e) => e.id === c.id)?.pageKey).toBe(pk);
+  });
+
+  test("ignores a parent that is itself a sub-bullet (no third level)", () => {
+    const top = addEntry(pk, "task", "top", false);
+    const mid = addEntry(pk, "task", "mid", false);
+    setParent(mid.id, top.id);
+    const c = addEntry(pk, "task", "child", false, false, "", mid.id);
+    expect(c.parentId).toBeUndefined();
+  });
+
+  test("ignores a parent that no longer exists", () => {
+    const c = addEntry(pk, "task", "child", false, false, "", "gone");
+    expect(c.parentId).toBeUndefined();
+    expect(readAll().find((e) => e.id === c.id)).toBeTruthy();
+  });
+});
+
 describe("moveTo", () => {
   test("changes the page and drops nesting (the parent stays behind)", () => {
     const parent = addEntry("2026-07-24", "task", "parent", false);

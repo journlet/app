@@ -5,8 +5,8 @@
 import type { RefObject } from "react";
 import { SCOPES, SCOPE_LABEL } from "../lib/dates";
 import type { Scope } from "../lib/dates";
-import { GLYPH } from "../lib/types";
-import type { Collection, EntryType } from "../lib/types";
+import { GLYPH, STATE_GLYPH, STATE_WORD } from "../lib/types";
+import type { Collection, Entry, EntryType } from "../lib/types";
 import type { CaptureScope } from "../lib/sticky";
 import { S } from "./styles";
 
@@ -16,6 +16,19 @@ interface CaptureFormProps {
   setInput: (value: string) => void;
   captureDetails: string;
   setCaptureDetails: (value: string) => void;
+  /** parent this entry will nest under, when capture was opened from an
+   *  entry's "Add a sub-bullet" action (spec §4.1). Null = ordinary capture. */
+  captureParent: Entry | null;
+  /** why the parent can no longer take sub-bullets, if it can't — it has gone,
+   *  or it has become a sub-bullet itself, or its collection was deleted. The
+   *  entry then lands at top level and the form says which of those happened. */
+  captureLost: string | null;
+  /** the page this capture is pinned to, named because it may not be the page
+   *  on screen: the ⋯ sheet opens from scheduled rows on other pages too.
+   *  Non-null for the whole of a sub-bullet capture, including after the parent
+   *  has gone — the page choice must stay hidden for as long as it is ignored. */
+  captureParentPageLabel: string | null;
+  clearCaptureParent: () => void;
   submitEntry: () => void;
   closeCapture: () => void;
   justLogged: string | null;
@@ -41,6 +54,10 @@ export default function CaptureForm({
   setInput,
   captureDetails,
   setCaptureDetails,
+  captureParent,
+  captureLost,
+  captureParentPageLabel,
+  clearCaptureParent,
   submitEntry,
   closeCapture,
   justLogged,
@@ -59,10 +76,17 @@ export default function CaptureForm({
   customGran,
   setCustomGran,
 }: CaptureFormProps) {
+  // The capture is pinned to one page for as long as App holds a parent for it.
+  // Gate the page choice on the pin, not on the parent entry: if the parent has
+  // gone the page is still fixed, and showing scope buttons that are then
+  // ignored would be the app claiming a choice the entry can't honour.
+  const pinnedToPage = captureParentPageLabel !== null;
   return (
         <div style={S.captureForm} role="dialog" aria-label="New entry">
           <div style={S.captureFormHead}>
-            <h2 style={S.captureFormTitle}>New entry</h2>
+            <h2 style={S.captureFormTitle}>
+              {captureParent ? "New sub-bullet" : "New entry"}
+            </h2>
             <button
               className="sheetBtn isCompact"
               style={{ flex: "none", margin: 0 }}
@@ -72,6 +96,73 @@ export default function CaptureForm({
             </button>
           </div>
           <div style={S.captureFormBody}>
+            {/* Sub-bullet context (spec §4.1). Shown before the input so the
+                parent is known before typing, and always with a plainly
+                labelled way out — nothing about where this lands is implied. */}
+            {captureParent && (
+              <>
+                <div style={S.formLbl}>
+                  Nesting under
+                  {captureParentPageLabel ? `, on ${captureParentPageLabel}` : ""}
+                </div>
+                <div style={S.subParentRow}>
+                  {/* Purist glyph, but never the only signal: the state is
+                      spelled out beside it, and the glyph is hidden from
+                      screen readers which would otherwise read it raw */}
+                  <span style={{ color: "var(--ink-soft)" }} aria-hidden="true">
+                    {captureParent.state === "done" ||
+                    captureParent.state === "migrated" ||
+                    captureParent.state === "scheduled"
+                      ? STATE_GLYPH[captureParent.state]
+                      : GLYPH[captureParent.type]}
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      textDecoration:
+                        captureParent.state === "struck"
+                          ? "line-through"
+                          : undefined,
+                    }}
+                  >
+                    {captureParent.text}
+                  </span>
+                  <span style={S.stateWord}>
+                    {captureParent.state === "open"
+                      ? captureParent.type
+                      : `${captureParent.type}, ${STATE_WORD[captureParent.state]}`}
+                  </span>
+                </div>
+                <button
+                  className="sheetBtn isCompact"
+                  style={{ margin: "0 0 4px" }}
+                  onClick={clearCaptureParent}
+                >
+                  Log at top level instead
+                </button>
+              </>
+            )}
+            {/* The parent stopped being usable mid-capture. Say what changed
+                and where the entry will now land, rather than quietly reverting
+                to the sticky scope and putting it on a page nobody asked for. */}
+            {captureLost && (
+              <div style={S.captureWarn} role="status">
+                {captureLost} This will be logged at top level
+                {captureParentPageLabel
+                  ? ` on ${captureParentPageLabel}`
+                  : " on the page you choose below"}
+                .
+                {captureParentPageLabel && (
+                  <button
+                    className="sheetBtn isCompact"
+                    style={{ margin: "8px 0 0" }}
+                    onClick={clearCaptureParent}
+                  >
+                    Choose a page instead
+                  </button>
+                )}
+              </div>
+            )}
             <div style={S.formLbl}>Entry</div>
             <div style={S.captureBar}>
               <span style={S.captureGlyph}>{GLYPH[captureType]}</span>
@@ -86,13 +177,17 @@ export default function CaptureForm({
                   if (ev.key === "Escape") closeCapture();
                 }}
                 placeholder={
-                  activeCol
-                    ? `Log into ${activeCol.name}…`
-                    : captureScope === "date"
-                      ? "Log for the chosen date…"
-                      : `Log for ${SCOPE_LABEL[captureScope].toLowerCase()}…`
+                  captureParent
+                    ? "Log a sub-bullet…"
+                    : pinnedToPage
+                      ? `Log for ${captureParentPageLabel}…`
+                      : activeCol
+                        ? `Log into ${activeCol.name}…`
+                        : captureScope === "date"
+                          ? "Log for the chosen date…"
+                          : `Log for ${SCOPE_LABEL[captureScope].toLowerCase()}…`
                 }
-                aria-label="New entry"
+                aria-label={captureParent ? "New sub-bullet" : "New entry"}
                 enterKeyHint="done"
                 autoComplete="off"
               />
@@ -109,7 +204,16 @@ export default function CaptureForm({
                 Logged “{justLogged}” — keep typing for another, or Done
               </div>
             )}
-            {activeCol ? (
+            {pinnedToPage ? (
+              // A sub-bullet belongs beside its parent, so there is no page to
+              // choose. Said plainly, and naming the page, rather than shown
+              // disabled or left to be inferred.
+              <div style={S.formNote}>
+                {captureParent
+                  ? `Sub-bullets sit on the same page as their parent, so this lands on ${captureParentPageLabel}`
+                  : `This lands on ${captureParentPageLabel}, the page you started from`}
+              </div>
+            ) : activeCol ? (
               <div style={S.formNote}>
                 Logging into the “{activeCol.name}” collection
               </div>

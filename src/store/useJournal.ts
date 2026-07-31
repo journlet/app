@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Collection, Entry, Habit, Recurrence } from "../lib/types";
+import { groupByPage } from "./pageOrder";
 import {
   collections as collectionsArr,
   doc,
@@ -25,30 +26,6 @@ export interface JournalSnapshot {
   recurrences: Recurrence[];
 }
 
-// Order a page: top-level entries by creation time, each followed by its
-// children (one level deep). Orphans — children whose parent left the page —
-// are promoted to top level.
-const orderPage = (list: Entry[]): Entry[] => {
-  list.sort((a, b) => a.createdAt - b.createdAt);
-  const ids = new Set(list.map((e) => e.id));
-  const ordered: Entry[] = [];
-  for (const e of list) {
-    if (e.parentId && ids.has(e.parentId)) continue; // placed under parent
-    if (e.parentId) e.parentId = undefined; // orphan → promote
-    ordered.push(e);
-    for (const child of list)
-      if (child.parentId === e.id) ordered.push(child);
-  }
-  return ordered;
-};
-
-const group = (list: Entry[]): Record<string, Entry[]> => {
-  const days: Record<string, Entry[]> = {};
-  for (const e of list) (days[e.pageKey] ??= []).push(e);
-  for (const k of Object.keys(days)) days[k] = orderPage(days[k]);
-  return days;
-};
-
 export function useJournal(): JournalSnapshot {
   const [days, setDays] = useState<Record<string, Entry[]>>({});
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -60,7 +37,7 @@ export function useJournal(): JournalSnapshot {
 
   useEffect(() => {
     const refresh = () => {
-      setDays(group(readAll()));
+      setDays(groupByPage(readAll()));
       setCollections(readCollections());
       setHabits(readHabits());
       setRecurrences(readRecurrences());

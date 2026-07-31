@@ -28,6 +28,7 @@ vi.mock("../../src/store/reminders", () => ({
 import {
   migrateEntry,
   moveTo,
+  setParent,
   setText,
   toggleDone,
   toggleStruck,
@@ -63,7 +64,14 @@ const setup = (
     sheet: { scope: "day" as Scope | null, pk: "2026-07-24", id: "e1" },
     sheetEntry: openTask,
     sheetHistory: [] as string[],
-    sheetNestTarget: null,
+    sheetNestTargets: [] as Entry[],
+    sheetHasChildren: false,
+    nestFilter: null,
+    setNestFilter: vi.fn(),
+    nestRefused: null,
+    onOpenNestPicker: vi.fn(),
+    onNestUnder: vi.fn(),
+    onAddSubBullet: vi.fn(),
     sheetMigrates: false,
     recurrences: [],
     collections: [
@@ -281,4 +289,148 @@ test("repeat mode starts the rule via saveRepeat", () => {
   const props = setup({ editRepeat: { n: "1", unit: "week", time: "" } });
   fireEvent.click(screen.getByRole("button", { name: "Start repeating" }));
   expect(props.saveRepeat).toHaveBeenCalledTimes(1);
+});
+
+// Nesting, one level deep (spec §4.1). Any top-level entry on the page can be
+// the parent, so the actions list offers a picker sub-view rather than naming
+// the single entry above.
+describe("nesting", () => {
+  const other = (id: string, text: string): Entry => ({
+    ...openTask,
+    id,
+    text,
+  });
+
+  test("a top-level entry offers to gain sub-bullets", () => {
+    const props = setup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add a sub-bullet under this entry" })
+    );
+    expect(props.onAddSubBullet).toHaveBeenCalledTimes(1);
+  });
+
+  test("a sub-bullet cannot gain sub-bullets of its own", () => {
+    setup({ sheetEntry: { ...openTask, parentId: "p1" } });
+    expect(
+      screen.queryByRole("button", {
+        name: "Add a sub-bullet under this entry",
+      })
+    ).toBeNull();
+  });
+
+  test("the nest action opens the picker rather than nesting blindly", () => {
+    const props = setup({ sheetNestTargets: [other("e2", "plan the week")] });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Nest under another entry…" })
+    );
+    expect(props.onOpenNestPicker).toHaveBeenCalledTimes(1);
+    expect(setParent).not.toHaveBeenCalled();
+  });
+
+  test("with no other entry on the page there is nothing to nest under", () => {
+    setup({ sheetNestTargets: [] });
+    expect(screen.queryByRole("button", { name: /Nest under/ })).toBeNull();
+  });
+
+  test("the picker lists every candidate parent, not just the one above", () => {
+    setup({
+      nestFilter: "",
+      sheetNestTargets: [
+        other("e2", "plan the week"),
+        other("e3", "call the bank"),
+        other("e4", "book the dentist"),
+      ],
+    });
+    expect(
+      screen.getByRole("button", { name: "Nest under plan the week" })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Nest under book the dentist" })
+    ).toBeTruthy();
+  });
+
+  test("choosing a parent asks App to nest, which reports any refusal", () => {
+    const props = setup({
+      nestFilter: "",
+      sheetNestTargets: [other("e2", "plan the week")],
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Nest under plan the week" })
+    );
+    expect(props.onNestUnder).toHaveBeenCalledWith("e2");
+    // the sheet must not close the picker itself — App does, only on success
+    expect(props.setNestFilter).not.toHaveBeenCalledWith(null);
+  });
+
+  test("a refused nest is stated, not swallowed", () => {
+    setup({
+      nestFilter: "",
+      nestRefused: "That entry can no longer take sub-bullets.",
+      sheetNestTargets: [other("e2", "plan the week")],
+    });
+    const note = screen.getByRole("status");
+    expect(note.textContent).toContain("no longer take sub-bullets");
+  });
+
+  test("the picker names the page, which may not be the one on screen", () => {
+    setup({ nestFilter: "", sheetNestTargets: [other("e2", "plan the week")] });
+    // the entry lives on 24 Jul 2026, so the heading must say so
+    expect(screen.getByText(/24 Jul/)).toBeTruthy();
+  });
+
+  test("a candidate's real state is shown and named, not disguised as open", () => {
+    setup({
+      nestFilter: "",
+      sheetNestTargets: [{ ...other("e2", "done thing"), state: "done" }],
+    });
+    // × not •, spelled out in the row, and in the accessible name too, so the
+    // purist glyph is never the only thing carrying the meaning
+    expect(
+      screen.getByRole("button", { name: /Nest under done thing, done/ })
+    ).toBeTruthy();
+    expect(screen.getByText("×")).toBeTruthy();
+    expect(screen.getByText("completed")).toBeTruthy();
+  });
+
+  test("the picker matches text ignoring accents, as search does", () => {
+    setup({ nestFilter: "cafe", sheetNestTargets: [other("e2", "café run")] });
+    expect(
+      screen.getByRole("button", { name: /Nest under café run/ })
+    ).toBeTruthy();
+  });
+
+  test("the filter stays put once typed in, even if the list shortens", () => {
+    // Otherwise a sync could hide the filter while it kept narrowing the list
+    setup({ nestFilter: "bank", sheetNestTargets: [other("e3", "call the bank")] });
+    expect(screen.getByLabelText("Find an entry")).toBeTruthy();
+  });
+
+  test("the picker filters by entry text once the list is long", () => {
+    setup({
+      nestFilter: "bank",
+      sheetNestTargets: [
+        other("e2", "plan the week"),
+        other("e3", "call the bank"),
+      ],
+    });
+    expect(
+      screen.getByRole("button", { name: "Nest under call the bank" })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Nest under plan the week" })
+    ).toBeNull();
+  });
+
+  test("a sub-bullet can be promoted back to top level", () => {
+    const props = setup({ sheetEntry: { ...openTask, parentId: "p1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Move to top level" }));
+    expect(setParent).toHaveBeenCalledWith("e1", null);
+    expect(props.closeSheet).toHaveBeenCalledTimes(1);
+  });
+
+  test("an entry with sub-bullets is told why it cannot be nested", () => {
+    setup({ sheetHasChildren: true, sheetNestTargets: [] });
+    expect(screen.getByText(/has sub-bullets of its own/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Nest under/ })).toBeNull();
+  });
 });

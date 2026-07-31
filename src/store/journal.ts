@@ -17,6 +17,8 @@ import type {
 import { colPageKey, uid } from "../lib/types";
 import { isFutureKey } from "../lib/dates";
 import { docNameForVolume, getActiveVolume } from "../lib/volume";
+import { canNest } from "./pageOrder";
+import type { Nestable } from "./pageOrder";
 
 // Origin tag for updates applied from the sync layer (shared so other
 // modules can distinguish remote from local changes)
@@ -180,16 +182,30 @@ export const addEntry = (
   text: string,
   priority: boolean,
   inspiration = false,
-  details = ""
+  details = "",
+  /** nest the new entry under this parent (spec §4.1, one level deep). The
+   *  parent must be a top-level entry on the same page; anything else is
+   *  ignored and the entry lands at top level rather than being lost. */
+  parentId?: string
 ): Entry => {
   const trimmedDetails = details.trim();
+  const id = uid();
+  // Same resolver the page is drawn with, so a parent the UI offered is never
+  // silently refused here — the entry would land at top level while the capture
+  // form still claimed it was nesting.
+  const parentOk = Boolean(
+    parentId &&
+      findMap(parentId)?.get("pageKey") === pageKey &&
+      canNest([...pageNesting(pageKey), { id }], id, parentId)
+  );
   const e: Entry = {
-    id: uid(),
+    id,
     type,
     text,
     priority,
     inspiration: inspiration || undefined,
     details: trimmedDetails || undefined,
+    parentId: parentOk ? parentId : undefined,
     state: "open",
     pageKey,
     createdAt: Date.now(),
@@ -311,14 +327,46 @@ export const moveTo = (id: string, targetPageKey: string): void => {
   });
 };
 
-/** Nest an entry under a parent (null = back to top level). One level only. */
-export const setParent = (id: string, parentId: string | null): void => {
+/** The nesting shape of one page, as the rendered page sees it. */
+const pageNesting = (pageKey: string): Nestable[] => {
+  const page: Nestable[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const m = entries.get(i);
+    if (m.get("pageKey") !== pageKey) continue;
+    page.push({
+      id: m.get("id") as string,
+      parentId: (m.get("parentId") as string | undefined) ?? undefined,
+    });
+  }
+  return page;
+};
+
+/**
+ * Nest an entry under any top-level entry on its own page, or pass null to
+ * return it to top level (spec §4.1, one level deep). Render order follows
+ * the parent — a sub-bullet is drawn directly beneath it wherever it sits on
+ * the page — so no position is stored and `createdAt` stays the sort key.
+ *
+ * The one-level rule is checked here, not only in the UI, so a stale screen or
+ * an odd merge can't write a grandchild. The check goes through the same
+ * resolver the page is drawn with (store/pageOrder), so the store can never
+ * refuse something the UI has just offered.
+ *
+ * Returns whether it nested, so callers can say so instead of failing silently.
+ */
+export const setParent = (id: string, parentId: string | null): boolean => {
   const m = findMap(id);
-  if (!m) return;
-  doc.transact(() => {
-    if (parentId === null) m.delete("parentId");
-    else m.set("parentId", parentId);
-  });
+  if (!m) return false;
+  if (parentId === null) {
+    doc.transact(() => m.delete("parentId"));
+    return true;
+  }
+  const pk = m.get("pageKey") as string;
+  const p = findMap(parentId);
+  if (!p || p.get("pageKey") !== pk) return false; // same page only
+  if (!canNest(pageNesting(pk), id, parentId)) return false;
+  doc.transact(() => m.set("parentId", parentId));
+  return true;
 };
 
 export const removeEntry = (id: string): Entry | null => {

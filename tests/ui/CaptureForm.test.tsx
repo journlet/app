@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
 import CaptureForm from "../../src/ui/CaptureForm";
-import type { Collection } from "../../src/lib/types";
+import type { Collection, Entry } from "../../src/lib/types";
 
 afterEach(cleanup);
 
@@ -15,6 +15,10 @@ const setup = (overrides: Partial<Parameters<typeof CaptureForm>[0]> = {}) => {
     setInput: vi.fn(),
     captureDetails: "",
     setCaptureDetails: vi.fn(),
+    captureParent: null as Entry | null,
+    captureLost: null as string | null,
+    captureParentPageLabel: null as string | null,
+    clearCaptureParent: vi.fn(),
     submitEntry: vi.fn(),
     closeCapture: vi.fn(),
     justLogged: null,
@@ -131,4 +135,119 @@ test("in collection mode the scope tabs are hidden and the collection is named",
   setup({ activeCol });
   expect(screen.getByText(/Logging into the .*Books.* collection/)).toBeTruthy();
   expect(screen.queryByRole("tab", { name: "week" })).toBeNull();
+});
+
+// Capturing a sub-bullet (spec §4.1): the form is opened from an entry's
+// "Add a sub-bullet" action with that entry pre-set as the parent.
+describe("sub-bullet capture", () => {
+  const parent: Entry = {
+    id: "p1",
+    type: "task",
+    text: "plan the week",
+    priority: false,
+    state: "open",
+    pageKey: "2026-07-24",
+    createdAt: 0,
+  };
+
+  test("names the parent before the input, so it is known before typing", () => {
+    setup({ captureParent: parent, captureParentPageLabel: "Fri 24 Jul" });
+    expect(screen.getByText("New sub-bullet")).toBeTruthy();
+    expect(screen.getByText(/Nesting under/)).toBeTruthy();
+    expect(screen.getByText("plan the week")).toBeTruthy();
+  });
+
+  test("hides the page choice, says why, and names the page it lands on", () => {
+    // The sheet opens from scheduled rows on other pages, so the page a
+    // sub-bullet lands on may not be the page on screen — it must be named
+    setup({ captureParent: parent, captureParentPageLabel: "Fri 24 Jul" });
+    expect(screen.queryByRole("tablist", { name: "Log into" })).toBeNull();
+    expect(
+      screen.getByText(/same page as their parent, so this lands on Fri 24 Jul/)
+    ).toBeTruthy();
+  });
+
+  test("a completed parent is shown as completed, not as an open bullet", () => {
+    setup({
+      captureParent: { ...parent, state: "done" },
+      captureParentPageLabel: "Fri 24 Jul",
+    });
+    expect(screen.getByText("×")).toBeTruthy();
+  });
+
+  test("a lost parent is announced with the reason, page choice stays hidden", () => {
+    // The page is still pinned, so offering scope buttons would be a lie
+    setup({
+      captureParent: null,
+      captureLost: "The entry you were nesting under has gone.",
+      captureParentPageLabel: "Fri 24 Jul",
+    });
+    const note = screen.getByRole("status");
+    expect(note.textContent).toContain("has gone");
+    expect(note.textContent).toContain("top level");
+    expect(note.textContent).toContain("Fri 24 Jul");
+    expect(screen.queryByRole("tablist", { name: "Log into" })).toBeNull();
+    expect(screen.getByText("New entry")).toBeTruthy();
+  });
+
+  test("a parent that became a sub-bullet itself is reported as such", () => {
+    // Not "gone" — the reason has to match what actually happened
+    setup({
+      captureParent: null,
+      captureLost:
+        "The entry you were nesting under is now a sub-bullet itself, so it can't take sub-bullets.",
+      captureParentPageLabel: "Fri 24 Jul",
+    });
+    expect(screen.getByRole("status").textContent).toContain(
+      "now a sub-bullet itself"
+    );
+  });
+
+  test("a lost parent offers a way back to choosing a page", () => {
+    const props = setup({
+      captureParent: null,
+      captureLost: "The entry you were nesting under has gone.",
+      captureParentPageLabel: "Fri 24 Jul",
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose a page instead" })
+    );
+    expect(props.clearCaptureParent).toHaveBeenCalledTimes(1);
+  });
+
+  test("a deleted collection page drops the pin and restores the page choice", () => {
+    // The pinned page no longer exists, so keeping it would strand the entry
+    setup({
+      captureParent: null,
+      captureLost: "The collection you were logging into has been deleted.",
+      captureParentPageLabel: null,
+    });
+    expect(screen.getByRole("status").textContent).toContain(
+      "page you choose below"
+    );
+    expect(screen.getByRole("tablist", { name: "Log into" })).toBeTruthy();
+  });
+
+  test("offers a plainly labelled way back to ordinary capture", () => {
+    const props = setup({ captureParent: parent, captureParentPageLabel: "Fri 24 Jul" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Log at top level instead" })
+    );
+    expect(props.clearCaptureParent).toHaveBeenCalledTimes(1);
+  });
+
+  test("type and signifiers still apply — a sub-bullet is a full entry", () => {
+    const props = setup({ captureParent: parent, captureParentPageLabel: "Fri 24 Jul" });
+    fireEvent.click(screen.getByRole("button", { name: /note/ }));
+    expect(props.setCaptureType).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /priority/ }));
+    expect(props.setCapturePriority).toHaveBeenCalled();
+  });
+
+  test("ordinary capture is unchanged: the page choice is still offered", () => {
+    setup({ captureParent: null });
+    expect(screen.getByRole("tablist", { name: "Log into" })).toBeTruthy();
+    expect(screen.getByText("New entry")).toBeTruthy();
+    expect(screen.queryByText(/Nesting under/)).toBeNull();
+  });
 });

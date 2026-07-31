@@ -15,8 +15,9 @@ import {
   shiftAnchor,
 } from "../lib/dates";
 import type { Scope } from "../lib/dates";
+import { normalise } from "../lib/search";
 import { pageRefLabel, threadTargets } from "../lib/threads";
-import { GLYPH } from "../lib/types";
+import { GLYPH, STATE_GLYPH, STATE_WORD } from "../lib/types";
 import type {
   Collection,
   Entry,
@@ -43,7 +44,21 @@ interface EntryActionsSheetProps {
   sheet: SheetTarget;
   sheetEntry: Entry;
   sheetHistory: string[];
-  sheetNestTarget: Entry | null;
+  /** every entry on this page that could become this one's parent (spec §4.1) */
+  sheetNestTargets: Entry[];
+  /** this entry has sub-bullets of its own, so it can't become one */
+  sheetHasChildren: boolean;
+  /** "Nest under…" picker sub-view: null = closed, otherwise its filter text */
+  nestFilter: string | null;
+  setNestFilter: Dispatch<SetStateAction<string | null>>;
+  /** why the last nest attempt was refused, if it was */
+  nestRefused: string | null;
+  /** open the "Nest under…" picker, clearing any previous refusal */
+  onOpenNestPicker: () => void;
+  /** nest this entry under the chosen parent; App reports any refusal */
+  onNestUnder: (parentId: string) => void;
+  /** open capture with this entry pre-set as the parent */
+  onAddSubBullet: () => void;
   sheetMigrates: boolean;
   recurrences: Recurrence[];
   /** list collections, for the thread-to-a-page targets (spec §4.4) */
@@ -77,7 +92,14 @@ export default function EntryActionsSheet({
   sheet,
   sheetEntry,
   sheetHistory,
-  sheetNestTarget,
+  sheetNestTargets,
+  sheetHasChildren,
+  nestFilter,
+  setNestFilter,
+  nestRefused,
+  onOpenNestPicker,
+  onNestUnder,
+  onAddSubBullet,
   sheetMigrates,
   recurrences,
   collections,
@@ -251,11 +273,9 @@ export default function EntryActionsSheet({
                   collections,
                   nowKeys
                 );
-                const q = threadFilter.trim().toLowerCase();
+                const q = normalise(threadFilter.trim());
                 const shown = q
-                  ? targets.filter((t) =>
-                      t.label.toLowerCase().includes(q)
-                    )
+                  ? targets.filter((t) => normalise(t.label).includes(q))
                   : targets;
                 return (
                   <>
@@ -265,7 +285,7 @@ export default function EntryActionsSheet({
                     </div>
                     {/* A filter only earns its place once the list is past a
                         glance; below that it is one more thing to look at */}
-                    {targets.length > 8 && (
+                    {(targets.length > 8 || q.length > 0) && (
                       <input
                         style={S.sheetInput}
                         value={threadFilter}
@@ -275,18 +295,9 @@ export default function EntryActionsSheet({
                         aria-label="Find a page"
                       />
                     )}
-                    <div style={{ maxHeight: "42vh", overflowY: "auto" }}>
+                    <div style={S.pickerList}>
                       {shown.length === 0 && (
-                        <div
-                          style={{
-                            fontSize: 13,
-                            fontStyle: "italic",
-                            color: "var(--ink-soft)",
-                            padding: "4px 4px 10px",
-                          }}
-                        >
-                          no page matches
-                        </div>
+                        <div style={S.sheetEmpty}>no page matches</div>
                       )}
                       {shown.map((t) => {
                         const already = Boolean(
@@ -346,6 +357,107 @@ export default function EntryActionsSheet({
                   </>
                 );
               })()
+            ) : nestFilter !== null ? (
+              // "Nest under…" picker (spec §4.1). Any top-level entry on the
+              // page can be the parent, not only the one above: a sub-bullet
+              // is drawn directly beneath its parent wherever that parent
+              // sits, so choosing one moves this entry there. A sub-view, like
+              // the thread picker, so the actions list stays the same length
+              // however long the page gets.
+              (() => {
+                const q = normalise(nestFilter.trim());
+                const shown = q
+                  ? sheetNestTargets.filter((t) =>
+                      normalise(t.text).includes(q)
+                    )
+                  : sheetNestTargets;
+                return (
+                  <>
+                    {/* Names the page, as the thread picker does: the sheet can
+                        be opened from a scheduled row, so the entries listed
+                        may live on a page that isn't the one on screen */}
+                    <div style={S.sheetGroupLabel}>
+                      Nest under — this entry moves to sit beneath the one you
+                      choose, on{" "}
+                      {pageRefLabel(sheetEntry.pageKey, collections)}
+                    </div>
+                    {/* A filter only earns its place once the list is past a
+                        glance; below that it is one more thing to look at. It
+                        stays put once typed in, so a list can never be narrowed
+                        by a filter the user can no longer see. */}
+                    {(sheetNestTargets.length > 8 || q.length > 0) && (
+                      <input
+                        style={S.sheetInput}
+                        value={nestFilter}
+                        autoFocus
+                        placeholder="Find an entry…"
+                        onChange={(ev) => setNestFilter(ev.target.value)}
+                        aria-label="Find an entry"
+                      />
+                    )}
+                    {nestRefused && (
+                      <div style={S.sheetWarn} role="status">
+                        {nestRefused}
+                      </div>
+                    )}
+                    <div style={S.pickerList}>
+                      {shown.length === 0 && (
+                        <div style={S.sheetEmpty}>
+                          {q.length > 0
+                            ? "no entry matches"
+                            : "nothing left to nest this under"}
+                        </div>
+                      )}
+                      {shown.map((t) => (
+                        <button
+                          key={t.id}
+                          className="sheetBtn"
+                          style={S.nestTargetBtn}
+                          // The state is named as well as drawn: a completed or
+                          // migrated entry can still be a parent, but the user
+                          // should not have to guess that from a glyph alone
+                          aria-label={`Nest under ${t.text}${
+                            t.state === "open" ? "" : `, ${t.state}`
+                          }`}
+                          onClick={() => onNestUnder(t.id)}
+                        >
+                          <span
+                            style={{ color: "var(--ink-soft)" }}
+                            aria-hidden="true"
+                          >
+                            {t.state === "done" ||
+                            t.state === "migrated" ||
+                            t.state === "scheduled"
+                              ? STATE_GLYPH[t.state]
+                              : GLYPH[t.type]}
+                          </span>
+                          <span
+                            style={
+                              t.state === "struck"
+                                ? { textDecoration: "line-through" }
+                                : undefined
+                            }
+                          >
+                            {trunc(t.text, 44)}
+                          </span>
+                          {t.state !== "open" && (
+                            <span style={{ ...S.stateWord, marginLeft: "auto" }}>
+                              {STATE_WORD[t.state]}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      className="sheetBtn isQuiet"
+                      onClick={() => setNestFilter(null)}
+                    >
+                      Back
+                    </button>
+
+                  </>
+                );
+              })()
             ) : editText === null ? (
               <>
                 <div style={S.sheetEntry}>
@@ -401,16 +513,31 @@ export default function EntryActionsSheet({
                     {sheetEntry.state === "done" ? "Reopen task" : "Mark complete"}
                   </button>
                 )}
-                {sheetNestTarget && (
+                {/* Nesting, one level deep (spec §4.1). A top-level entry can
+                    gain sub-bullets; a sub-bullet can be moved to a different
+                    parent or promoted. An entry that already has sub-bullets
+                    can't itself be nested — that would make a third level —
+                    and the sheet says so rather than hiding the action. */}
+                {!sheetEntry.parentId && (
+                  <button className="sheetBtn" onClick={onAddSubBullet}>
+                    Add a sub-bullet under this entry
+                  </button>
+                )}
+                {sheetNestTargets.length > 0 && (
                   <button
                     className="sheetBtn"
-                    onClick={() => {
-                      setParent(sheet.id, sheetNestTarget.id);
-                      closeSheet();
-                    }}
+                    onClick={onOpenNestPicker}
                   >
-                    Nest under "{trunc(sheetNestTarget.text, 34)}"
+                    {sheetEntry.parentId
+                      ? "Nest under a different entry…"
+                      : "Nest under another entry…"}
                   </button>
+                )}
+                {sheetHasChildren && !sheetEntry.parentId && (
+                  <div style={S.sheetNote}>
+                    This entry has sub-bullets of its own, so it can't be nested
+                    under another. Move them out first.
+                  </div>
                 )}
                 {sheetEntry.parentId && (
                   <button

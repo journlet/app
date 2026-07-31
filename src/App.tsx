@@ -48,6 +48,7 @@ import {
   addRecurrence,
   removeCollection,
   restoreCollection,
+  setParent,
   setReminder,
   tagEntryRecurrence,
 } from "./store/journal";
@@ -147,6 +148,14 @@ export default function App() {
   // Optional details for the entry being captured; per-entry, so not sticky —
   // cleared after each log alongside the text (spec §9)
   const [captureDetails, setCaptureDetails] = useState("");
+  // Parent for the entry being captured, when capture was opened from an
+  // entry's "Add a sub-bullet" action (spec §4.1). Holds the parent's id and
+  // page so the child lands beside it; stays set for a run of sub-bullets,
+  // and is cleared when the form closes. Null = ordinary top-level capture.
+  const [captureParent, setCaptureParent] = useState<{
+    id: string;
+    pk: string;
+  } | null>(null);
   // Last entry logged while the capture form has been open (batch cue)
   const [justLogged, setJustLogged] = useState<string | null>(null);
 
@@ -204,6 +213,15 @@ export default function App() {
   // current filter text (spec §4.4). A sub-view rather than inline buttons so
   // the sheet's length doesn't grow with the number of collections.
   const [threadFilter, setThreadFilter] = useState<string | null>(null);
+  // "Nest under…" sub-view of the ⋯ sheet: null = closed, otherwise the
+  // current filter text. Every top-level entry on the page is a candidate
+  // parent, so like the thread picker this is a sub-view rather than a row of
+  // buttons — the sheet's length can't grow with the size of the page.
+  const [nestFilter, setNestFilter] = useState<string | null>(null);
+  // Set when a nest was refused because the page changed under the picker
+  // (another device deleted or moved something). Shown rather than swallowed —
+  // an action that appears to do nothing is the app lying about what happened.
+  const [nestRefused, setNestRefused] = useState<string | null>(null);
   const [editRepeat, setEditRepeat] = useState<EditRepeat | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -383,12 +401,25 @@ export default function App() {
   const submitEntry = useCallback(() => {
     const text = input.trim();
     if (!text) return;
-    const pk = activeCol
-      ? colPageKey(activeCol.id)
-      : captureScope === "date"
-        ? periodKey(customGran, customDate)
-        : nowKeys[captureScope];
-    addEntry(pk, captureType, text, capturePriority, captureInspiration, captureDetails);
+    // A sub-bullet belongs beside its parent, so the pinned page wins over the
+    // scope buttons — which the form hides for exactly as long as it is pinned.
+    // The pin is dropped if its page is deleted, so this can't name a dead page.
+    const pk =
+      capturePinnedPk ??
+      (activeCol
+        ? colPageKey(activeCol.id)
+        : captureScope === "date"
+          ? periodKey(customGran, customDate)
+          : nowKeys[captureScope]);
+    addEntry(
+      pk,
+      captureType,
+      text,
+      capturePriority,
+      captureInspiration,
+      captureDetails,
+      captureParentUsable?.id
+    );
     // First entry logged on this device unlocks the install nudge (see
     // lib/install): let people feel capture work once, then offer to install.
     markCaptured();
@@ -401,7 +432,7 @@ export default function App() {
       text.length > 40 ? text.slice(0, 39) + "…" : text
     );
     inputRef.current?.focus();
-  }, [input, captureDetails, activeCol, captureScope, captureType, capturePriority, captureInspiration, customDate, customGran, nowKeys]);
+  }, [input, captureDetails, capturePinnedPk, captureParentUsable, activeCol, captureScope, captureType, capturePriority, captureInspiration, customDate, customGran, nowKeys]);
 
   const showToast = (t: DeletedToast) => {
     setToast(t);
@@ -427,6 +458,35 @@ export default function App() {
     setCaptureOpen(false);
     setJustLogged(null);
     setCaptureDetails("");
+    setCaptureParent(null);
+  };
+
+  /**
+   * Nest the sheet's entry under the chosen parent. Closes the picker when it
+   * worked; when the store refuses — only possible if the page changed while
+   * the picker was open — the picker stays put and says so, so the tap is never
+   * a silent no-op.
+   */
+  const nestUnder = (parentId: string) => {
+    if (!sheet) return;
+    if (setParent(sheet.id, parentId)) {
+      setNestRefused(null);
+      setNestFilter(null);
+    } else {
+      setNestRefused(
+        "That entry can no longer take sub-bullets — the page changed. Pick another."
+      );
+    }
+  };
+
+  /** Open capture with the entry pre-set as parent, for a run of sub-bullets */
+  const openSubBulletCapture = (parentId: string, pk: string) => {
+    setCaptureParent({ id: parentId, pk });
+    setInput("");
+    setCaptureDetails("");
+    setJustLogged(null);
+    closeSheet();
+    setCaptureOpen(true);
   };
 
   const closeSheet = () => {
@@ -435,6 +495,8 @@ export default function App() {
     setEditRemind(null);
     setEditRepeat(null);
     setThreadFilter(null);
+    setNestFilter(null);
+    setNestRefused(null);
     setSchedDate("");
   };
 
@@ -640,19 +702,57 @@ export default function App() {
     ? (days[sheet.pk] || []).find((x) => x.id === sheet.id) ?? null
     : null;
 
-  // Nesting context: candidate parent above, and whether this entry has kids
+  // Nesting context (spec §4.1). A child is drawn under its parent wherever
+  // the parent sits, so any top-level entry on the page can be the parent —
+  // not just the one immediately above. Nesting is one level deep, so an entry
+  // that already has children of its own can't itself become a child.
   const sheetPageList = sheet ? days[sheet.pk] || [] : [];
   const sheetHasChildren = sheetEntry
     ? sheetPageList.some((x) => x.parentId === sheetEntry.id)
     : false;
-  const sheetNestTarget = (() => {
-    if (!sheet || !sheetEntry || sheetEntry.parentId || sheetHasChildren)
-      return null;
-    const idx = sheetPageList.findIndex((x) => x.id === sheet.id);
-    for (let i = idx - 1; i >= 0; i--)
-      if (!sheetPageList[i].parentId) return sheetPageList[i];
-    return null;
-  })();
+  // The parent behind a sub-bullet capture, resolved fresh each render so a
+  // change elsewhere is reflected. Three ways it can stop being usable, and the
+  // form has to say which — logging the entry somewhere it wasn't promised is
+  // exactly what the no-guessing rule forbids.
+  const captureParentEntry: Entry | null = captureParent
+    ? (days[captureParent.pk] || []).find((x) => x.id === captureParent.id) ??
+      null
+    : null;
+  // A pinned collection page can be deleted outright, taking the page with it.
+  // The pin must then be dropped, or the entry would land on a page that no
+  // longer exists — reachable from no spread, no index, no export.
+  const capturePageGone = Boolean(
+    captureParent &&
+      isColPageKey(captureParent.pk) &&
+      !collections.some((c) => c.id === colIdFromKey(captureParent.pk))
+  );
+  const captureLost: string | null = !captureParent
+    ? null
+    : capturePageGone
+      ? "The collection you were logging into has been deleted."
+      : !captureParentEntry
+        ? "The entry you were nesting under has gone."
+        : captureParentEntry.parentId
+          ? "The entry you were nesting under is now a sub-bullet itself, so it can't take sub-bullets."
+          : null;
+  // Only a top-level entry can take sub-bullets, so the form must stop claiming
+  // to nest the moment its parent becomes one itself
+  const captureParentUsable: Entry | null = captureLost
+    ? null
+    : captureParentEntry;
+  // The page a pinned capture lands on, or null once the pin is dropped
+  const capturePinnedPk = capturePageGone ? null : captureParent?.pk ?? null;
+
+  // Candidate parents. `days` is already resolved by store/pageOrder, so an
+  // entry drawn at top level is offered as a parent and the store will accept
+  // it — the two can't disagree.
+  const sheetNestTargets: Entry[] =
+    !sheet || !sheetEntry || sheetHasChildren
+      ? []
+      : sheetPageList.filter(
+          (x) =>
+            !x.parentId && x.id !== sheet.id && x.id !== sheetEntry.parentId
+        );
   const trunc = (s: string, n: number) =>
     s.length > n ? s.slice(0, n - 1) + "…" : s;
 
@@ -1228,6 +1328,12 @@ export default function App() {
           setInput={setInput}
           captureDetails={captureDetails}
           setCaptureDetails={setCaptureDetails}
+          captureParent={captureParentUsable}
+          captureLost={captureLost}
+          captureParentPageLabel={
+            capturePinnedPk ? pageRefLabel(capturePinnedPk, collections) : null
+          }
+          clearCaptureParent={() => setCaptureParent(null)}
           submitEntry={submitEntry}
           closeCapture={closeCapture}
           justLogged={justLogged}
@@ -1339,7 +1445,19 @@ export default function App() {
           sheet={sheet}
           sheetEntry={sheetEntry}
           sheetHistory={sheetHistory}
-          sheetNestTarget={sheetNestTarget}
+          sheetNestTargets={sheetNestTargets}
+          sheetHasChildren={sheetHasChildren}
+          nestFilter={nestFilter}
+          setNestFilter={setNestFilter}
+          nestRefused={nestRefused}
+          onOpenNestPicker={() => {
+            // A refusal belongs to the attempt that caused it, never to the
+            // next one — otherwise the picker opens already complaining
+            setNestRefused(null);
+            setNestFilter("");
+          }}
+          onNestUnder={nestUnder}
+          onAddSubBullet={() => openSubBulletCapture(sheet.id, sheet.pk)}
           sheetMigrates={sheetMigrates}
           recurrences={recurrences}
           collections={collections}

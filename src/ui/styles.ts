@@ -254,6 +254,39 @@ export const S: Record<string, CSSProperties> = {
     fontStyle: "italic",
     marginTop: 10,
   },
+  // Something changed under the capture form and the entry will now land
+  // somewhere other than the form first said
+  captureWarn: {
+    fontSize: 13,
+    color: INK,
+    padding: "10px 12px",
+    marginBottom: 10,
+    border: `1.5px solid ${INK}`,
+    borderRadius: 10,
+  },
+  // The type and state of an entry, spelled out beside its glyph so a picker
+  // row or a context row never depends on the symbol alone (no-guessing rule)
+  stateWord: {
+    fontSize: 11.5,
+    color: INK_SOFT,
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
+  // The parent shown above the input during a sub-bullet capture (spec §4.1).
+  // Read-only context, so it is a bordered row rather than a button — nothing
+  // here is tappable except the plainly labelled escape beneath it.
+  subParentRow: {
+    display: "flex",
+    gap: 8,
+    alignItems: "baseline",
+    fontSize: 15,
+    padding: "10px 12px",
+    marginBottom: 8,
+    border: `1px solid ${LINE}`,
+    borderRadius: 10,
+    color: INK,
+    wordBreak: "break-word",
+  },
   captureGlyph: {
     fontSize: 18,
     width: 16,
@@ -388,6 +421,39 @@ export const S: Record<string, CSSProperties> = {
     margin: "10px 4px 6px",
   },
   sheetRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 },
+  // Scrollable body of a picker sub-view, so a long list can't push the
+  // sheet's Back button off screen
+  pickerList: { maxHeight: "42vh", overflowY: "auto" },
+  // Quiet explanation inside the sheet — why an action isn't on offer
+  sheetNote: {
+    fontSize: 12,
+    color: INK_SOFT,
+    padding: "0 4px 10px",
+  },
+  // "nothing matches" / "nothing available" inside a picker sub-view
+  sheetEmpty: {
+    fontSize: 13,
+    fontStyle: "italic",
+    color: INK_SOFT,
+    padding: "4px 4px 10px",
+  },
+  // Something the user tried didn't take; carries more weight than a note
+  sheetWarn: {
+    fontSize: 13,
+    color: INK,
+    padding: "10px 12px",
+    marginBottom: 10,
+    border: `1.5px solid ${INK}`,
+    borderRadius: 10,
+  },
+  // A candidate parent in the "Nest under…" picker: glyph then text, left
+  // aligned, so a column of them reads like the page it came from
+  nestTargetBtn: {
+    display: "flex",
+    justifyContent: "flex-start",
+    gap: 8,
+    textAlign: "left",
+  },
   sheetInput: {
     width: "100%",
     boxSizing: "border-box",
