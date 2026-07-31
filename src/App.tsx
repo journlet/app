@@ -721,6 +721,13 @@ export default function App() {
   // Follow a search result to the page it lives on. The entry is never moved
   // or copied: you are taken to where it was written, exactly as turning to a
   // page number would, and it is marked there for a few seconds.
+  // Search always opens empty. The last query is not a place you left off —
+  // it belongs to the entry you were hunting, and that hunt is over.
+  const openSearch = useCallback(() => {
+    setQuery("");
+    setView("search");
+  }, [setView]);
+
   const openFoundEntry = (pk: string, id: string) => {
     // openPage navigates, which clears any previous mark — so set this one
     // afterwards
@@ -1023,10 +1030,7 @@ export default function App() {
           view !== "search"
         }
         onBack={goBack}
-        onSearch={() => {
-          setQuery("");
-          setView("search");
-        }}
+        onSearch={openSearch}
         onMenu={() => setView("menu")}
         saving={saveState === "saving"}
         syncStatus={syncStatus}
@@ -1124,10 +1128,7 @@ export default function App() {
             canPromptInstall={install.canPrompt}
             onInstall={() => void install.promptInstall()}
             onOpenIndex={() => setView("index")}
-            onOpenSearch={() => {
-              setQuery("");
-              setView("search");
-            }}
+            onOpenSearch={openSearch}
             onOpenSync={() => setView("sync")}
             onExport={() => {
               const md = buildMarkdown(days, collections, habits);
@@ -1200,6 +1201,7 @@ export default function App() {
         view !== "search" && (
         <CaptureLauncher
           onOpen={() => setCaptureOpen(true)}
+          onFind={openSearch}
           activeCol={activeCol}
           captureType={captureType}
           captureScope={captureScope}

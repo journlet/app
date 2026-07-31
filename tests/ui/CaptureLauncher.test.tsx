@@ -8,6 +8,7 @@ afterEach(cleanup);
 
 const base = {
   onOpen: vi.fn(),
+  onFind: vi.fn(),
   activeCol: null as Collection | null,
   captureType: "task" as const,
   captureScope: "day" as const,
@@ -54,4 +55,26 @@ test("both the field and the Log button open the form", () => {
     screen.getByRole("button", { name: "Log — opens the entry form" })
   );
   expect(onOpen).toHaveBeenCalledTimes(2);
+});
+
+test("Find sits on the bar and opens search, without opening the entry form", () => {
+  const onFind = vi.fn();
+  const onOpen = vi.fn();
+  render(<CaptureLauncher {...base} onFind={onFind} onOpen={onOpen} />);
+  const find = screen.getByRole("button", {
+    name: "Find an entry — opens search",
+  });
+  // the icon is paired with the word, never left to carry the meaning alone
+  expect(find.textContent).toBe("Find");
+  fireEvent.click(find);
+  expect(onFind).toHaveBeenCalledTimes(1);
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("Find comes before the entry field, Log after it", () => {
+  const { container } = render(<CaptureLauncher {...base} />);
+  const order = Array.from(
+    container.querySelectorAll(".launcherFind, .launcherField, .launcherGo")
+  ).map((el) => el.className);
+  expect(order).toEqual(["launcherFind", "launcherField", "launcherGo"]);
 });

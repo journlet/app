@@ -630,6 +630,27 @@ table.habits {
   text-align: left;
   min-width: 0;
 }
+/* Find: the quiet twin of the Log button at the other end of the bar. Same
+   shape and icon-plus-word construction, but plain rather than ink-filled —
+   logging is the headline action (spec §4.1) and must stay the loudest thing
+   on the screen. */
+.launcherFind {
+  background: none;
+  border: none;
+  border-right: 1px solid var(--line);
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.launcherFind:hover {
+  color: var(--ink);
+}
 .launcherGo {
   background: var(--ink);
   color: var(--paper);
@@ -644,6 +665,7 @@ table.habits {
   gap: 5px;
   flex-shrink: 0;
 }
+.launcherFind:focus-visible,
 .launcherField:focus-visible,
 .launcherGo:focus-visible {
   outline: 2px solid var(--ink);
