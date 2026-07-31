@@ -14,10 +14,20 @@ import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabas
 import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
 import {
   markThisDeviceSignedOut,
+  thisClientLabel,
   thisDeviceId,
   touchThisDevice,
 } from "./devices";
-import { publishDeviceKey, shareDataKeyWithDevices } from "./deviceLink";
+import {
+  approveLinkRequest,
+  claimWrappedDataKey,
+  listLinkRequests,
+  publishDeviceKey,
+  publishLinkRequest,
+  rejectLinkRequest,
+  shareDataKeyWithDevices,
+} from "./deviceLink";
+import type { LinkRequest } from "./deviceLink";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -181,6 +191,13 @@ const teardown = () => {
   shadow?.destroy();
   shadow = null;
   lastMaxId = 0;
+  // Link state belongs to a session and a keyring, both of which are going.
+  // A pending-approval card left on screen after a sign-out would offer to
+  // grant a device access with a data key this device no longer holds.
+  keeperUsable = false;
+  linkCode = null;
+  pendingRequests = [];
+  stopLinkPolling();
 };
 
 // Writes are serialised. The shadow doc only learns that the server has an
@@ -303,6 +320,18 @@ doc.on("update", (update: Uint8Array, origin: unknown) => {
 
 // ---------- journal key handling ----------
 
+/**
+ * Whether this device's keeper key is known to open this account's journal.
+ *
+ * Every fresh device generates a keeper key on first launch, and on a device
+ * that is linking to an existing journal that key is simply wrong. Without this
+ * flag the Sync screen would happily render it as the recovery code: sixteen
+ * groups of characters that look exactly like the real thing and open nothing.
+ * A recovery code that does not work is worse than no recovery code, because it
+ * gets written down and trusted.
+ */
+let keeperUsable = false;
+
 // Returns true when this device's keys are good for the remote journal
 const ensureJournalKeys = async (): Promise<boolean> => {
   if (!supabase || !ring) return false;
@@ -316,7 +345,20 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     return false;
   }
   if (!data) {
-    // First device: publish our wrapped data key
+    // First device: publish our wrapped data key.
+    //
+    // A device with no keeper key cannot create a journal, and should never be
+    // here: not having one means it was approved by another device, which means a
+    // journal existed. If the row has gone missing under it, creating a new one
+    // would abandon the old ciphertext and look like total data loss, so it says
+    // so instead.
+    if (!ring.keeperKey || !ring.wrapped) {
+      setError(
+        "This account's journal record is missing. This device was linked by another device, so it cannot recreate it."
+      );
+      setStatus(navigator.onLine ? "pending" : "offline");
+      return false;
+    }
     const { error: insErr } = await supabase.from("journals").insert({
       user_id: session?.user.id,
       wrapped_key: wrappedToJson(ring.wrapped),
@@ -331,26 +373,190 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     // existing journal has just been handed the code and does not need telling
     // (decision 4, spec device-identity-design.md).
     markRecoveryPending();
+    keeperUsable = true;
     return true;
   }
   // Journal exists: can our keeper unwrap its data key?
-  try {
-    const remoteWrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
-    const dataKey = await unwrapDataKey(remoteWrapped, ring.keeperKey);
-    ring = { ...ring, dataKey, wrapped: remoteWrapped };
-    await replaceKeyRing(ring);
-    return true;
-  } catch {
-    // This device holds a keeper key that will not open the account's journal,
-    // so it needs the journal key from a device that can. One meaning, one
-    // response: ask for the key. Inferring anything more from this — that the
-    // key must have been *changed*, and therefore that this device has been
-    // locked out and should sign itself out — is what the retreat of 28 July
-    // removed, and it caused two worse bugs than the one it addressed. See
-    // spec §6.1b.
-    setStatus("needs-key");
-    return false;
+  if (ring.keeperKey) {
+    try {
+      const remoteWrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
+      const dataKey = await unwrapDataKey(remoteWrapped, ring.keeperKey);
+      ring = { ...ring, dataKey, wrapped: remoteWrapped };
+      await replaceKeyRing(ring);
+      keeperUsable = true;
+      return true;
+    } catch {
+      // This device holds a keeper key that will not open the account's journal.
+      // Inferring anything more from this — that the key must have been
+      // *changed*, and therefore that this device has been locked out and should
+      // sign itself out — is what the retreat of 28 July removed, and it caused
+      // two worse bugs than the one it addressed. See spec §6.1b.
+      keeperUsable = false;
+    }
   }
+  // Has another device left a key for this one? This is the ordinary path for a
+  // device being added now: it asked, somebody approved, and the data key is
+  // waiting wrapped to this device alone.
+  try {
+    const granted = await claimWrappedDataKey(supabase, deviceBinding());
+    if (granted) {
+      // The keeper key goes, deliberately. It never opened this journal, and
+      // keeping it would leave something that looks like a recovery code on a
+      // device that has no business displaying one.
+      ring = {
+        ...ring,
+        keeperKey: undefined,
+        wrapped: undefined,
+        dataKey: granted,
+      };
+      await replaceKeyRing(ring);
+      await withdrawLinkRequest();
+      return true;
+    }
+  } catch (e) {
+    // A failed check is not a refusal. Fall through to asking, which is what a
+    // device in this state should be doing anyway.
+    console.warn("[devices] could not check for a granted key", e);
+  }
+  // Nothing granted: ask, and show the code to compare.
+  await askToBeAdded();
+  setStatus("needs-key");
+  return false;
+};
+
+// ---------- being added, and adding others ----------
+
+const deviceBinding = () => ({
+  userId: session?.user.id ?? "",
+  deviceId: thisDeviceId(),
+});
+
+const notify = () => listeners.forEach((fn) => fn(status));
+
+/** The code this device is displaying while it waits, or null if not waiting. */
+let linkCode: string | null = null;
+export const getLinkCode = (): string | null => linkCode;
+
+/** Requests this device could approve. */
+let pendingRequests: LinkRequest[] = [];
+export const getLinkRequests = (): LinkRequest[] => pendingRequests;
+
+/**
+ * How often a waiting device looks for its key.
+ *
+ * A poll rather than realtime, because a device in this state has never
+ * subscribed to anything: the channel is opened after the first successful
+ * reconcile, and this device cannot reconcile until it is let in. Five seconds is
+ * chosen for the person watching two screens and waiting for one to change; the
+ * screen is in the foreground by definition, and the poll stops the moment the
+ * status leaves needs-key.
+ */
+const LINK_POLL_MS = 5_000;
+let linkPoll: ReturnType<typeof setInterval> | null = null;
+
+const stopLinkPolling = () => {
+  if (!linkPoll) return;
+  clearInterval(linkPoll);
+  linkPoll = null;
+};
+
+const pollForGrant = async (): Promise<void> => {
+  if (!supabase || !session || status !== "needs-key") {
+    stopLinkPolling();
+    return;
+  }
+  try {
+    // Discarding the key is intentional: connect() re-claims and adopts it
+    // properly, and duplicating that here is how the two paths drift apart.
+    if (await claimWrappedDataKey(supabase, deviceBinding())) {
+      stopLinkPolling();
+      await connect();
+    }
+  } catch {
+    // Still waiting. A failed check is not a refusal.
+  }
+};
+
+const startLinkPolling = () => {
+  if (linkPoll) return;
+  linkPoll = setInterval(() => void pollForGrant(), LINK_POLL_MS);
+};
+
+/**
+ * Ask another device to let this one in, and remember the code to display.
+ *
+ * Failure is not fatal and is not shown. The journal key remains a complete
+ * route in, so a device that cannot publish a request falls back to the screen
+ * it had before this feature existed rather than to a dead end.
+ */
+const askToBeAdded = async (): Promise<void> => {
+  if (!supabase || !session) return;
+  try {
+    linkCode = await publishLinkRequest(
+      supabase,
+      deviceBinding(),
+      thisClientLabel()
+    );
+    startLinkPolling();
+    notify();
+  } catch (e) {
+    linkCode = null;
+    console.warn("[devices] could not ask to be added", e);
+  }
+};
+
+/** Stop asking, once in or once leaving. */
+const withdrawLinkRequest = async (): Promise<void> => {
+  const wasAsking = linkCode !== null;
+  linkCode = null;
+  stopLinkPolling();
+  if (!wasAsking || !supabase || !session) return;
+  try {
+    await rejectLinkRequest(supabase, thisDeviceId());
+  } catch {
+    // It expires on its own, and the approving device deletes it too.
+  }
+};
+
+/**
+ * Refresh the list of devices asking to be let in.
+ *
+ * Only on a device that is actually connected and holds the data key: a device
+ * that cannot open the journal itself has nothing to grant, and showing it an
+ * approval prompt would be offering a decision it cannot carry out.
+ */
+const refreshLinkRequests = async (): Promise<void> => {
+  if (!supabase || !session || !connectedUserId || !ring) return;
+  try {
+    const next = await listLinkRequests(supabase, deviceBinding());
+    const unchanged =
+      next.length === pendingRequests.length &&
+      next.every((r, i) => r.deviceId === pendingRequests[i]?.deviceId);
+    if (unchanged) return;
+    pendingRequests = next;
+    notify();
+  } catch (e) {
+    console.warn("[devices] could not read link requests", e);
+  }
+};
+
+/** Grant a request, after the person has compared the codes. */
+export const approveDevice = async (request: LinkRequest): Promise<void> => {
+  if (!supabase || !session || !ring)
+    throw new Error("This device cannot add another right now");
+  await approveLinkRequest(supabase, ring.dataKey, request, deviceBinding());
+  pendingRequests = pendingRequests.filter(
+    (r) => r.deviceId !== request.deviceId
+  );
+  notify();
+};
+
+/** Refuse a request, whether because the codes differ or it was not expected. */
+export const rejectDevice = async (deviceId: string): Promise<void> => {
+  if (!supabase) throw new Error("Sync is not configured");
+  await rejectLinkRequest(supabase, deviceId);
+  pendingRequests = pendingRequests.filter((r) => r.deviceId !== deviceId);
+  notify();
 };
 
 /**
@@ -382,6 +588,10 @@ const adoptJournalKey = async (code: string): Promise<void> => {
   }
   ring = { keeperKey, dataKey, wrapped, createdAt: Date.now() };
   await replaceKeyRing(ring);
+  // Proven by the unwrap above: this key opens this account's journal, so this
+  // device can display it as the recovery code.
+  keeperUsable = true;
+  await withdrawLinkRequest();
 };
 
 /** Link this device: adopt the journal key code from another device, then sync. */
@@ -416,8 +626,19 @@ export const acceptJournalKey = async (
   return "linked";
 };
 
-export const getJournalKeyCode = async (): Promise<string> => {
+/**
+ * The recovery code, or null on a device that has no business showing one.
+ *
+ * Null in two cases. A device linked by approval never held the keeper key at
+ * all. A device that has not yet proven its keeper key against this account holds
+ * one that is almost certainly wrong — every fresh install generates one — and
+ * rendering that would produce a plausible-looking code that opens nothing. A
+ * recovery code that does not work is worse than none, because it gets written
+ * down and relied on.
+ */
+export const getJournalKeyCode = async (): Promise<string | null> => {
   const r = ring ?? (await ensureKeys());
+  if (!r.keeperKey || !keeperUsable) return null;
   return exportJournalKeyCode(r.keeperKey);
 };
 
@@ -586,6 +807,19 @@ const subscribe = () => {
         if (row.payload) void applyRemotePayload(row.payload);
       }
     )
+    .on(
+      "postgres_changes",
+      {
+        // Every event, not just INSERT: a request withdrawn or approved on
+        // another device has to take the prompt off this screen too, or two
+        // devices both show a card for something already dealt with.
+        event: "*",
+        schema: "public",
+        table: "device_link_requests",
+        filter: `user_id=eq.${session.user.id}`,
+      },
+      () => void refreshLinkRequests()
+    )
     .subscribe((state) => {
       if (state === "SUBSCRIBED") {
         // A re-join after a dropped socket means events were missed while
@@ -660,6 +894,10 @@ const doConnect = async (): Promise<void> => {
   // the user can see depends on them yet, and a journal that is synced should say
   // so without waiting on a table it does not read from.
   void shareThisDevicesKeys();
+  // Realtime is the fast path, this is the floor: a backgrounded PWA misses
+  // events with no replay, so a device that was asleep when a request arrived
+  // would otherwise show nothing until something else happened to poke it.
+  void refreshLinkRequests();
 };
 
 /**
@@ -673,7 +911,7 @@ const doConnect = async (): Promise<void> => {
  */
 const shareThisDevicesKeys = async (): Promise<void> => {
   if (!supabase || !session || !ring) return;
-  const binding = { userId: session.user.id, deviceId: thisDeviceId() };
+  const binding = deviceBinding();
   try {
     await publishDeviceKey(supabase, binding);
     await shareDataKeyWithDevices(supabase, ring.dataKey, binding);
@@ -781,8 +1019,12 @@ export const startSync = (): void => {
   // replay — catch up whenever the app comes back to the foreground
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !session) return;
-    if (connectedUserId) void reconcile("visibility");
-    else void connect();
+    if (connectedUserId) {
+      void reconcile("visibility");
+      // A request that arrived while this device was asleep produced no event it
+      // could hear, so foregrounding is the moment it finds out.
+      void refreshLinkRequests();
+    } else void connect();
   });
 };
 
@@ -862,6 +1104,10 @@ export const signOutAndWipe = async (): Promise<void> => {
   } catch {
     // Never block leaving on being able to announce it.
   }
+  // Withdraw any outstanding request while there is still a session to do it
+  // with. A device that asked, gave up and signed out would otherwise leave a
+  // prompt on someone else's screen for something that is no longer waiting.
+  await withdrawLinkRequest();
   teardown();
   clearPendingKey();
   if (supabase) {

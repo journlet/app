@@ -17,9 +17,21 @@ const RING_KEY = "ring-v1";
 const PAIR_KEY = "device-pair-v1";
 
 export interface KeyRing {
-  keeperKey: CryptoKey;
+  /**
+   * The key the recovery code is made of, and the only thing that can open the
+   * account's `journals` row.
+   *
+   * Optional since approval-based linking (step 3): a device let in by another
+   * device is handed the data key directly and never sees this. That is the
+   * point rather than a shortcoming — a device that held the keeper key could
+   * still read everything after being removed, which would make removing it
+   * meaningless. It also means only the device that created the journal, or one
+   * linked with the recovery code, can display that code.
+   */
+  keeperKey?: CryptoKey;
   dataKey: CryptoKey;
-  wrapped: WrappedDataKey;
+  /** The data key wrapped by the keeper key. Present exactly when it is. */
+  wrapped?: WrappedDataKey;
   createdAt: number;
 }
 

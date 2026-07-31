@@ -15,9 +15,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ensureDeviceKeyPair } from "../lib/keystore";
 import {
   exportDevicePublicKey,
+  unwrapDataKeyForDevice,
+  verificationCode,
   wrapDataKeyForDevice,
 } from "../lib/deviceKeys";
 import type { DeviceBinding, DeviceWrappedKeyJson } from "../lib/deviceKeys";
+
+/**
+ * How long a pending request stays valid.
+ *
+ * Enforced by the client rather than the database: nothing here runs on a
+ * schedule (no pg_cron), so a request expires by being ignored and deleted by
+ * whichever device next looks at it. Thirty minutes is long enough to walk to
+ * another room and short enough that the plaintext client string is not sitting
+ * on the server for any length of time.
+ */
+export const LINK_REQUEST_TTL_MS = 30 * 60 * 1000;
 
 /**
  * Make sure the server knows this device's public key, and return it.
@@ -143,4 +156,218 @@ export const shareDataKeyWithDevices = async (
     written += 1;
   }
   return written;
+};
+
+// ---------- step 3: asking, and being asked ----------
+
+/** A device waiting to be let in, as the approving device sees it. */
+export interface LinkRequest {
+  deviceId: string;
+  publicKey: string;
+  /** What it calls itself. Plaintext, and null if it declined to say. */
+  client: string | null;
+  requestedAt: number;
+  /** Computed here from the public key that actually arrived. */
+  code: string;
+}
+
+/**
+ * Ask to be let in, and return the code to display.
+ *
+ * The code is derived from this device's own public key, and the approving
+ * device derives its copy from the key it received. Comparing the two screens is
+ * therefore comparing what was sent against what arrived, which is the whole
+ * mechanism: a server that substituted a key of its own would have to show a
+ * matching code, and it cannot.
+ */
+export const publishLinkRequest = async (
+  client: SupabaseClient,
+  binding: DeviceBinding,
+  clientLabel: string
+): Promise<string> => {
+  const pair = await ensureDeviceKeyPair();
+  const publicKey = await exportDevicePublicKey(pair.publicKey);
+  const { error } = await client.from("device_link_requests").upsert(
+    {
+      user_id: binding.userId,
+      device_id: binding.deviceId,
+      public_key: publicKey,
+      client: clientLabel,
+      // Reset on every ask, so a device that has been sitting on a stale request
+      // gets a fresh half hour rather than expiring mid-approval.
+      requested_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,device_id" }
+  );
+  if (error) throw new Error(`Could not ask to be added: ${error.message}`);
+  return verificationCode(publicKey);
+};
+
+/**
+ * Requests worth showing someone, newest first.
+ *
+ * Expired rows are deleted rather than merely filtered. Nothing in this app runs
+ * on a timer server-side, so if the device that notices a stale request does not
+ * clear it, the plaintext client string stays on the server indefinitely — which
+ * is precisely the thing the thirty-minute window is supposed to bound.
+ *
+ * This device's own request is excluded. A device cannot vouch for itself, and
+ * showing it its own prompt would be an invitation to approve it.
+ */
+export const listLinkRequests = async (
+  client: SupabaseClient,
+  binding: DeviceBinding
+): Promise<LinkRequest[]> => {
+  const { data, error } = await client
+    .from("device_link_requests")
+    .select("device_id, public_key, client, requested_at");
+  if (error) throw new Error(`Could not read link requests: ${error.message}`);
+
+  const rows = (data ?? []) as {
+    device_id: string;
+    public_key: string;
+    client: string | null;
+    requested_at: string;
+  }[];
+
+  const fresh: LinkRequest[] = [];
+  const stale: string[] = [];
+  for (const row of rows) {
+    if (row.device_id === binding.deviceId) continue;
+    const requestedAt = Date.parse(row.requested_at);
+    // An unparseable timestamp counts as expired. Treating it as fresh would
+    // mean a malformed row could be shown for approval forever.
+    if (!Number.isFinite(requestedAt) || Date.now() - requestedAt > LINK_REQUEST_TTL_MS) {
+      stale.push(row.device_id);
+      continue;
+    }
+    fresh.push({
+      deviceId: row.device_id,
+      publicKey: row.public_key,
+      client: row.client,
+      requestedAt,
+      code: await verificationCode(row.public_key),
+    });
+  }
+
+  for (const deviceId of stale) {
+    // Failure here is not worth reporting: the request is expired either way and
+    // will be retried by whoever looks next.
+    await client
+      .from("device_link_requests")
+      .delete()
+      .eq("device_id", deviceId)
+      .then(() => undefined, () => undefined);
+  }
+
+  return fresh.sort((a, b) => b.requestedAt - a.requestedAt);
+};
+
+/**
+ * Grant a request: wrap the data key for it, publish, then withdraw the request.
+ *
+ * The order is load-bearing. Publishing before deleting means a failure between
+ * the two leaves a linked device with a lingering request, which is untidy and
+ * self-corrects when the new device claims its key. The reverse order would
+ * leave a device that has been told nothing and has nothing to wait for.
+ *
+ * `request.publicKey` is used rather than a fresh read of the row. The user
+ * approved a specific code, and that code was computed from this exact key; going
+ * back to the server would create a window in which the row could change between
+ * the comparison and the grant.
+ */
+export const approveLinkRequest = async (
+  client: SupabaseClient,
+  dataKey: CryptoKey,
+  request: LinkRequest,
+  binding: DeviceBinding
+): Promise<void> => {
+  const wrapped = await wrapDataKeyForDevice(dataKey, request.publicKey, {
+    userId: binding.userId,
+    deviceId: request.deviceId,
+  });
+  const { error } = await client.from("device_wrapped_keys").upsert(
+    {
+      user_id: binding.userId,
+      device_id: request.deviceId,
+      wrapped: wrapped satisfies DeviceWrappedKeyJson,
+    },
+    { onConflict: "user_id,device_id" }
+  );
+  if (error) throw new Error(`Could not add the device: ${error.message}`);
+
+  // Also publish its public key, so the device appears in the ordinary key
+  // table and future data-key changes reach it without another approval.
+  const { error: keyError } = await client.from("device_keys").upsert(
+    {
+      user_id: binding.userId,
+      device_id: request.deviceId,
+      public_key: request.publicKey,
+    },
+    { onConflict: "user_id,device_id" }
+  );
+  if (keyError)
+    throw new Error(`Could not record the device's key: ${keyError.message}`);
+
+  await rejectLinkRequest(client, request.deviceId);
+};
+
+/**
+ * Withdraw a request without granting it.
+ *
+ * Used both for "codes are different" and as the last step of an approval. A
+ * rejection deletes rather than marking, because the asking device is watching
+ * for its own request to disappear and a tombstone would need a meaning of its
+ * own; the device can simply ask again.
+ */
+export const rejectLinkRequest = async (
+  client: SupabaseClient,
+  deviceId: string
+): Promise<void> => {
+  const { error } = await client
+    .from("device_link_requests")
+    .delete()
+    .eq("device_id", deviceId);
+  if (error)
+    throw new Error(`Could not clear the request: ${error.message}`);
+};
+
+/**
+ * Take the data key if one has been left for this device.
+ *
+ * Null means "not yet", which is the ordinary state of a device that is waiting,
+ * and is deliberately not an error.
+ *
+ * A row that will not open is deleted. Only this device could ever unwrap it, so
+ * a row that fails is unusable by definition — the realistic cause is a row
+ * sealed to a keypair this device lost in a wipe. Leaving it would mean every
+ * later check finds the same broken row and reports the same failure.
+ */
+export const claimWrappedDataKey = async (
+  client: SupabaseClient,
+  binding: DeviceBinding
+): Promise<CryptoKey | null> => {
+  const { data, error } = await client
+    .from("device_wrapped_keys")
+    .select("wrapped")
+    .eq("device_id", binding.deviceId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not check for a key: ${error.message}`);
+  if (!data) return null;
+
+  const pair = await ensureDeviceKeyPair();
+  try {
+    return await unwrapDataKeyForDevice(
+      data.wrapped as DeviceWrappedKeyJson,
+      pair.privateKey,
+      binding
+    );
+  } catch {
+    await client
+      .from("device_wrapped_keys")
+      .delete()
+      .eq("device_id", binding.deviceId)
+      .then(() => undefined, () => undefined);
+    return null;
+  }
 };

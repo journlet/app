@@ -87,6 +87,13 @@ vi.mock("../src/lib/keystore", () => ({
   ensureKeys: async () => ({ keeperKey, dataKey, wrapped, createdAt: 0 }),
   replaceKeyRing: async () => {},
   wipeKeys: async () => {},
+  // Every connect publishes this device's key now, so the mock has to offer
+  // one. A stub keypair is enough: the wrapping itself is tested against real
+  // keys in deviceKeys.test.ts.
+  ensureDeviceKeyPair: async () =>
+    crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, [
+      "deriveBits",
+    ]),
 }));
 
 const boot = async () => {

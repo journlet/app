@@ -106,6 +106,18 @@ const clientName = (): string => {
   return "Browser";
 };
 
+/**
+ * What this device calls itself when asking to be let in.
+ *
+ * The one piece of plaintext metadata the server ever sees, and it earns that:
+ * an approval prompt that cannot say what is asking is a prompt nobody can
+ * judge, and a device awaiting approval has no key to write anything encrypted
+ * with. Same coarse wording as the register, so the prompt and the device list
+ * agree with each other.
+ */
+export const thisClientLabel = (): string =>
+  `${clientName()} (${platformName()})`;
+
 // Last-seen is not refreshed more often than this. Every write here becomes a
 // row in the append-only log, and §6.1a is a long account of what happens when
 // something writes to that log on every launch and foreground: one device

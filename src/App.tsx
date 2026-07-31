@@ -30,6 +30,7 @@ import {
   getSyncStatus,
   hasSyncedOnce,
   isConfigured,
+  getLinkCode,
   onSyncStatus,
   retryConnect,
 } from "./store/sync";
@@ -90,6 +91,7 @@ import CaptureLauncher from "./ui/CaptureLauncher";
 import OnboardingView from "./ui/OnboardingView";
 import RecoveryCodeView from "./ui/RecoveryCodeView";
 import UnlockView from "./ui/UnlockView";
+import LinkPrompts from "./ui/LinkPrompts";
 import CannotLoadView from "./ui/CannotLoadView";
 import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
 import {
@@ -639,6 +641,12 @@ export default function App() {
     syncedOnce,
   });
 
+  // The code this device is displaying while it waits to be approved. Read off
+  // the same status notifications, since the engine publishes the request as part
+  // of arriving at needs-key.
+  const [linkCode, setLinkCode] = useState(getLinkCode());
+  useEffect(() => onSyncStatus(() => setLinkCode(getLinkCode())), []);
+
   // Second stage of first run: the recovery code, shown once before the journal
   // on the device that created it (decision 4). Re-read on every status change
   // so it clears as soon as it is acknowledged.
@@ -659,10 +667,16 @@ export default function App() {
     // If the code cannot be read there is nothing useful to show, so let the
     // journal through rather than blocking on a screen with a gap in it. It
     // stays readable later under Sync.
-    getJournalKeyCode().then(setRecoveryCode, () => {
+    const giveUp = () => {
       acknowledgeRecovery();
       setRecoveryPend(false);
-    });
+    };
+    // Null as well as a rejection. A device with no usable keeper key has no code
+    // to show, and leaving recoveryCode null would re-run this effect forever
+    // behind a screen with a gap in it. It should not happen — only the device
+    // that created the journal is marked, and that device has a working key — but
+    // an infinite loop is not the way to find that out.
+    getJournalKeyCode().then((code) => (code ? setRecoveryCode(code) : giveUp()), giveUp);
   }, [showRecovery, recoveryCode]);
 
   // Volume-size instrumentation (remediation item 15): log the encoded doc
@@ -1150,6 +1164,14 @@ export default function App() {
         {!onboarding && !unlocking && !showRecovery && !stuck && !settling && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner onSignIn={() => setView("sync")} />
         )}
+        {/* A device asking to be added, shown wherever the journal is. Above the
+            not-syncing banner would be wrong — that banner explains why the
+            journal in front of you is stale, which is the more urgent thing —
+            and inside a particular view would mean the prompt disappears when
+            you change view while a device sits waiting. */}
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && (
+          <LinkPrompts />
+        )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
         {onboarding && (
           <OnboardingView>
@@ -1171,7 +1193,7 @@ export default function App() {
           />
         )}
         {!onboarding && unlocking && (
-          <UnlockView>
+          <UnlockView linkCode={linkCode}>
             <SyncView />
           </UnlockView>
         )}

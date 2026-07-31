@@ -105,10 +105,12 @@ vi.mock("@supabase/supabase-js", () => ({
           cfg: { table?: string },
           handler: (msg: { new: Row }) => void
         ) => {
-          // Only the journal_updates handler is driven from here; the journals
-          // handler (lost-device revocation) has its own file. Discarded rather
-          // than captured, so this file has no unused hook pretending to.
-          if (cfg?.table !== "journals") realtimeHandler = handler;
+          // Named positively. This was `!== "journals"`, and when a third
+          // subscription was added (device_link_requests) it silently captured
+          // that one instead, so every remote-edit test in this file started
+          // asserting against a handler that does nothing with journal rows.
+          // Match the table you mean.
+          if (cfg?.table === "journal_updates") realtimeHandler = handler;
           return ch;
         },
         subscribe: (cb: (s: string) => void) => {
@@ -139,6 +141,13 @@ vi.mock("../src/lib/keystore", () => ({
   ensureKeys: async () => ({ keeperKey, dataKey, wrapped, createdAt: 0 }),
   replaceKeyRing: async () => {},
   wipeKeys: async () => {},
+  // Every connect publishes this device's key now, so the mock has to offer
+  // one. A stub keypair is enough: the wrapping itself is tested against real
+  // keys in deviceKeys.test.ts.
+  ensureDeviceKeyPair: async () =>
+    crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, [
+      "deriveBits",
+    ]),
 }));
 
 /** A stored row in the retired format: same layout, version byte 1, no AAD. */

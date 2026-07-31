@@ -136,8 +136,15 @@ export default function SyncView() {
     }
   };
 
+  const [noKeyHere, setNoKeyHere] = useState(false);
+
   const showKey = async () => {
-    setKeyCode(await getJournalKeyCode());
+    const code = await getJournalKeyCode();
+    // Null on a device that was added by approval: it was handed the data key
+    // alone and never held the recovery key. Saying so is important, because the
+    // alternative is a button that appears to do nothing.
+    setNoKeyHere(code === null);
+    setKeyCode(code);
     setCopied(false);
   };
 
@@ -509,6 +516,14 @@ export default function SyncView() {
                   </button>
                 </div>
               </>
+            ) : noKeyHere ? (
+              <p style={{ ...ST.p, marginBottom: 0 }}>
+                This device does not hold the journal key. It was added by
+                another device, which gave it what it needs to read your journal
+                and nothing more — that is what makes it possible to remove this
+                device on its own later. The key can be shown on the device that
+                created the journal.
+              </p>
             ) : (
               <button className="miniBtn" onClick={showKey}>
                 show journal key
