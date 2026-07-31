@@ -58,12 +58,12 @@ test("both the field and the Log button open the form", () => {
   expect(onOpen).toHaveBeenCalledTimes(2);
 });
 
-test("Find sits on the bar and opens search, without opening the entry form", () => {
+test("Find sits on the bar and opens the find screen, without opening the entry form", () => {
   const onFind = vi.fn();
   const onOpen = vi.fn();
   render(<CaptureLauncher {...base} onFind={onFind} onOpen={onOpen} />);
   const find = screen.getByRole("button", {
-    name: "Find an entry — opens search",
+    name: "Find an entry — opens the find screen",
   });
   // the icon is paired with the word, never left to carry the meaning alone
   expect(find.textContent).toBe("Find");
@@ -78,7 +78,7 @@ test("on a page that takes no entries, Find stands alone and the field goes", ()
   expect(screen.queryByText("Log an entry…")).toBeNull();
   expect(screen.queryByRole("button", { name: /opens the entry form/ })).toBeNull();
   const find = screen.getByRole("button", {
-    name: "Find an entry — opens search",
+    name: "Find an entry — opens the find screen",
   });
   // same control, same corner — it must not move between pages
   expect(find.className).toContain("launcherFind");

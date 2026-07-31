@@ -159,16 +159,17 @@ export default function MenuView({
         </div>
         <div style={ST.row}>
           <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Search</div>
+            <div style={ST.rowLabel}>Find</div>
             <div style={ST.rowDesc}>
-              Find any entry by its words, including completed and migrated
-              ones. Runs on this device — your journal is encrypted, so the
-              server could not search it even if asked.
+              Look up any entry by its words, including completed and migrated
+              ones. Also on the capture bar at the bottom of every journal
+              page. Runs on this device — your journal is encrypted, so the
+              server could not read it even if asked.
             </div>
           </div>
           <div style={ST.rowBtn}>
             <button className="miniBtn" onClick={onOpenSearch}>
-              open search
+              find an entry
             </button>
           </div>
         </div>

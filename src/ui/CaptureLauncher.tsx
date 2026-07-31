@@ -67,7 +67,7 @@ export default function CaptureLauncher({
       className={"launcherFind" + (canLog ? "" : " isAlone")}
       type="button"
       onClick={onFind}
-      aria-label="Find an entry — opens search"
+      aria-label="Find an entry — opens the find screen"
     >
       <FindGlass />
       Find

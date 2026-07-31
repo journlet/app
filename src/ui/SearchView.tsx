@@ -1,7 +1,11 @@
-// Search (spec §10: search runs locally, never on the server). One field, and
-// results grouped by the page they live on — the page number is how you find
-// anything in the paper method, so a result's job is to tell you which page to
-// turn to and then take you there.
+// Find (spec §4.8; §10: search runs locally, never on the server). Called
+// Find throughout the interface — one word for one action, matching the
+// button on the capture bar. The code keeps the name "search", which is what
+// the mechanism is.
+//
+// One field, and results grouped by the page they live on — the page number
+// is how you find anything in the paper method, so a result's job is to tell
+// you which page to turn to and then take you there.
 //
 // Every state is listed, completed and migrated included: the entry you have
 // lost is as often a finished one, and hiding it would be the app editing your
@@ -144,20 +148,20 @@ export default function SearchView({
   return (
     <div>
       <div style={ST.head}>
-        <h2 style={ST.title}>Search</h2>
+        <h2 style={ST.title}>Find</h2>
         <span style={ST.sub}>this device only — nothing is sent anywhere</span>
       </div>
 
       <div style={ST.fieldRow}>
-        <label htmlFor="journal-search" style={ST.srOnly}>
-          Search your journal
+        <label htmlFor="journal-find" style={ST.srOnly}>
+          Find an entry in your journal
         </label>
         <input
-          id="journal-search"
+          id="journal-find"
           type="search"
           value={query}
           onChange={(ev) => setQuery(ev.target.value)}
-          placeholder="Search every entry…"
+          placeholder="Find an entry…"
           autoFocus
           autoComplete="off"
           autoCorrect="off"
@@ -178,10 +182,10 @@ export default function SearchView({
 
       {!searching && (
         <div style={ST.empty}>
-          Type to search every entry in this journal — tasks, events and notes,
-          including completed, struck and migrated ones, plus entry details and
-          collection names. Your journal is encrypted, so searching happens here
-          on your device and never on the server.
+          Type to look through every entry in this journal — tasks, events and
+          notes, including completed, struck and migrated ones, plus entry
+          details and collection names. Your journal is encrypted, so this runs
+          here on your device and never on the server.
         </div>
       )}
 

@@ -42,10 +42,19 @@ const view = (query: string, over: Record<string, unknown> = {}) =>
     />
   );
 
-test("an empty field explains what search covers and that it stays on device", () => {
+test("an empty field explains what it covers and that it stays on device", () => {
   view("");
   expect(screen.getByText(/never on the server/i)).toBeTruthy();
   expect(screen.queryByText(/entries on/)).toBeNull();
+});
+
+test("the interface calls it Find, matching the button that opens it", () => {
+  const { container } = view("");
+  expect(screen.getByRole("heading", { name: "Find" })).toBeTruthy();
+  expect(
+    container.querySelector("input")?.getAttribute("placeholder")
+  ).toBe("Find an entry…");
+  expect(container.textContent).not.toContain("Search");
 });
 
 test("typing filters and counts the hits across pages", () => {
