@@ -57,6 +57,99 @@ drop policy if exists "insert own updates" on public.journal_updates;
 create policy "insert own updates" on public.journal_updates
   for insert with check (auth.uid() = user_id);
 
+-- Per-device keys (spec/device-identity-design.md, steps 2 and 3). These exist
+-- so that one device can be signed out without locking out the rest: with a
+-- single shared keeper key the only lever is rotating it, which hits everything
+-- at once.
+--
+-- All three tables are readable and writable by any device signed in to the
+-- account, because RLS can only see auth.uid() — there is no device identity in
+-- the JWT to narrow it with. That is not the weakness it looks like. Public keys
+-- are public by construction, and a device can read every wrapped blob but can
+-- only *unwrap* the one bound to its own device id.
+
+-- One row per device: its public ECDH key, raw P-256 point, base64.
+create table if not exists public.device_keys (
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  device_id  text not null,
+  public_key text not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, device_id)
+);
+
+alter table public.device_keys enable row level security;
+
+drop policy if exists "read own device keys" on public.device_keys;
+create policy "read own device keys" on public.device_keys
+  for select using (auth.uid() = user_id);
+drop policy if exists "write own device keys" on public.device_keys;
+create policy "write own device keys" on public.device_keys
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "update own device keys" on public.device_keys;
+create policy "update own device keys" on public.device_keys
+  for update using (auth.uid() = user_id);
+drop policy if exists "delete own device keys" on public.device_keys;
+create policy "delete own device keys" on public.device_keys
+  for delete using (auth.uid() = user_id);
+
+-- The data key, wrapped so that exactly one device can open it. Ciphertext
+-- only: { v, epk, salt, iv, blob }, all base64.
+create table if not exists public.device_wrapped_keys (
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  device_id  text not null,
+  wrapped    jsonb not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, device_id)
+);
+
+alter table public.device_wrapped_keys enable row level security;
+
+drop policy if exists "read own wrapped keys" on public.device_wrapped_keys;
+create policy "read own wrapped keys" on public.device_wrapped_keys
+  for select using (auth.uid() = user_id);
+drop policy if exists "write own wrapped keys" on public.device_wrapped_keys;
+create policy "write own wrapped keys" on public.device_wrapped_keys
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "update own wrapped keys" on public.device_wrapped_keys;
+create policy "update own wrapped keys" on public.device_wrapped_keys
+  for update using (auth.uid() = user_id);
+drop policy if exists "delete own wrapped keys" on public.device_wrapped_keys;
+create policy "delete own wrapped keys" on public.device_wrapped_keys
+  for delete using (auth.uid() = user_id);
+
+-- A device asking to be let in, pending approval on a device already trusted.
+--
+-- `client` is plaintext, and is the one deliberate metadata addition in the
+-- whole design: an approval prompt that cannot say what is asking is a prompt
+-- nobody can judge, and the asking device has no key yet so it cannot write into
+-- the encrypted journal. Mitigated by being ephemeral — the client enforces a
+-- thirty minute expiry and deletes the row on approval or rejection — so the
+-- server learns "something calling itself Safari on iOS asked to link at 14:32"
+-- for half an hour, and nothing about content.
+create table if not exists public.device_link_requests (
+  user_id      uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  device_id    text not null,
+  public_key   text not null,
+  client       text,
+  requested_at timestamptz not null default now(),
+  primary key (user_id, device_id)
+);
+
+alter table public.device_link_requests enable row level security;
+
+drop policy if exists "read own link requests" on public.device_link_requests;
+create policy "read own link requests" on public.device_link_requests
+  for select using (auth.uid() = user_id);
+drop policy if exists "write own link requests" on public.device_link_requests;
+create policy "write own link requests" on public.device_link_requests
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "update own link requests" on public.device_link_requests;
+create policy "update own link requests" on public.device_link_requests
+  for update using (auth.uid() = user_id);
+drop policy if exists "delete own link requests" on public.device_link_requests;
+create policy "delete own link requests" on public.device_link_requests
+  for delete using (auth.uid() = user_id);
+
 -- Account deletion (remediation item 16). Deleting an auth user normally needs
 -- the service role key, which cannot ship in a client-only app. A security
 -- definer function is the way round it that keeps the "no server-side code"
@@ -93,6 +186,9 @@ begin
   end if;
   delete from public.journal_updates where user_id = uid;
   delete from public.journals where user_id = uid;
+  delete from public.device_link_requests where user_id = uid;
+  delete from public.device_wrapped_keys where user_id = uid;
+  delete from public.device_keys where user_id = uid;
   delete from auth.users where id = uid;
 end;
 $$;
@@ -115,12 +211,28 @@ grant execute on function public.delete_account() to authenticated;
 -- served (28 Jul, see spec §6.1b). If a project already has it published, that
 -- is harmless: nothing subscribes to it. To tidy it up:
 --   alter publication supabase_realtime drop table public.journals;
+--
+-- device_link_requests and device_wrapped_keys are published too, and both are
+-- load-bearing rather than a nicety: an approval prompt that only appears when
+-- the trusted device happens to relaunch would leave someone holding a phone
+-- that says "waiting" with nothing to wait for, and the new device needs to
+-- notice its wrapped key the moment it is granted. Foreground polling remains
+-- the floor under both, since a backgrounded PWA misses realtime entirely and
+-- there is no replay (spec §6.1a).
 do $$
+declare
+  t text;
 begin
-  if not exists (
-    select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime' and tablename = 'journal_updates'
-  ) then
-    alter publication supabase_realtime add table public.journal_updates;
-  end if;
+  foreach t in array array[
+    'journal_updates', 'device_link_requests', 'device_wrapped_keys'
+  ] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and tablename = t
+    ) then
+      execute format(
+        'alter publication supabase_realtime add table public.%I', t
+      );
+    end if;
+  end loop;
 end $$;

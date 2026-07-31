@@ -12,7 +12,12 @@ import * as Y from "yjs";
 import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
 import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
-import { markThisDeviceSignedOut, touchThisDevice } from "./devices";
+import {
+  markThisDeviceSignedOut,
+  thisDeviceId,
+  touchThisDevice,
+} from "./devices";
+import { publishDeviceKey, shareDataKeyWithDevices } from "./deviceLink";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -23,6 +28,7 @@ import {
 } from "../lib/crypto";
 import type { WrappedDataKey } from "../lib/crypto";
 import { ensureKeys, replaceKeyRing, wipeKeys } from "../lib/keystore";
+import { b64decode, b64encode } from "../lib/base64";
 import type { KeyRing } from "../lib/keystore";
 import {
   clearPendingKey,
@@ -85,15 +91,6 @@ export const onSyncStatus = (fn: (s: SyncStatus) => void): (() => void) => {
 };
 
 // ---------- helpers ----------
-
-const b64encode = (bytes: Uint8Array): string => {
-  let s = "";
-  bytes.forEach((b) => (s += String.fromCharCode(b)));
-  return btoa(s);
-};
-
-const b64decode = (s: string): Uint8Array =>
-  Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 interface WrappedKeyJson {
   v: number;
@@ -659,6 +656,30 @@ const doConnect = async (): Promise<void> => {
   subscribe();
   touchThisDevice();
   setStatus("synced");
+  // Not awaited, and deliberately last. Per-device keys are groundwork: nothing
+  // the user can see depends on them yet, and a journal that is synced should say
+  // so without waiting on a table it does not read from.
+  void shareThisDevicesKeys();
+};
+
+/**
+ * Publish this device's public key, then hand the data key to any device that has
+ * published one and has not been given it (spec step 2).
+ *
+ * Failure is swallowed on purpose. There is nothing for the user to do about it,
+ * the journal in front of them is syncing normally, and the next launch tries
+ * again, so an error banner here would be alarm without a remedy. The console
+ * line is for me.
+ */
+const shareThisDevicesKeys = async (): Promise<void> => {
+  if (!supabase || !session || !ring) return;
+  const binding = { userId: session.user.id, deviceId: thisDeviceId() };
+  try {
+    await publishDeviceKey(supabase, binding);
+    await shareDataKeyWithDevices(supabase, ring.dataKey, binding);
+  } catch (e) {
+    console.warn("[devices] key sharing deferred to the next launch", e);
+  }
 };
 
 // Single-flight. connect() has four callers — the auth listener, the online
