@@ -1021,16 +1021,7 @@ export default function App() {
           !settling &&
           view === "spread"
         }
-        showSearch={
-          !onboarding &&
-          !unlocking &&
-          !showRecovery &&
-          !stuck &&
-          !settling &&
-          view !== "search"
-        }
         onBack={goBack}
-        onSearch={openSearch}
         onMenu={() => setView("menu")}
         saving={saveState === "saving"}
         syncStatus={syncStatus}
@@ -1193,15 +1184,18 @@ export default function App() {
         !showRecovery &&
         !stuck &&
         !settling &&
-        activeCol?.kind !== "habits" &&
         view !== "sync" &&
         view !== "menu" &&
-        // Search is a screen for finding, not writing: the launcher would sit
-        // over the results and the keyboard has the room instead.
+        // Search is a screen for finding, not writing: the bar would sit over
+        // the results and the keyboard has the room instead. It is also the
+        // one page where a Find button would point at itself.
         view !== "search" && (
         <CaptureLauncher
           onOpen={() => setCaptureOpen(true)}
           onFind={openSearch}
+          // A habit tracker holds no entries, so it shows Find alone rather
+          // than an entry field that would have nowhere to write to
+          canLog={activeCol?.kind !== "habits"}
           activeCol={activeCol}
           captureType={captureType}
           captureScope={captureScope}

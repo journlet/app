@@ -651,6 +651,16 @@ table.habits {
 .launcherFind:hover {
   color: var(--ink);
 }
+/* Alone in the footer on a page that takes no entries: it has to carry its
+   own edges, since there is no bar around it to sit inside. */
+.launcherFind.isAlone {
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px 14px;
+  font-size: 14px;
+}
 .launcherGo {
   background: var(--ink);
   color: var(--paper);

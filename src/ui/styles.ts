@@ -185,6 +185,14 @@ export const S: Record<string, CSSProperties> = {
     borderRadius: 10,
     overflow: "hidden",
   },
+  // Find standing on its own, where the page takes no entries (habit
+  // trackers). Same left edge and same footer as the full bar, so the control
+  // does not move between pages.
+  launcherAlone: {
+    maxWidth: 560,
+    margin: "0 auto",
+    display: "flex",
+  },
   launcherHint: {
     flex: 1,
     overflow: "hidden",

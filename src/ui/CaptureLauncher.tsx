@@ -1,11 +1,15 @@
 // Footer capture launcher: a slim bar showing the current capture preferences
 // that opens the full-screen CaptureForm. Presentational — App owns the sticky
-// capture prefs and decides when the launcher shows (hidden on habit
-// collections, the sync screen, the menu and search).
+// capture prefs and decides when the bar shows (hidden on the sync screen, the
+// menu, and search itself).
 //
 // The bar carries the two things you do with a journal: put something in, and
 // find something again. Find sits at the far left and Log at the far right,
 // both within a thumb's reach, with the entry field between them.
+//
+// Find is here and nowhere else — one fixed place on every journal page beats
+// the same action in two spots. A habit tracker takes no entries, so it gets
+// the Find control on its own rather than losing the bar altogether (canLog).
 
 import { GLYPH } from "../lib/types";
 import type { Collection, EntryType } from "../lib/types";
@@ -39,6 +43,8 @@ const FindGlass = () => (
 interface CaptureLauncherProps {
   onOpen: () => void;
   onFind: () => void;
+  /** false on a habit tracker, which holds no entries to log */
+  canLog: boolean;
   activeCol: Collection | null;
   captureType: EntryType;
   captureScope: CaptureScope;
@@ -49,24 +55,38 @@ interface CaptureLauncherProps {
 export default function CaptureLauncher({
   onOpen,
   onFind,
+  canLog,
   activeCol,
   captureType,
   captureScope,
   capturePriority,
   captureInspiration,
 }: CaptureLauncherProps) {
+  const find = (
+    <button
+      className={"launcherFind" + (canLog ? "" : " isAlone")}
+      type="button"
+      onClick={onFind}
+      aria-label="Find an entry — opens search"
+    >
+      <FindGlass />
+      Find
+    </button>
+  );
+
+  // Nothing can be logged onto this page, so the entry field would be a
+  // control that does not apply. Find keeps its corner regardless.
+  if (!canLog)
+    return (
+      <footer style={S.captureWrap}>
+        <div style={S.launcherAlone}>{find}</div>
+      </footer>
+    );
+
   return (
     <footer style={S.captureWrap}>
       <div style={S.launcher}>
-        <button
-          className="launcherFind"
-          type="button"
-          onClick={onFind}
-          aria-label="Find an entry — opens search"
-        >
-          <FindGlass />
-          Find
-        </button>
+        {find}
         <button
           className="launcherField"
           onClick={onOpen}

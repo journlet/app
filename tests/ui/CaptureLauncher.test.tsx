@@ -9,6 +9,7 @@ afterEach(cleanup);
 const base = {
   onOpen: vi.fn(),
   onFind: vi.fn(),
+  canLog: true,
   activeCol: null as Collection | null,
   captureType: "task" as const,
   captureScope: "day" as const,
@@ -69,6 +70,20 @@ test("Find sits on the bar and opens search, without opening the entry form", ()
   fireEvent.click(find);
   expect(onFind).toHaveBeenCalledTimes(1);
   expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("on a page that takes no entries, Find stands alone and the field goes", () => {
+  const onFind = vi.fn();
+  render(<CaptureLauncher {...base} canLog={false} onFind={onFind} />);
+  expect(screen.queryByText("Log an entry…")).toBeNull();
+  expect(screen.queryByRole("button", { name: /opens the entry form/ })).toBeNull();
+  const find = screen.getByRole("button", {
+    name: "Find an entry — opens search",
+  });
+  // same control, same corner — it must not move between pages
+  expect(find.className).toContain("launcherFind");
+  fireEvent.click(find);
+  expect(onFind).toHaveBeenCalledTimes(1);
 });
 
 test("Find comes before the entry field, Log after it", () => {
