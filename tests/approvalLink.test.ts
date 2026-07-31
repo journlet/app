@@ -275,6 +275,26 @@ describe("once another device approves", () => {
     expect(sync.getLinkCode()).toBeNull();
   });
 
+  test("signing out gives up its place on the account", async () => {
+    // The gap Gary found on 31 July. Sign-out marked the register and left both
+    // server rows in place, so the device stayed listed as one of the account's
+    // devices and per-device keys were doing nothing for the one case they were
+    // built for. Asserted here rather than in the unit tests because the unit
+    // test for surrenderDeviceKeys passed while nothing called it.
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+    await somebodyApproves();
+    await sync.retryConnect();
+    await vi.waitFor(() =>
+      expect(tables.device_keys?.some((r) => r.device_id === DEVICE_ID)).toBe(true)
+    );
+
+    await sync.signOutAndWipe();
+
+    expect(tables.device_keys ?? []).toEqual([]);
+    expect(tables.device_wrapped_keys ?? []).toEqual([]);
+  });
+
   test("it does not keep the keeper key it arrived with", async () => {
     // Keeping it would leave something that looks like a recovery code on a
     // device that has no business showing one, and would mean a device removed

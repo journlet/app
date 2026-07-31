@@ -115,6 +115,7 @@ const {
   publishLinkRequest,
   rejectLinkRequest,
   shareDataKeyWithDevices,
+  surrenderDeviceKeys,
 } = await import("../src/store/deviceLink");
 
 const binding = { userId: USER, deviceId: "this-device" };
@@ -582,6 +583,71 @@ describe("waiting for a key", () => {
     await expect(claimWrappedDataKey(client, binding)).rejects.toThrow(
       /Could not check for a key/
     );
+  });
+});
+
+describe("giving up a place on the account", () => {
+  test("removes this device's key and the key wrapped to it", async () => {
+    // The point of per-device keys. A sign-out that leaves these rows behind has
+    // not removed the device from anything.
+    await publishDeviceKey(client, binding);
+    (tables.device_wrapped_keys ??= []).push({
+      user_id: USER,
+      device_id: "this-device",
+      wrapped: { v: 1 },
+    });
+
+    await surrenderDeviceKeys(client, binding);
+
+    expect(tables.device_keys).toEqual([]);
+    expect(tables.device_wrapped_keys).toEqual([]);
+  });
+
+  test("leaves the other devices alone", async () => {
+    // A device signing out must not disturb the rest, which is the whole reason
+    // the blanket keeper-key rotation was abandoned on 28 July.
+    const laptop = await otherDevice("laptop");
+    (tables.device_wrapped_keys ??= []).push({
+      user_id: USER,
+      device_id: laptop.id,
+      wrapped: { v: 1 },
+    });
+    await publishDeviceKey(client, binding);
+
+    await surrenderDeviceKeys(client, binding);
+
+    expect(tables.device_keys?.map((r) => r.device_id)).toEqual(["laptop"]);
+    expect(tables.device_wrapped_keys?.map((r) => r.device_id)).toEqual([
+      "laptop",
+    ]);
+  });
+
+  test("reports a failure rather than looking like success", async () => {
+    // The caller signs out anyway, but it should be able to say so in the log.
+    await publishDeviceKey(client, binding);
+    failing.add("device_keys:delete");
+
+    await expect(surrenderDeviceKeys(client, binding)).rejects.toThrow(
+      /Could not remove this device's key/
+    );
+  });
+
+  test("does not drop the public key while a usable blob remains", async () => {
+    // Order matters when only one deletion lands. A public key with nothing
+    // sealed to it is harmless; a wrapped blob with no record of whose it is
+    // outlives the device it belonged to.
+    await publishDeviceKey(client, binding);
+    (tables.device_wrapped_keys ??= []).push({
+      user_id: USER,
+      device_id: "this-device",
+      wrapped: { v: 1 },
+    });
+    failing.add("device_wrapped_keys:delete");
+
+    await expect(surrenderDeviceKeys(client, binding)).rejects.toThrow(
+      /Could not release the journal key/
+    );
+    expect(tables.device_keys).toHaveLength(1);
   });
 });
 

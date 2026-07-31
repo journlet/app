@@ -549,8 +549,22 @@ export default function SyncView() {
                 {deviceList.map((d) => (
                   <li key={d.id} style={ST.devRow}>
                     <div>
-                      <div style={{ fontWeight: 600 }}>
+                      {/* A signed-out device is drawn back rather than dressed
+                          up: the name loses its weight and its full contrast, so
+                          the devices that actually hold your journal are the ones
+                          that stand out. The state was previously said only in
+                          the small print underneath, which Gary read straight
+                          past on 31 Jul — true, and invisible. */}
+                      <div
+                        style={{
+                          fontWeight: d.signedOutAt ? 400 : 600,
+                          color: d.signedOutAt ? "var(--ink-soft)" : "var(--ink)",
+                        }}
+                      >
                         {d.name}
+                        {d.signedOutAt && (
+                          <span style={ST.devGone}>signed out</span>
+                        )}
                         {d.isThisDevice && (
                           <span style={ST.devHere}> this device</span>
                         )}
@@ -850,6 +864,22 @@ const ST: Record<string, CSSProperties> = {
     letterSpacing: "0.08em",
     color: INK_SOFT,
     marginLeft: 6,
+  },
+  // A filled pill rather than the bare uppercase label used for "this device".
+  // The two say different kinds of thing — where you are, versus what a device
+  // is no longer doing — and the second one needs to be seen without being read.
+  devGone: {
+    display: "inline-block",
+    fontSize: 10.5,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: INK_SOFT,
+    background: "var(--track)",
+    border: `1px solid ${LINE}`,
+    borderRadius: 999,
+    padding: "1px 7px",
+    marginLeft: 7,
+    verticalAlign: "1px",
   },
   devMeta: { fontSize: 12, color: INK_SOFT, marginTop: 2 },
   code: {

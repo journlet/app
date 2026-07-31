@@ -26,6 +26,7 @@ import {
   publishLinkRequest,
   rejectLinkRequest,
   shareDataKeyWithDevices,
+  surrenderDeviceKeys,
 } from "./deviceLink";
 import type { LinkRequest } from "./deviceLink";
 import {
@@ -1108,6 +1109,18 @@ export const signOutAndWipe = async (): Promise<void> => {
   // with. A device that asked, gave up and signed out would otherwise leave a
   // prompt on someone else's screen for something that is no longer waiting.
   await withdrawLinkRequest();
+  // Give up this device's key rows, for the same reason and in the same window.
+  // Sign-out left them behind until 31 July, which meant per-device keys were
+  // built and never used for the one thing they exist for.
+  if (supabase && session) {
+    try {
+      await surrenderDeviceKeys(supabase, deviceBinding());
+    } catch (e) {
+      // Never block leaving. The rows are unopenable regardless once the
+      // keystore is wiped, and this device's next sign-in republishes over them.
+      console.warn("[devices] could not release this device's keys", e);
+    }
+  }
   teardown();
   clearPendingKey();
   if (supabase) {

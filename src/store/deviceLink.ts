@@ -333,6 +333,47 @@ export const rejectLinkRequest = async (
 };
 
 /**
+ * Give up this device's place on the account: its public key and the data key
+ * wrapped to it.
+ *
+ * Called as a device signs out, which is the only moment it can be: RLS scopes
+ * these tables to the account, so a session is needed, and the departing device
+ * is the only one that knows it is leaving.
+ *
+ * Without this, sign-out left both rows behind and per-device keys achieved
+ * nothing — the whole reason each device has its own key is so that one can be
+ * removed without touching the others, and a sign-out that leaves the rows in
+ * place has not removed anything. The keys become unopenable anyway, since the
+ * private half goes with the wiped keystore, but "unopenable" is not the same as
+ * "gone" and the table should say what is true.
+ *
+ * Best effort by design. Nothing may stop a device leaving, so a caller that
+ * cannot reach the server signs out anyway and the rows are cleared by the
+ * device's own next sign-in, which republishes over them.
+ */
+export const surrenderDeviceKeys = async (
+  client: SupabaseClient,
+  binding: DeviceBinding
+): Promise<void> => {
+  const { error: wrappedError } = await client
+    .from("device_wrapped_keys")
+    .delete()
+    .eq("device_id", binding.deviceId);
+  // The wrapped key first. If only one of the two deletions lands, the safer
+  // leftover is a public key with nothing sealed to it: the reverse leaves a
+  // usable blob with no record of whose it is.
+  if (wrappedError)
+    throw new Error(`Could not release the journal key: ${wrappedError.message}`);
+
+  const { error } = await client
+    .from("device_keys")
+    .delete()
+    .eq("device_id", binding.deviceId);
+  if (error)
+    throw new Error(`Could not remove this device's key: ${error.message}`);
+};
+
+/**
  * Take the data key if one has been left for this device.
  *
  * Null means "not yet", which is the ordinary state of a device that is waiting,
