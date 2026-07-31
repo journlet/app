@@ -46,6 +46,10 @@ type Row = Record<string, unknown>;
 let tables: Record<string, Row[]> = {};
 let doc = new Y.Doc();
 let authCallback: ((e: string, s: unknown) => void) | null = null;
+/** The realtime handler watching this device's wrapped-key row. */
+let grantHandler: (() => void) | null = null;
+/** Slows the journals read, to open the window the "opening" state fills. */
+let journalsDelayMs = 0;
 
 /* oxlint-disable unicorn/no-thenable */
 vi.mock("@supabase/supabase-js", () => ({
@@ -63,6 +67,9 @@ vi.mock("@supabase/supabase-js", () => ({
         return {
           select: () => ({
             maybeSingle: async () => ({
+              ...(journalsDelayMs
+                ? await new Promise((r) => setTimeout(r, journalsDelayMs))
+                : {}),
               data: {
                 wrapped_key: {
                   v: accountWrapped.v,
@@ -128,9 +135,18 @@ vi.mock("@supabase/supabase-js", () => ({
     removeChannel: () => {},
     channel: () => {
       const ch = {
-        on: () => ch,
-        subscribe: (cb: (s: string) => void) => {
-          cb("SUBSCRIBED");
+        // Captured by table, so a test can deliver an event the way the server
+        // would. Keyed positively after the same mistake in syncEngine.test.ts,
+        // where a mock naming the table it did *not* want silently captured the
+        // wrong handler once a third subscription appeared.
+        on: (_evt: string, cfg: { table?: string }, handler: () => void) => {
+          if (cfg?.table === "device_wrapped_keys") grantHandler = handler;
+          return ch;
+        },
+        subscribe: (cb?: (s: string) => void) => {
+          // Optional: watchForGrant subscribes with no callback, which is legal and
+          // made this mock throw.
+          cb?.("SUBSCRIBED");
           return ch;
         },
       };
@@ -207,6 +223,8 @@ beforeEach(async () => {
   doc = new Y.Doc();
   adoptedRing = null;
   authCallback = null;
+  grantHandler = null;
+  journalsDelayMs = 0;
   localStorage.clear();
   localStorage.setItem("journlet-device-id", DEVICE_ID);
   myPair = await generateDeviceKeyPair();
@@ -245,6 +263,51 @@ describe("a device that cannot open the journal", () => {
     await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
 
     expect(await sync.getJournalKeyCode()).toBeNull();
+  });
+});
+
+describe("noticing the approval", () => {
+  test("subscribes to its own wrapped-key row while it waits", async () => {
+    // Polling alone was the original design and the delay was plain to see:
+    // approving on one device left this one saying "waiting" for seconds, which
+    // reads as a hang. The subscription is the fast path; the poll is the floor
+    // under it.
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+
+    expect(grantHandler).not.toBeNull();
+  });
+
+  test("links on the realtime event, without waiting for the poll", async () => {
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+
+    await somebodyApproves();
+    grantHandler?.();
+
+    // Well inside the poll interval, so passing here means the event did it.
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"), {
+      timeout: 1500,
+    });
+  });
+
+  test("says it is opening the journal, rather than still asking to be added", async () => {
+    // The gap Gary saw. Between being granted the key and having a journal to
+    // show there is a fetch and a decrypt, and the screen used to spend it
+    // telling him to go and approve something he had just approved.
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getLinkStage()).toBe("waiting"));
+
+    await somebodyApproves();
+    journalsDelayMs = 300;
+    grantHandler?.();
+
+    await vi.waitFor(() => expect(sync.getLinkStage()).toBe("opening"));
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"), {
+      timeout: 2000,
+    });
+    // And it clears, so the state cannot outlive the thing it describes.
+    expect(sync.getLinkStage()).toBeNull();
   });
 });
 

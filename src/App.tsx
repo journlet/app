@@ -31,6 +31,7 @@ import {
   hasSyncedOnce,
   isConfigured,
   getLinkCode,
+  getLinkStage,
   onSyncStatus,
   retryConnect,
 } from "./store/sync";
@@ -645,7 +646,15 @@ export default function App() {
   // the same status notifications, since the engine publishes the request as part
   // of arriving at needs-key.
   const [linkCode, setLinkCode] = useState(getLinkCode());
-  useEffect(() => onSyncStatus(() => setLinkCode(getLinkCode())), []);
+  const [linkStage, setLinkStage] = useState(getLinkStage());
+  useEffect(
+    () =>
+      onSyncStatus(() => {
+        setLinkCode(getLinkCode());
+        setLinkStage(getLinkStage());
+      }),
+    []
+  );
 
   // Second stage of first run: the recovery code, shown once before the journal
   // on the device that created it (decision 4). Re-read on every status change
@@ -1193,7 +1202,7 @@ export default function App() {
           />
         )}
         {!onboarding && unlocking && (
-          <UnlockView linkCode={linkCode}>
+          <UnlockView linkCode={linkCode} linkStage={linkStage}>
             <SyncView />
           </UnlockView>
         )}

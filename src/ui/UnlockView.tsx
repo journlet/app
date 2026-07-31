@@ -8,15 +8,23 @@
 // entry form is SyncView's, passed in as a child.
 
 import type { ReactNode } from "react";
+import type { LinkStage } from "../store/sync";
 import { S } from "./styles";
 
 interface UnlockViewProps {
   /** The code to compare, or null if the request could not be published. */
   linkCode: string | null;
+  /** "opening" once approval has landed and the journal is being fetched. */
+  linkStage: LinkStage | null;
   children: ReactNode;
 }
 
-export default function UnlockView({ linkCode, children }: UnlockViewProps) {
+export default function UnlockView({
+  linkCode,
+  linkStage,
+  children,
+}: UnlockViewProps) {
+  const opening = linkStage === "opening";
   return (
     <section style={{ maxWidth: 480 }}>
       <h2
@@ -39,7 +47,33 @@ export default function UnlockView({ linkCode, children }: UnlockViewProps) {
         never leaves your devices.
       </p>
 
-      {linkCode && (
+      {/* Approval has landed and the journal is being fetched and decrypted.
+          Reported as its own state because it used to be reported as nothing:
+          the code sat there telling the user to go and approve something they
+          had just approved, which reads as a hang rather than as work in
+          progress. It replaces the waiting block rather than sitting alongside
+          it, since a code to compare is exactly what is no longer wanted. */}
+      {opening && (
+        <div
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            borderRadius: 10,
+            padding: "10px 14px",
+            margin: "14px 0",
+          }}
+        >
+          <div style={{ fontWeight: 600, color: "var(--ink)" }}>
+            Approved. Opening your journal…
+          </div>
+          <p style={{ ...S.onboardLede, marginTop: 4, marginBottom: 0 }}>
+            Fetching it and decrypting it on this device. This can take a few
+            seconds on a long journal.
+          </p>
+        </div>
+      )}
+
+      {linkCode && !opening && (
         <div
           style={{
             background: "var(--surface)",
@@ -97,12 +131,19 @@ export default function UnlockView({ linkCode, children }: UnlockViewProps) {
         </div>
       )}
 
-      <p style={S.onboardLede}>
-        {linkCode
-          ? "No other device to hand? Enter your journal key instead. You will find it under Sync → show journal key on the device that created the journal, or wherever you saved it when you started."
-          : "Enter your journal key to unlock it. You will find it on a device you are already using, under Sync → show journal key, or wherever you saved it when you started."}
-      </p>
-      {children}
+      {/* The fallback is hidden while opening. Offering a second way in at the
+          moment the first one has succeeded invites someone to start over on top
+          of work that is already underway. */}
+      {!opening && (
+        <>
+          <p style={S.onboardLede}>
+            {linkCode
+              ? "No other device to hand? Enter your journal key instead. You will find it under Sync → show journal key on the device that created the journal, or wherever you saved it when you started."
+              : "Enter your journal key to unlock it. You will find it on a device you are already using, under Sync → show journal key, or wherever you saved it when you started."}
+          </p>
+          {children}
+        </>
+      )}
     </section>
   );
 }

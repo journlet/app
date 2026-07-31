@@ -80,8 +80,10 @@ vi.mock("@supabase/supabase-js", () => ({
     channel: () => {
       const ch = {
         on: () => ch,
-        subscribe: (cb: (s: string) => void) => {
-          cb("SUBSCRIBED");
+        subscribe: (cb?: (s: string) => void) => {
+          // Optional: watchForGrant subscribes with no callback, which is legal and
+          // made this mock throw.
+          cb?.("SUBSCRIBED");
           return ch;
         },
       };

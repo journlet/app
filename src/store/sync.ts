@@ -197,8 +197,9 @@ const teardown = () => {
   // grant a device access with a data key this device no longer holds.
   keeperUsable = false;
   linkCode = null;
+  linkStage = null;
   pendingRequests = [];
-  stopLinkPolling();
+  stopWatchingForGrant();
 };
 
 // Writes are serialised. The shadow doc only learns that the server has an
@@ -438,49 +439,99 @@ const notify = () => listeners.forEach((fn) => fn(status));
 let linkCode: string | null = null;
 export const getLinkCode = (): string | null => linkCode;
 
+/**
+ * Where this device is in being added.
+ *
+ * "opening" is the gap between being granted the key and having a journal to
+ * show, which takes a fetch and a decrypt. Reported rather than left blank
+ * because that gap is exactly where the screen looked hung: the code sat there
+ * saying "waiting for approval" for seconds after the approval had happened.
+ */
+export type LinkStage = "waiting" | "opening";
+let linkStage: LinkStage | null = null;
+export const getLinkStage = (): LinkStage | null => linkStage;
+
 /** Requests this device could approve. */
 let pendingRequests: LinkRequest[] = [];
 export const getLinkRequests = (): LinkRequest[] => pendingRequests;
 
 /**
- * How often a waiting device looks for its key.
+ * The backstop under the realtime subscription below, not the primary path.
  *
- * A poll rather than realtime, because a device in this state has never
- * subscribed to anything: the channel is opened after the first successful
- * reconcile, and this device cannot reconcile until it is let in. Five seconds is
- * chosen for the person watching two screens and waiting for one to change; the
- * screen is in the foreground by definition, and the poll stops the moment the
- * status leaves needs-key.
+ * It was the primary path until 31 July and the delay was plainly visible:
+ * approving on one device left the other saying "waiting" for up to five
+ * seconds, which reads as a hang rather than as latency. Kept as a floor because
+ * realtime can fail to connect, a channel can drop, and a home-screen PWA gets
+ * suspended, so the interval is now longer than it was rather than shorter.
  */
-const LINK_POLL_MS = 5_000;
+const LINK_POLL_MS = 8_000;
 let linkPoll: ReturnType<typeof setInterval> | null = null;
+/** Its own channel, since the journal channel does not exist yet. */
+let grantChannel: RealtimeChannel | null = null;
 
-const stopLinkPolling = () => {
-  if (!linkPoll) return;
-  clearInterval(linkPoll);
-  linkPoll = null;
+const stopWatchingForGrant = () => {
+  if (linkPoll) {
+    clearInterval(linkPoll);
+    linkPoll = null;
+  }
+  if (grantChannel && supabase) void supabase.removeChannel(grantChannel);
+  grantChannel = null;
 };
 
 const pollForGrant = async (): Promise<void> => {
   if (!supabase || !session || status !== "needs-key") {
-    stopLinkPolling();
+    stopWatchingForGrant();
     return;
   }
   try {
     // Discarding the key is intentional: connect() re-claims and adopts it
     // properly, and duplicating that here is how the two paths drift apart.
-    if (await claimWrappedDataKey(supabase, deviceBinding())) {
-      stopLinkPolling();
-      await connect();
-    }
+    if (!(await claimWrappedDataKey(supabase, deviceBinding()))) return;
+    stopWatchingForGrant();
+    // Said before the work rather than after it. Fetching and decrypting the
+    // journal takes a moment, and during that moment the screen would otherwise
+    // still be telling the user to go and approve something they just approved.
+    linkStage = "opening";
+    notify();
+    await connect();
   } catch {
     // Still waiting. A failed check is not a refusal.
   }
 };
 
-const startLinkPolling = () => {
-  if (linkPoll) return;
-  linkPoll = setInterval(() => void pollForGrant(), LINK_POLL_MS);
+/**
+ * Watch for this device being granted the key.
+ *
+ * A dedicated realtime channel. My earlier reasoning for polling instead — that
+ * a device in this state has never subscribed to anything — was about the journal
+ * channel, which is opened after the first successful reconcile. Nothing stops
+ * this device subscribing to its own row: it has a session, and RLS scopes the
+ * subscription to its own account.
+ *
+ * Both INSERT and UPDATE. An approval is an upsert, so which one arrives depends
+ * on whether a row for this device existed before, and treating that as a detail
+ * of the moment is how one of the two cases ends up never firing.
+ */
+const watchForGrant = () => {
+  if (!supabase || !session) return;
+  if (!linkPoll) linkPoll = setInterval(() => void pollForGrant(), LINK_POLL_MS);
+  if (grantChannel) return;
+  grantChannel = supabase
+    .channel("device-grant")
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "device_wrapped_keys",
+        filter: `user_id=eq.${session.user.id}`,
+      },
+      // Not read from the payload. The row carries ciphertext this device has to
+      // authenticate against its own binding anyway, so the event is a nudge to
+      // go and look properly, nothing more.
+      () => void pollForGrant()
+    )
+    .subscribe();
 };
 
 /**
@@ -498,10 +549,12 @@ const askToBeAdded = async (): Promise<void> => {
       deviceBinding(),
       thisClientLabel()
     );
-    startLinkPolling();
+    linkStage = "waiting";
+    watchForGrant();
     notify();
   } catch (e) {
     linkCode = null;
+    linkStage = null;
     console.warn("[devices] could not ask to be added", e);
   }
 };
@@ -510,7 +563,8 @@ const askToBeAdded = async (): Promise<void> => {
 const withdrawLinkRequest = async (): Promise<void> => {
   const wasAsking = linkCode !== null;
   linkCode = null;
-  stopLinkPolling();
+  linkStage = null;
+  stopWatchingForGrant();
   if (!wasAsking || !supabase || !session) return;
   try {
     await rejectLinkRequest(supabase, thisDeviceId());

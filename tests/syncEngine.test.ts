@@ -113,9 +113,11 @@ vi.mock("@supabase/supabase-js", () => ({
           if (cfg?.table === "journal_updates") realtimeHandler = handler;
           return ch;
         },
-        subscribe: (cb: (s: string) => void) => {
-          subscribeCallback = cb;
-          cb("SUBSCRIBED");
+        subscribe: (cb?: (s: string) => void) => {
+          // Optional: watchForGrant subscribes with no callback, which is legal
+          // and made this mock throw.
+          if (cb) subscribeCallback = cb;
+          cb?.("SUBSCRIBED");
           return ch;
         },
       };
