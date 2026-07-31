@@ -31,13 +31,19 @@ interface Outcome {
   what: string;
 }
 
+// Same panel geometry as the approval card and the Sync screen's sections, so a
+// request and its outcome occupy the same footprint and nothing jumps when one
+// replaces the other.
 const line: React.CSSProperties = {
-  border: "1px solid var(--rule)",
+  background: "var(--surface)",
+  border: "1px solid var(--line)",
   borderRadius: 10,
   padding: "9px 12px",
-  margin: "0 0 14px",
-  fontSize: 14,
-  color: "var(--ink-soft)",
+  margin: "10px 0 16px",
+  maxWidth: 480,
+  fontSize: 13.5,
+  lineHeight: 1.55,
+  color: "var(--ink)",
   display: "flex",
   alignItems: "center",
   gap: 10,
@@ -87,7 +93,7 @@ export default function LinkPrompts() {
     <>
       {outcome?.kind === "added" && (
         <div style={line}>
-          <span style={{ flex: 1, color: "var(--ink)" }}>
+          <span style={{ flex: 1 }}>
             {outcome.what} was added. Your journal is on its way to it.
           </span>
           <button className="miniBtn" onClick={() => setOutcome(null)}>
@@ -97,8 +103,14 @@ export default function LinkPrompts() {
       )}
 
       {outcome?.kind === "rejected" && (
-        <div style={{ ...line, borderColor: "var(--warn)" }}>
-          <span style={{ flex: 1, color: "var(--ink)" }}>
+        <div
+          style={{
+            ...line,
+            borderColor: "var(--danger-line)",
+            alignItems: "flex-start",
+          }}
+        >
+          <span style={{ flex: 1 }}>
             Rejected, and nothing was shared. Codes that do not match mean either
             the wrong request or something pretending to be your device. If you
             meant to add one, start again on that device and check the code

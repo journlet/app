@@ -42,19 +42,20 @@ export default function UnlockView({ linkCode, children }: UnlockViewProps) {
       {linkCode && (
         <div
           style={{
-            border: "1px solid var(--rule)",
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
             borderRadius: 10,
-            padding: "12px 14px",
+            padding: "10px 14px",
             margin: "14px 0",
           }}
         >
           <div
             style={{
-              fontSize: 12,
+              fontSize: 11,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
               color: "var(--ink-soft)",
-              marginBottom: 6,
+              marginBottom: 5,
             }}
           >
             Waiting to be added
@@ -71,10 +72,13 @@ export default function UnlockView({ linkCode, children }: UnlockViewProps) {
             style={{
               display: "block",
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-              fontSize: 20,
-              letterSpacing: "0.12em",
+              fontSize: 19,
+              letterSpacing: "0.1em",
               textAlign: "center",
               padding: "10px 0",
+              borderTop: "1px solid var(--line)",
+              borderBottom: "1px solid var(--line)",
+              margin: "0 0 8px",
               color: "var(--ink)",
             }}
           >

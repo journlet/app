@@ -22,12 +22,33 @@ interface ApprovalCardProps {
   onDefer: (deviceId: string) => void;
 }
 
+// The same shape as every other panel on the Sync screen (ST.keyBox): raised
+// surface, hairline border, 10px radius, capped at 480. An earlier version
+// invented --rule and --warn, neither of which exists, so an invalid var() took
+// the whole border declaration with it and the card rendered as loose text
+// floating on the page.
 const box: React.CSSProperties = {
-  border: "1px solid var(--rule)",
+  background: "var(--surface)",
+  border: "1px solid var(--line)",
   borderRadius: 10,
-  padding: "12px 14px",
-  margin: "0 0 14px",
-  background: "var(--paper)",
+  padding: "10px 14px",
+  margin: "10px 0 16px",
+  maxWidth: 480,
+};
+
+const eyebrow: React.CSSProperties = {
+  fontSize: 11,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "var(--ink-soft)",
+  marginBottom: 4,
+};
+
+const body: React.CSSProperties = {
+  fontSize: 13.5,
+  lineHeight: 1.55,
+  color: "var(--ink)",
+  margin: "0 0 10px",
 };
 
 const ago = (at: number): string => {
@@ -62,36 +83,41 @@ export default function ApprovalCard({
 
   return (
     <div style={box}>
-      <div style={{ fontWeight: 600, color: "var(--ink)", marginBottom: 2 }}>
-        Add {request.client ?? "another device"} to your journal?
-      </div>
-      <p
+      <div style={eyebrow}>A device wants to be added</div>
+      <div
         style={{
-          margin: "0 0 10px",
-          fontSize: 14,
-          color: "var(--ink-soft)",
-          lineHeight: 1.5,
+          fontSize: 15,
+          fontWeight: 600,
+          color: "var(--ink)",
+          marginBottom: 3,
         }}
       >
+        Add {request.client ?? "another device"} to your journal?
+      </div>
+      <p style={body}>
         Asked {ago(request.requestedAt)}. It cannot read anything until you say
         so.
       </p>
+      {/* The code sits on the page rather than in a nested card: a box inside a
+          box at this size reads as clutter, and a hairline above and below is
+          enough to say "compare this part". */}
       <div
         style={{
-          border: "1px solid var(--rule)",
-          borderRadius: 8,
-          padding: "8px 10px",
-          marginBottom: 10,
+          borderTop: "1px solid var(--line)",
+          borderBottom: "1px solid var(--line)",
+          padding: "8px 0 10px",
+          margin: "0 0 10px",
         }}
       >
-        <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 4 }}>
-          The new device should be showing this code
+        <div style={{ ...eyebrow, marginBottom: 5 }}>
+          The new device should be showing this
         </div>
         <code
           style={{
+            display: "block",
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            fontSize: 18,
-            letterSpacing: "0.12em",
+            fontSize: 19,
+            letterSpacing: "0.1em",
             color: "var(--ink)",
           }}
         >
@@ -99,9 +125,7 @@ export default function ApprovalCard({
         </code>
       </div>
       {error && (
-        <p style={{ margin: "0 0 10px", fontSize: 14, color: "var(--warn)" }}>
-          {error}
-        </p>
+        <p style={{ ...body, color: "var(--danger)" }}>{error}</p>
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button
@@ -111,9 +135,13 @@ export default function ApprovalCard({
         >
           codes match, add it
         </button>
+        {/* Coloured as the cautious answer, not styled as the destructive one:
+            refusing costs nothing and can be repeated, so it should not look
+            frightening. */}
         <button
           className="miniBtn"
           disabled={busy}
+          style={{ color: "var(--danger)" }}
           onClick={() => void run(() => onReject(request.deviceId))}
         >
           codes are different
