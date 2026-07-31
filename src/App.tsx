@@ -398,6 +398,43 @@ export default function App() {
     habits.length > 0 ||
     Object.values(days).some((arr) => arr.length > 0);
 
+  // Sub-bullet capture context (spec §4.1). Declared above submitEntry, which
+  // lists it as a dependency — a dependency array is evaluated the moment the
+  // callback is created, so anything in it must already exist by this line.
+  //
+  // The parent is resolved fresh each render so a change elsewhere is
+  // reflected. Three ways it can stop being usable, and the form has to say
+  // which — logging the entry somewhere it wasn't promised is exactly what the
+  // no-guessing rule forbids.
+  const captureParentEntry: Entry | null = captureParent
+    ? (days[captureParent.pk] || []).find((x) => x.id === captureParent.id) ??
+      null
+    : null;
+  // A pinned collection page can be deleted outright, taking the page with it.
+  // The pin must then be dropped, or the entry would land on a page that no
+  // longer exists — reachable from no spread, no index, no export.
+  const capturePageGone = Boolean(
+    captureParent &&
+      isColPageKey(captureParent.pk) &&
+      !collections.some((c) => c.id === colIdFromKey(captureParent.pk))
+  );
+  const captureLost: string | null = !captureParent
+    ? null
+    : capturePageGone
+      ? "The collection you were logging into has been deleted."
+      : !captureParentEntry
+        ? "The entry you were nesting under has gone."
+        : captureParentEntry.parentId
+          ? "The entry you were nesting under is now a sub-bullet itself, so it can't take sub-bullets."
+          : null;
+  // Only a top-level entry can take sub-bullets, so the form must stop claiming
+  // to nest the moment its parent becomes one itself
+  const captureParentUsable: Entry | null = captureLost
+    ? null
+    : captureParentEntry;
+  // The page a pinned capture lands on, or null once the pin is dropped
+  const capturePinnedPk = capturePageGone ? null : captureParent?.pk ?? null;
+
   const submitEntry = useCallback(() => {
     const text = input.trim();
     if (!text) return;
@@ -710,39 +747,6 @@ export default function App() {
   const sheetHasChildren = sheetEntry
     ? sheetPageList.some((x) => x.parentId === sheetEntry.id)
     : false;
-  // The parent behind a sub-bullet capture, resolved fresh each render so a
-  // change elsewhere is reflected. Three ways it can stop being usable, and the
-  // form has to say which — logging the entry somewhere it wasn't promised is
-  // exactly what the no-guessing rule forbids.
-  const captureParentEntry: Entry | null = captureParent
-    ? (days[captureParent.pk] || []).find((x) => x.id === captureParent.id) ??
-      null
-    : null;
-  // A pinned collection page can be deleted outright, taking the page with it.
-  // The pin must then be dropped, or the entry would land on a page that no
-  // longer exists — reachable from no spread, no index, no export.
-  const capturePageGone = Boolean(
-    captureParent &&
-      isColPageKey(captureParent.pk) &&
-      !collections.some((c) => c.id === colIdFromKey(captureParent.pk))
-  );
-  const captureLost: string | null = !captureParent
-    ? null
-    : capturePageGone
-      ? "The collection you were logging into has been deleted."
-      : !captureParentEntry
-        ? "The entry you were nesting under has gone."
-        : captureParentEntry.parentId
-          ? "The entry you were nesting under is now a sub-bullet itself, so it can't take sub-bullets."
-          : null;
-  // Only a top-level entry can take sub-bullets, so the form must stop claiming
-  // to nest the moment its parent becomes one itself
-  const captureParentUsable: Entry | null = captureLost
-    ? null
-    : captureParentEntry;
-  // The page a pinned capture lands on, or null once the pin is dropped
-  const capturePinnedPk = capturePageGone ? null : captureParent?.pk ?? null;
-
   // Candidate parents. `days` is already resolved by store/pageOrder, so an
   // entry drawn at top level is offered as a parent and the store will accept
   // it — the two can't disagree.
