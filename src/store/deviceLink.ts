@@ -112,7 +112,8 @@ export const publishDeviceKey = async (
 export const shareDataKeyWithDevices = async (
   client: SupabaseClient,
   dataKey: CryptoKey,
-  binding: DeviceBinding
+  binding: DeviceBinding,
+  epoch: number
 ): Promise<number> => {
   const { data: keys, error: keysError } = await client
     .from("device_keys")
@@ -123,18 +124,30 @@ export const shareDataKeyWithDevices = async (
 
   const { data: held, error: heldError } = await client
     .from("device_wrapped_keys")
-    .select("device_id");
+    .select("device_id, epoch");
   if (heldError)
     throw new Error(`Could not list shared keys: ${heldError.message}`);
 
-  const alreadyHeld = new Set(
-    (held ?? []).map((row: { device_id: string }) => row.device_id)
-  );
+  const rows = (held ?? []) as { device_id: string; epoch: number | null }[];
+  /**
+   * Entitlement, and the reason this function no longer grants to anyone with a
+   * published public key.
+   *
+   * Until 3 August, a row in `device_keys` was treated as permission, and
+   * `publishDeviceKey` writes that row on every connect. So a removed device that
+   * still held a session would republish its key and the next device to launch
+   * would wrap the current key for it, with no approval and nothing shown to
+   * anyone — quietly undoing the removal. A device is entitled only if it already
+   * holds a wrapped key for some epoch, which removal deletes.
+   */
+  const entitled = new Set(rows.map((r) => r.device_id));
+  const holds = new Set(rows.map((r) => `${r.device_id}@${r.epoch ?? 0}`));
 
   let written = 0;
   for (const row of keys as { device_id: string; public_key: string }[]) {
     if (row.device_id === binding.deviceId) continue;
-    if (alreadyHeld.has(row.device_id)) continue;
+    if (!entitled.has(row.device_id)) continue;
+    if (holds.has(`${row.device_id}@${epoch}`)) continue;
     // Bound to the recipient, not to us. The recipient rebuilds this binding
     // from its own ids and will refuse anything addressed elsewhere.
     const wrapped = await wrapDataKeyForDevice(dataKey, row.public_key, {
@@ -145,9 +158,10 @@ export const shareDataKeyWithDevices = async (
       {
         user_id: binding.userId,
         device_id: row.device_id,
+        epoch,
         wrapped: wrapped satisfies DeviceWrappedKeyJson,
       },
-      { onConflict: "user_id,device_id" }
+      { onConflict: "user_id,device_id,epoch" }
     );
     if (error)
       throw new Error(
@@ -280,19 +294,24 @@ export const approveLinkRequest = async (
   client: SupabaseClient,
   dataKey: CryptoKey,
   request: LinkRequest,
-  binding: DeviceBinding
+  binding: DeviceBinding,
+  epoch: number
 ): Promise<void> => {
   const wrapped = await wrapDataKeyForDevice(dataKey, request.publicKey, {
     userId: binding.userId,
     deviceId: request.deviceId,
   });
+  // Only the current epoch. A newly added device gets the key it needs to read
+  // and write now; earlier epochs follow from the ordinary share loop on the next
+  // connect, which is also what fills in a device that missed a rotation.
   const { error } = await client.from("device_wrapped_keys").upsert(
     {
       user_id: binding.userId,
       device_id: request.deviceId,
+      epoch,
       wrapped: wrapped satisfies DeviceWrappedKeyJson,
     },
-    { onConflict: "user_id,device_id" }
+    { onConflict: "user_id,device_id,epoch" }
   );
   if (error) throw new Error(`Could not add the device: ${error.message}`);
 
@@ -384,31 +403,92 @@ export const surrenderDeviceKeys = async (
  * sealed to a keypair this device lost in a wipe. Leaving it would mean every
  * later check finds the same broken row and reports the same failure.
  */
-export const claimWrappedDataKey = async (
+export const claimWrappedDataKeys = async (
   client: SupabaseClient,
   binding: DeviceBinding
-): Promise<CryptoKey | null> => {
+): Promise<Map<number, CryptoKey>> => {
   const { data, error } = await client
     .from("device_wrapped_keys")
-    .select("wrapped")
-    .eq("device_id", binding.deviceId)
-    .maybeSingle();
+    .select("epoch, wrapped")
+    .eq("device_id", binding.deviceId);
   if (error) throw new Error(`Could not check for a key: ${error.message}`);
-  if (!data) return null;
 
+  const rows = (data ?? []) as { epoch: number | null; wrapped: unknown }[];
+  const keys = new Map<number, CryptoKey>();
   const pair = await ensureDeviceKeyPair();
-  try {
-    return await unwrapDataKeyForDevice(
-      data.wrapped as DeviceWrappedKeyJson,
-      pair.privateKey,
-      binding
-    );
-  } catch {
+  const unusable: number[] = [];
+
+  for (const row of rows) {
+    // Null epoch means a row written before the column existed, which is epoch 0
+    // by definition. Coalesced here rather than trusted from the database, since
+    // the default only applies to rows inserted after the migration.
+    const epoch = row.epoch ?? 0;
+    try {
+      keys.set(
+        epoch,
+        await unwrapDataKeyForDevice(
+          row.wrapped as DeviceWrappedKeyJson,
+          pair.privateKey,
+          binding
+        )
+      );
+    } catch {
+      unusable.push(epoch);
+    }
+  }
+
+  for (const epoch of unusable) {
+    // Only this device could ever open these, so one that fails is unusable by
+    // definition — realistically sealed to a keypair lost in a wipe. Cleared so a
+    // later check does not keep finding the same broken row. One epoch failing
+    // does not condemn the others: they were wrapped at different times.
     await client
       .from("device_wrapped_keys")
       .delete()
       .eq("device_id", binding.deviceId)
+      .eq("epoch", epoch)
       .then(() => undefined, () => undefined);
-    return null;
   }
+
+  return keys;
+};
+
+/**
+ * The epoch the account is currently writing under.
+ *
+ * Zero when `journal_keys` is empty, which is every account that has never
+ * rotated: epoch 0's key lives in `journals.wrapped_key` where it always did, so
+ * a fresh account has nothing here at all.
+ *
+ * Read on every connect rather than cached. A device that believes the epoch is
+ * lower than it is would encrypt under a superseded key, and no other device
+ * would ever write beside those rows.
+ */
+export const readCurrentEpoch = async (
+  client: SupabaseClient
+): Promise<number> => {
+  const { data, error } = await client
+    .from("journal_keys")
+    .select("epoch")
+    .order("epoch", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`Could not read the key epoch: ${error.message}`);
+  const rows = (data ?? []) as { epoch: number }[];
+  return rows[0]?.epoch ?? 0;
+};
+
+/** Every keeper-wrapped epoch key, for a device that holds the keeper key. */
+export const readKeeperWrappedEpochs = async (
+  client: SupabaseClient
+): Promise<Map<number, unknown>> => {
+  const { data, error } = await client
+    .from("journal_keys")
+    .select("epoch, wrapped_key");
+  if (error) throw new Error(`Could not read the journal keys: ${error.message}`);
+  return new Map(
+    ((data ?? []) as { epoch: number; wrapped_key: unknown }[]).map((r) => [
+      r.epoch,
+      r.wrapped_key,
+    ])
+  );
 };

@@ -100,7 +100,15 @@ vi.mock("../src/store/journal", () => ({
 }));
 
 vi.mock("../src/lib/keystore", () => ({
-  ensureKeys: async () => ({ keeperKey, dataKey, wrapped, createdAt: 0 }),
+  // The ring holds a key per epoch since 3 August. Epoch 0 is every account
+  // that has never rotated, which is what these tests exercise.
+  ensureKeys: async () => ({
+    keeperKey,
+    dataKeys: new Map([[0, dataKey]]),
+    epoch: 0,
+    wrapped,
+    createdAt: 0,
+  }),
   replaceKeyRing: async () => {},
   wipeKeys: async () => {},
   // Every connect publishes this device's key now, so the mock has to offer

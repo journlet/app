@@ -65,7 +65,8 @@ vi.mock("../src/store/journal", async () => {
 vi.mock("../src/lib/keystore", () => ({
   ensureKeys: async () => ({
     keeperKey: {},
-    dataKey: {},
+    dataKeys: new Map([[0, {}]]),
+    epoch: 0,
     wrapped: { v: 1, iv: new Uint8Array(), blob: new Uint8Array() },
     createdAt: 0,
   }),

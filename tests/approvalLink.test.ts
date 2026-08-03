@@ -169,20 +169,31 @@ vi.mock("../src/store/journal", () => ({
 vi.mock("../src/lib/keystore", () => ({
   ensureKeys: async () => ({
     keeperKey: ownKeeper,
-    dataKey: adoptedRing?.dataKey ?? (await generateDataKey()),
+    // Whatever the engine last stored, so a second connect sees the keys the
+    // first one adopted rather than a fresh useless one.
+    dataKeys: adoptedRing?.dataKeys ?? new Map([[0, await generateDataKey()]]),
+    epoch: adoptedRing?.epoch ?? 0,
     wrapped: ownWrapped,
     createdAt: 0,
   }),
   // Records what the engine decided to store, which is how the test sees that
   // the useless keeper key was dropped rather than kept.
   replaceKeyRing: async (ring: unknown) => {
-    adoptedRing = ring as { keeperKey?: CryptoKey; dataKey: CryptoKey };
+    adoptedRing = ring as {
+      keeperKey?: CryptoKey;
+      dataKeys: Map<number, CryptoKey>;
+      epoch: number;
+    };
   },
   wipeKeys: async () => {},
   ensureDeviceKeyPair: async () => myPair,
 }));
 
-let adoptedRing: { keeperKey?: CryptoKey; dataKey: CryptoKey } | null = null;
+let adoptedRing: {
+  keeperKey?: CryptoKey;
+  dataKeys: Map<number, CryptoKey>;
+  epoch: number;
+} | null = null;
 
 /** Put the account's journal on the server, so a granted device has something to pull. */
 const serverHoldsAJournal = async () => {

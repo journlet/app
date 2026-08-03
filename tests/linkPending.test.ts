@@ -149,7 +149,8 @@ const boot = async () => {
   localStorage.setItem("journlet-device-id", "phone-id");
   storedRing = {
     keeperKey: freshKeeper,
-    dataKey: await generateDataKey(),
+    dataKeys: new Map([[0, await generateDataKey()]]),
+    epoch: 0,
     wrapped: await wrapDataKey(await generateDataKey(), freshKeeper),
     createdAt: 0,
   };

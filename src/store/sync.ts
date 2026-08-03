@@ -20,10 +20,12 @@ import {
 } from "./devices";
 import {
   approveLinkRequest,
-  claimWrappedDataKey,
+  claimWrappedDataKeys,
   listLinkRequests,
   publishDeviceKey,
   publishLinkRequest,
+  readCurrentEpoch,
+  readKeeperWrappedEpochs,
   rejectLinkRequest,
   shareDataKeyWithDevices,
   surrenderDeviceKeys,
@@ -33,14 +35,18 @@ import {
   decryptUpdate,
   encryptUpdate,
   LegacyPayloadError,
+  readPayloadEpoch,
   unwrapDataKey,
   importJournalKeyCode,
   exportJournalKeyCode,
 } from "../lib/crypto";
 import type { WrappedDataKey } from "../lib/crypto";
 import { ensureKeys, replaceKeyRing, wipeKeys } from "../lib/keystore";
+// From keyring, not keystore: pure accessors, so the sync tests that stub
+// storage still exercise the real key selection.
+import { currentDataKey, dataKeyFor } from "../lib/keyring";
 import { b64decode, b64encode } from "../lib/base64";
-import type { KeyRing } from "../lib/keystore";
+import type { KeyRing } from "../lib/keyring";
 import {
   clearPendingKey,
   pendingJournalKey,
@@ -120,6 +126,25 @@ const wrappedFromJson = (j: WrappedKeyJson): WrappedDataKey => ({
   iv: b64decode(j.iv),
   blob: b64decode(j.blob),
 });
+
+/**
+ * What a device is told when its journal has been rotated past it.
+ *
+ * Not an outage and not a lockout: everything up to the last rotation reads
+ * normally, and the fix is having a device that holds the new key open at the
+ * same time as this one. Said in one place so the banner, the Sync screen and the
+ * console all say the same thing.
+ */
+const MISSING_EPOCH_KEY =
+  "This device does not have the newest key for your journal yet. Open Journlet on another of your devices while this one is open, and it will catch up.";
+
+/** A stored row written under an epoch this device holds no key for. */
+class MissingEpochKeyError extends Error {
+  constructor(epoch: number) {
+    super(`No key held for epoch ${epoch}`);
+    this.name = "MissingEpochKeyError";
+  }
+}
 
 // ---------- engine state ----------
 
@@ -285,11 +310,18 @@ const insertPayload = async (
     // One read of the active volume, used for both the AAD and the row, so the
     // binding can never disagree with where the row actually lands.
     const volume = getActiveVolume();
+    const writeKey = currentDataKey(ring);
+    // Refusing to write is the right failure here. Falling back to an older
+    // epoch's key would produce rows that every up-to-date device can read and
+    // none would write beside, which is a fork rather than an outage.
+    if (!writeKey) throw new Error(MISSING_EPOCH_KEY);
     const payload = b64encode(
-      await encryptUpdate(ring.dataKey, update, {
-        userId: session.user.id,
-        volume,
-      })
+      await encryptUpdate(
+        writeKey,
+        update,
+        { userId: session.user.id, volume },
+        ring.epoch
+      )
     );
     const { error } = await supabase
       .from("journal_updates")
@@ -378,15 +410,16 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     keeperUsable = true;
     return true;
   }
-  // Journal exists: can our keeper unwrap its data key?
+  // Journal exists. Gather every epoch key this device can get hold of, by both
+  // routes: the keeper key opens all of them, a per-device wrapped row opens one.
+  let epoch0Wrapped: WrappedDataKey | undefined;
+  let keeperKey0: CryptoKey | undefined;
+
   if (ring.keeperKey) {
     try {
-      const remoteWrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
-      const dataKey = await unwrapDataKey(remoteWrapped, ring.keeperKey);
-      ring = { ...ring, dataKey, wrapped: remoteWrapped };
-      await replaceKeyRing(ring);
+      epoch0Wrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
+      keeperKey0 = await unwrapDataKey(epoch0Wrapped, ring.keeperKey);
       keeperUsable = true;
-      return true;
     } catch {
       // This device holds a keeper key that will not open the account's journal.
       // Inferring anything more from this — that the key must have been
@@ -394,36 +427,98 @@ const ensureJournalKeys = async (): Promise<boolean> => {
       // sign itself out — is what the retreat of 28 July removed, and it caused
       // two worse bugs than the one it addressed. See spec §6.1b.
       keeperUsable = false;
+      epoch0Wrapped = undefined;
     }
   }
-  // Has another device left a key for this one? This is the ordinary path for a
-  // device being added now: it asked, somebody approved, and the data key is
-  // waiting wrapped to this device alone.
+
+  /**
+   * Keys already on this device, but only when they can be trusted to be the
+   * account's.
+   *
+   * Every fresh install generates its own keyring, so a device that still holds
+   * an unproven keeper key also holds a data key of its own invention. Seeding
+   * from it unconditionally — which is what I wrote first — made such a device
+   * believe it held epoch 0, skip asking to be added, and then decrypt nothing
+   * while reporting itself entitled. A ring with no keeper key was granted its
+   * keys by another device, so those are genuine.
+   */
+  const keys = new Map(
+    ring.keeperKey && !keeperUsable ? [] : ring.dataKeys
+  );
+  if (keeperKey0) keys.set(0, keeperKey0);
+
+  // Rows another device has left for this one. The ordinary route for a device
+  // added by approval, and the route by which any device catches up on an epoch
+  // it was offline for.
   try {
-    const granted = await claimWrappedDataKey(supabase, deviceBinding());
-    if (granted) {
-      // The keeper key goes, deliberately. It never opened this journal, and
-      // keeping it would leave something that looks like a recovery code on a
-      // device that has no business displaying one.
-      ring = {
-        ...ring,
-        keeperKey: undefined,
-        wrapped: undefined,
-        dataKey: granted,
-      };
-      await replaceKeyRing(ring);
-      await withdrawLinkRequest();
-      return true;
+    for (const [epoch, key] of await claimWrappedDataKeys(
+      supabase,
+      deviceBinding()
+    )) {
+      keys.set(epoch, key);
     }
   } catch (e) {
-    // A failed check is not a refusal. Fall through to asking, which is what a
-    // device in this state should be doing anyway.
-    console.warn("[devices] could not check for a granted key", e);
+    // A failed check is not a refusal.
+    console.warn("[devices] could not check for granted keys", e);
   }
-  // Nothing granted: ask, and show the code to compare.
-  await askToBeAdded();
-  setStatus("needs-key");
-  return false;
+
+  // Later epochs under the keeper key, for the device holding the recovery code.
+  if (keeperUsable && ring.keeperKey) {
+    try {
+      for (const [epoch, wrappedJson] of await readKeeperWrappedEpochs(supabase)) {
+        if (keys.has(epoch)) continue;
+        keys.set(
+          epoch,
+          await unwrapDataKey(
+            wrappedFromJson(wrappedJson as WrappedKeyJson),
+            ring.keeperKey
+          )
+        );
+      }
+    } catch (e) {
+      console.warn("[devices] could not read the journal keys", e);
+    }
+  }
+
+  if (keys.size === 0) {
+    // Nothing at all: this device has never been let in. Ask, and show the code.
+    await askToBeAdded();
+    setStatus("needs-key");
+    return false;
+  }
+
+  let epoch = ring.epoch;
+  try {
+    epoch = await readCurrentEpoch(supabase);
+  } catch (e) {
+    // Reading it failed, so trust the highest key actually held rather than a
+    // remembered number. Guessing high would stop this device writing at all.
+    epoch = Math.max(...keys.keys());
+    console.warn("[devices] could not read the current epoch", e);
+  }
+
+  ring = {
+    ...ring,
+    // The keeper key goes if it did not work, deliberately. It never opened this
+    // journal, and keeping it would leave something that looks like a recovery
+    // code on a device that has no business displaying one.
+    keeperKey: keeperUsable ? ring.keeperKey : undefined,
+    wrapped: epoch0Wrapped,
+    dataKeys: keys,
+    epoch,
+  };
+  await replaceKeyRing(ring);
+  await withdrawLinkRequest();
+
+  if (!currentDataKey(ring)) {
+    // Entitled, and behind. The journal reads to the last rotation and no
+    // further, which is a state worth naming rather than reporting as an outage:
+    // the fix is having another device open at the same time as this one.
+    setError(MISSING_EPOCH_KEY);
+    setStatus(navigator.onLine ? "pending" : "offline");
+    return false;
+  }
+  return true;
 };
 
 // ---------- being added, and adding others ----------
@@ -486,7 +581,8 @@ const pollForGrant = async (): Promise<void> => {
   try {
     // Discarding the key is intentional: connect() re-claims and adopts it
     // properly, and duplicating that here is how the two paths drift apart.
-    if (!(await claimWrappedDataKey(supabase, deviceBinding()))) return;
+    if ((await claimWrappedDataKeys(supabase, deviceBinding())).size === 0)
+      return;
     stopWatchingForGrant();
     // Said before the work rather than after it. Fetching and decrypting the
     // journal takes a moment, and during that moment the screen would otherwise
@@ -597,9 +693,18 @@ const refreshLinkRequests = async (): Promise<void> => {
 
 /** Grant a request, after the person has compared the codes. */
 export const approveDevice = async (request: LinkRequest): Promise<void> => {
-  if (!supabase || !session || !ring)
+  const key = ring && currentDataKey(ring);
+  if (!supabase || !session || !ring || !key)
     throw new Error("This device cannot add another right now");
-  await approveLinkRequest(supabase, ring.dataKey, request, deviceBinding());
+  // The current epoch only. A device cannot grant an epoch it does not itself
+  // hold, and the newcomer needs the key that is being written under now.
+  await approveLinkRequest(
+    supabase,
+    key,
+    request,
+    deviceBinding(),
+    ring.epoch
+  );
   pendingRequests = pendingRequests.filter(
     (r) => r.deviceId !== request.deviceId
   );
@@ -641,7 +746,15 @@ const adoptJournalKey = async (code: string): Promise<void> => {
   } catch {
     throw new Error("That journal key does not match this account's journal");
   }
-  ring = { keeperKey, dataKey, wrapped, createdAt: Date.now() };
+  // Epoch 0 only at this point. Later epochs are collected by the connect that
+  // follows, which can read journal_keys with this same keeper key.
+  ring = {
+    keeperKey,
+    dataKeys: new Map([[0, dataKey]]),
+    epoch: 0,
+    wrapped,
+    createdAt: Date.now(),
+  };
   await replaceKeyRing(ring);
   // Proven by the unwrap above: this key opens this account's journal, so this
   // device can display it as the recovery code.
@@ -716,12 +829,23 @@ export const countUpdates = async (): Promise<number | null> => {
 // two must not look the same. Legacy rows are counted and ignored; anything
 // else is counted and surfaced, because a journal that quietly drops content
 // while the badge reads "synced" is worse than one that admits a problem.
+//
+// Since epochs there is a third kind, and it matters that it is separate: a row
+// written under a key this device has not been given yet is neither corrupt nor
+// retired. It will read perfectly as soon as another device passes the key along.
+// Counting it as undecryptable would tell someone their writing may be lost when
+// nothing is lost at all.
 interface SkipTally {
   legacy: number;
   undecryptable: number;
+  behind: number;
 }
 
-const newTally = (): SkipTally => ({ legacy: 0, undecryptable: 0 });
+const newTally = (): SkipTally => ({
+  legacy: 0,
+  undecryptable: 0,
+  behind: 0,
+});
 
 const decryptRow = async (
   payloadB64: string,
@@ -729,14 +853,22 @@ const decryptRow = async (
 ): Promise<Uint8Array | null> => {
   if (!ring || !session) return null;
   try {
+    const payload = b64decode(payloadB64);
+    // The epoch is the one thing that *is* read from the row, because it selects
+    // which key to try and there is no other way to know. It is authenticated by
+    // being inside the AAD, so a forged epoch picks a key that then fails.
+    const epoch = readPayloadEpoch(payload);
+    const key = dataKeyFor(ring, epoch);
+    if (!key) throw new MissingEpochKeyError(epoch);
     // Expected values, never the row's own: a blob moved between volumes or
     // replayed into another account must fail here.
-    return await decryptUpdate(ring.dataKey, b64decode(payloadB64), {
+    return await decryptUpdate(key, payload, {
       userId: session.user.id,
       volume: getActiveVolume(),
     });
   } catch (e) {
     if (e instanceof LegacyPayloadError) tally.legacy += 1;
+    else if (e instanceof MissingEpochKeyError) tally.behind += 1;
     else tally.undecryptable += 1;
     return null;
   }
@@ -751,6 +883,12 @@ const reportTally = (tally: SkipTally): void => {
         tally.undecryptable === 1 ? "was" : "were"
       } skipped. Some recent writing may be missing from this device.`
     );
+  }
+  else if (tally.behind > 0) {
+    // Said instead of the message above, not alongside it: on a device that is
+    // behind, both counts can be non-zero and the accurate, actionable one is
+    // this. The rows are intact and readable the moment the key arrives.
+    setError(MISSING_EPOCH_KEY);
   }
   if (tally.legacy > 0) {
     // Not a fault: these are pre-AAD rows that are never read again. Logged
@@ -969,7 +1107,9 @@ const shareThisDevicesKeys = async (): Promise<void> => {
   const binding = deviceBinding();
   try {
     await publishDeviceKey(supabase, binding);
-    await shareDataKeyWithDevices(supabase, ring.dataKey, binding);
+    const key = currentDataKey(ring);
+    if (key)
+      await shareDataKeyWithDevices(supabase, key, binding, ring.epoch);
   } catch (e) {
     console.warn("[devices] key sharing deferred to the next launch", e);
   }

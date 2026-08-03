@@ -117,6 +117,56 @@ drop policy if exists "delete own wrapped keys" on public.device_wrapped_keys;
 create policy "delete own wrapped keys" on public.device_wrapped_keys
   for delete using (auth.uid() = user_id);
 
+-- Data key epochs (spec/device-identity-design.md, steps 4 and 5). Rotating the
+-- data key is what makes removing a device mean anything: without it a removed
+-- device keeps the only key there is and carries on reading everything.
+--
+-- Epoch 0 is not stored here. It lives in journals.wrapped_key, where it already
+-- is, so nothing existing has to move and an account that has never rotated has
+-- no rows in this table at all. The current epoch is therefore the highest epoch
+-- here, or 0 when it is empty.
+create table if not exists public.journal_keys (
+  user_id     uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  epoch       int not null,
+  wrapped_key jsonb not null,       -- the data key wrapped by the keeper key
+  created_at  timestamptz not null default now(),
+  primary key (user_id, epoch)
+);
+
+alter table public.journal_keys enable row level security;
+
+drop policy if exists "read own journal keys" on public.journal_keys;
+create policy "read own journal keys" on public.journal_keys
+  for select using (auth.uid() = user_id);
+drop policy if exists "write own journal keys" on public.journal_keys;
+create policy "write own journal keys" on public.journal_keys
+  for insert with check (auth.uid() = user_id);
+
+-- No update and no delete policy, deliberately. An epoch's wrapped key is
+-- write-once: changing one would make every row written under it unreadable, and
+-- deleting one would strip the recovery code of its access to that stretch of the
+-- journal. Retention is the decision recorded in the design doc.
+
+-- A device holds one wrapped key per epoch it is entitled to, not just the
+-- newest, because history has to stay readable. Existing rows are epoch 0, which
+-- the default supplies.
+alter table public.device_wrapped_keys
+  add column if not exists epoch int not null default 0;
+
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conname = 'device_wrapped_keys_pkey'
+      and conrelid = 'public.device_wrapped_keys'::regclass
+      and array_length(conkey, 1) = 2
+  ) then
+    alter table public.device_wrapped_keys
+      drop constraint device_wrapped_keys_pkey,
+      add primary key (user_id, device_id, epoch);
+  end if;
+end $$;
+
 -- A device asking to be let in, pending approval on a device already trusted.
 --
 -- `client` is plaintext, and is the one deliberate metadata addition in the
@@ -187,6 +237,7 @@ begin
   delete from public.journal_updates where user_id = uid;
   delete from public.journals where user_id = uid;
   delete from public.device_link_requests where user_id = uid;
+  delete from public.journal_keys where user_id = uid;
   delete from public.device_wrapped_keys where user_id = uid;
   delete from public.device_keys where user_id = uid;
   delete from auth.users where id = uid;

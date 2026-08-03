@@ -8,7 +8,7 @@ import {
   generateKeeperKey,
   wrapDataKey,
 } from "./crypto";
-import type { WrappedDataKey } from "./crypto";
+import type { KeyRing } from "./keyring";
 import { generateDeviceKeyPair } from "./deviceKeys";
 
 const DB_NAME = "journlet-keys";
@@ -16,24 +16,7 @@ const STORE = "keys";
 const RING_KEY = "ring-v1";
 const PAIR_KEY = "device-pair-v1";
 
-export interface KeyRing {
-  /**
-   * The key the recovery code is made of, and the only thing that can open the
-   * account's `journals` row.
-   *
-   * Optional since approval-based linking (step 3): a device let in by another
-   * device is handed the data key directly and never sees this. That is the
-   * point rather than a shortcoming — a device that held the keeper key could
-   * still read everything after being removed, which would make removing it
-   * meaningless. It also means only the device that created the journal, or one
-   * linked with the recovery code, can display that code.
-   */
-  keeperKey?: CryptoKey;
-  dataKey: CryptoKey;
-  /** The data key wrapped by the keeper key. Present exactly when it is. */
-  wrapped?: WrappedDataKey;
-  createdAt: number;
-}
+export type { KeyRing } from "./keyring";
 
 const openDb = (): Promise<IDBDatabase> =>
   new Promise((resolve, reject) => {
@@ -123,15 +106,45 @@ export const wipeKeys = (): Promise<void> => {
   });
 };
 
+/**
+ * A ring stored before epochs existed: one `dataKey` and no map.
+ *
+ * Upgraded on read rather than by a migration step, because there is exactly one
+ * possible answer — whatever key it held is epoch 0's, since epoch 0 is by
+ * definition everything written before a rotation was possible.
+ */
+interface PreEpochKeyRing {
+  dataKey?: CryptoKey;
+}
+
+const withEpochs = (stored: KeyRing & PreEpochKeyRing): KeyRing => {
+  if (stored.dataKeys instanceof Map) return stored;
+  const dataKeys = new Map<number, CryptoKey>();
+  if (stored.dataKey) dataKeys.set(0, stored.dataKey);
+  return { ...stored, dataKeys, epoch: 0 };
+};
+
 /** Load the device keyring, generating one silently on first launch. */
 export const ensureKeys = (): Promise<KeyRing> => {
   ringPromise ??= (async () => {
-    const existing = await idbGet<KeyRing>(RING_KEY);
-    if (existing) return existing;
+    const existing = await idbGet<KeyRing & PreEpochKeyRing>(RING_KEY);
+    if (existing) {
+      const upgraded = withEpochs(existing);
+      // Written back so the upgrade happens once rather than on every launch,
+      // and so anything reading the record directly sees the current shape.
+      if (upgraded !== existing) await idbPut(RING_KEY, upgraded);
+      return upgraded;
+    }
     const keeperKey = await generateKeeperKey();
     const dataKey = await generateDataKey();
     const wrapped = await wrapDataKey(dataKey, keeperKey);
-    const ring: KeyRing = { keeperKey, dataKey, wrapped, createdAt: Date.now() };
+    const ring: KeyRing = {
+      keeperKey,
+      dataKeys: new Map([[0, dataKey]]),
+      epoch: 0,
+      wrapped,
+      createdAt: Date.now(),
+    };
     await idbPut(RING_KEY, ring);
     return ring;
   })();

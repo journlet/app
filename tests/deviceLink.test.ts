@@ -75,8 +75,14 @@ const client = {
       async upsert(row: Row) {
         if (failing.has(`${table}:upsert`)) return fail(`${table}:upsert`);
         writes.push({ table, op: "upsert", row });
+        // Keyed on the epoch too, as device_wrapped_keys now is. Without this a
+        // second epoch would overwrite the first and the "holds every epoch"
+        // assertions would pass while the device held one key.
         const existing = rows().findIndex(
-          (r) => r.device_id === row.device_id && r.user_id === row.user_id
+          (r) =>
+            r.device_id === row.device_id &&
+            r.user_id === row.user_id &&
+            (r.epoch ?? 0) === (row.epoch ?? 0)
         );
         if (existing >= 0) rows()[existing] = row;
         else rows().push(row);
@@ -109,7 +115,7 @@ const client = {
 const {
   LINK_REQUEST_TTL_MS,
   approveLinkRequest,
-  claimWrappedDataKey,
+  claimWrappedDataKeys,
   listLinkRequests,
   publishDeviceKey,
   publishLinkRequest,
@@ -130,6 +136,16 @@ const otherDevice = async (id: string) => {
     public_key: publicKey,
   });
   return { id, pair, publicKey };
+};
+
+/** Give a device an entitlement: a wrapped key it already holds. */
+const alreadyGranted = (id: string, epoch = 0) => {
+  (tables.device_wrapped_keys ??= []).push({
+    user_id: USER,
+    device_id: id,
+    epoch,
+    wrapped: { v: 1, note: "granted earlier" },
+  });
 };
 
 beforeEach(async () => {
@@ -218,15 +234,16 @@ describe("a device coming back after signing out", () => {
 
 describe("sharing the data key", () => {
   test("the other device can open what it is given", async () => {
-    // The end-to-end assertion for the migration: not that a row appeared, but
-    // that the device it names can actually read the journal with it.
+    // The end-to-end assertion: not that a row appeared, but that the device it
+    // names can actually read the journal with it.
     const dataKey = await generateDataKey();
     const laptop = await otherDevice("laptop");
+    alreadyGranted(laptop.id, 0);
 
-    const written = await shareDataKeyWithDevices(client, dataKey, binding);
+    const written = await shareDataKeyWithDevices(client, dataKey, binding, 1);
 
     expect(written).toBe(1);
-    const row = tables.device_wrapped_keys?.[0];
+    const row = tables.device_wrapped_keys?.find((r) => r.epoch === 1);
     const opened = await unwrapDataKeyForDevice(
       row?.wrapped as DeviceWrappedKeyJson,
       laptop.pair.privateKey,
@@ -237,59 +254,72 @@ describe("sharing the data key", () => {
     expect(new Uint8Array(raw)).toEqual(new Uint8Array(expected));
   });
 
-  test("skips this device", async () => {
-    // This device already has the data key, and after a sign-out its keypair is
-    // gone, so a row wrapped to itself could never be opened by anything.
-    const dataKey = await generateDataKey();
-    await publishDeviceKey(client, binding);
+  test("a device that has never been granted anything gets nothing", async () => {
+    // The hole this rule closes, and the reason the rule changed on 3 August.
+    // Until then a row in device_keys was treated as permission, and every device
+    // republishes that row on each connect — so a removed device holding a
+    // session would be re-granted the current key silently, with no approval and
+    // nothing shown to anyone. Publishing a key is not being entitled to one.
+    const stranger = await otherDevice("removed-phone");
+    expect(stranger.id).toBe("removed-phone");
 
-    expect(await shareDataKeyWithDevices(client, dataKey, binding)).toBe(0);
+    expect(
+      await shareDataKeyWithDevices(client, await generateDataKey(), binding, 1)
+    ).toBe(0);
     expect(tables.device_wrapped_keys ?? []).toEqual([]);
   });
 
-  test("skips a device that already holds one", async () => {
+  test("skips this device", async () => {
+    // This device already has the key, and after a sign-out its keypair is gone,
+    // so a row wrapped to itself could never be opened by anything.
     const dataKey = await generateDataKey();
-    const laptop = await otherDevice("laptop");
-    (tables.device_wrapped_keys ??= []).push({
-      user_id: USER,
-      device_id: laptop.id,
-      wrapped: { v: 1, note: "given earlier" },
-    });
+    await publishDeviceKey(client, binding);
+    alreadyGranted(binding.deviceId, 0);
+    writes = [];
 
-    expect(await shareDataKeyWithDevices(client, dataKey, binding)).toBe(0);
-    expect(tables.device_wrapped_keys?.[0].wrapped).toEqual({
-      v: 1,
-      note: "given earlier",
-    });
+    expect(await shareDataKeyWithDevices(client, dataKey, binding, 1)).toBe(0);
+    expect(writes).toEqual([]);
   });
 
-  test("reaches every device that is missing one", async () => {
-    const dataKey = await generateDataKey();
+  test("skips an epoch the device already holds", async () => {
+    const laptop = await otherDevice("laptop");
+    alreadyGranted(laptop.id, 1);
+
+    expect(
+      await shareDataKeyWithDevices(client, await generateDataKey(), binding, 1)
+    ).toBe(0);
+  });
+
+  test("reaches every entitled device that is missing the new epoch", async () => {
     await otherDevice("laptop");
     await otherDevice("tablet");
     await otherDevice("desktop");
-    (tables.device_wrapped_keys ??= []).push({
-      user_id: USER,
-      device_id: "tablet",
-      wrapped: { v: 1 },
-    });
+    alreadyGranted("laptop", 0);
+    alreadyGranted("tablet", 0);
+    alreadyGranted("tablet", 1);
+    alreadyGranted("desktop", 0);
 
-    expect(await shareDataKeyWithDevices(client, dataKey, binding)).toBe(2);
-    expect(tables.device_wrapped_keys?.map((r) => r.device_id).sort()).toEqual([
-      "desktop",
-      "laptop",
-      "tablet",
-    ]);
+    expect(
+      await shareDataKeyWithDevices(client, await generateDataKey(), binding, 1)
+    ).toBe(2);
+    expect(
+      tables.device_wrapped_keys
+        ?.filter((r) => r.epoch === 1)
+        .map((r) => r.device_id)
+        .sort()
+    ).toEqual(["desktop", "laptop", "tablet"]);
   });
 
   test("each device gets a blob only it can open", async () => {
     const dataKey = await generateDataKey();
     const laptop = await otherDevice("laptop");
     await otherDevice("tablet");
-    await shareDataKeyWithDevices(client, dataKey, binding);
+    alreadyGranted("laptop", 0);
+    alreadyGranted("tablet", 0);
+    await shareDataKeyWithDevices(client, dataKey, binding, 1);
 
     const tabletRow = tables.device_wrapped_keys?.find(
-      (r) => r.device_id === "tablet"
+      (r) => r.device_id === "tablet" && r.epoch === 1
     );
     await expect(
       unwrapDataKeyForDevice(
@@ -302,7 +332,7 @@ describe("sharing the data key", () => {
 
   test("does nothing on an account with no other devices", async () => {
     expect(
-      await shareDataKeyWithDevices(client, await generateDataKey(), binding)
+      await shareDataKeyWithDevices(client, await generateDataKey(), binding, 0)
     ).toBe(0);
   });
 });
@@ -428,7 +458,7 @@ describe("approving", () => {
     const phone = await aRequest("phone");
     const [request] = await listLinkRequests(client, binding);
 
-    await approveLinkRequest(client, dataKey, request, binding);
+    await approveLinkRequest(client, dataKey, request, binding, 0);
 
     const row = tables.device_wrapped_keys?.[0];
     const opened = await unwrapDataKeyForDevice(
@@ -445,7 +475,7 @@ describe("approving", () => {
     await aRequest("phone");
     const [request] = await listLinkRequests(client, binding);
 
-    await approveLinkRequest(client, await generateDataKey(), request, binding);
+    await approveLinkRequest(client, await generateDataKey(), request, binding, 0);
 
     expect(tables.device_link_requests).toEqual([]);
   });
@@ -456,7 +486,7 @@ describe("approving", () => {
     const phone = await aRequest("phone");
     const [request] = await listLinkRequests(client, binding);
 
-    await approveLinkRequest(client, await generateDataKey(), request, binding);
+    await approveLinkRequest(client, await generateDataKey(), request, binding, 0);
 
     expect(tables.device_keys).toEqual([
       { user_id: USER, device_id: "phone", public_key: phone.publicKey },
@@ -476,7 +506,7 @@ describe("approving", () => {
     (tables.device_link_requests as Row[])[0].public_key =
       await exportDevicePublicKey(impostor.publicKey);
 
-    await approveLinkRequest(client, dataKey, request, binding);
+    await approveLinkRequest(client, dataKey, request, binding, 0);
 
     const row = tables.device_wrapped_keys?.[0];
     await expect(
@@ -501,7 +531,7 @@ describe("approving", () => {
     failing.add("device_wrapped_keys:upsert");
 
     await expect(
-      approveLinkRequest(client, await generateDataKey(), request, binding)
+      approveLinkRequest(client, await generateDataKey(), request, binding, 0)
     ).rejects.toThrow(/Could not add the device/);
     // The request survives, so the person can try again rather than being left
     // with a device that was told nothing.
@@ -532,9 +562,9 @@ describe("refusing", () => {
 });
 
 describe("waiting for a key", () => {
-  test("null while nothing has been granted", async () => {
+  test("empty while nothing has been granted", async () => {
     // The ordinary state of a waiting device, and deliberately not an error.
-    expect(await claimWrappedDataKey(client, binding)).toBeNull();
+    expect((await claimWrappedDataKeys(client, binding)).size).toBe(0);
   });
 
   test("the key once it has", async () => {
@@ -547,14 +577,17 @@ describe("waiting for a key", () => {
     (tables.device_wrapped_keys ??= []).push({
       user_id: USER,
       device_id: "this-device",
+      epoch: 0,
       wrapped,
     });
 
-    const claimed = await claimWrappedDataKey(client, binding);
+    const claimed = await claimWrappedDataKeys(client, binding);
 
-    expect(claimed).not.toBeNull();
+    expect([...claimed.keys()]).toEqual([0]);
     expect(
-      new Uint8Array(await crypto.subtle.exportKey("raw", claimed as CryptoKey))
+      new Uint8Array(
+        await crypto.subtle.exportKey("raw", claimed.get(0) as CryptoKey)
+      )
     ).toEqual(new Uint8Array(await crypto.subtle.exportKey("raw", dataKey)));
   });
 
@@ -565,6 +598,9 @@ describe("waiting for a key", () => {
     (tables.device_wrapped_keys ??= []).push({
       user_id: USER,
       device_id: "this-device",
+      // The column is not null with a default of 0, so a real row always carries
+      // an epoch even if it predates the column.
+      epoch: 0,
       wrapped: await wrapDataKeyForDevice(
         await generateDataKey(),
         await exportDevicePublicKey(stranger.publicKey),
@@ -572,7 +608,7 @@ describe("waiting for a key", () => {
       ),
     });
 
-    expect(await claimWrappedDataKey(client, binding)).toBeNull();
+    expect((await claimWrappedDataKeys(client, binding)).size).toBe(0);
     expect(tables.device_wrapped_keys).toEqual([]);
   });
 
@@ -580,7 +616,7 @@ describe("waiting for a key", () => {
     // Otherwise a server problem is indistinguishable from waiting, and the
     // device waits for something that will never come.
     failing.add("device_wrapped_keys:select");
-    await expect(claimWrappedDataKey(client, binding)).rejects.toThrow(
+    await expect(claimWrappedDataKeys(client, binding)).rejects.toThrow(
       /Could not check for a key/
     );
   });
@@ -671,9 +707,11 @@ describe("when the server refuses", () => {
 
   test("a failed share names the device it could not reach", async () => {
     await otherDevice("laptop");
+    // Entitled, or the share loop would correctly skip it and never fail.
+    alreadyGranted("laptop", 0);
     failing.add("device_wrapped_keys:upsert");
     await expect(
-      shareDataKeyWithDevices(client, await generateDataKey(), binding)
+      shareDataKeyWithDevices(client, await generateDataKey(), binding, 1)
     ).rejects.toThrow(/laptop/);
   });
 
