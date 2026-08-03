@@ -4,7 +4,8 @@
 //
 // These pin the wording, not the styling, because the wording is the fix. The
 // register in particular must not imply a power it does not have: it cannot
-// sign anything out, so it says "a record, not a lock".
+// remove a device's access for real since steps 4 and 5, so the old "a record,
+// not a lock" wording has gone.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";

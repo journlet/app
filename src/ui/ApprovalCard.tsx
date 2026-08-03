@@ -6,10 +6,19 @@
 // reason for it disappears once the prompt cannot steal focus. Prototyped and
 // approved 31 July (spec device-identity-design.md).
 //
-// Three answers, because two of them mean different things. A mismatched code is
-// the one signal that something may be impersonating a device and it has to
-// destroy the request; "not now" must not. Folding them together would turn an
-// attack into a delay.
+// Three answers: add it, do not add it, or decide later.
+//
+// The middle one was labelled "codes are different" until 3 August, on the
+// grounds that a mismatch is a security signal and deserves its own answer. It
+// does not. It has exactly the same effect as any other refusal — the request is
+// destroyed and nothing is shared — so the only thing the label added was a claim
+// the user might not mean, followed by a message telling them something untrue
+// about why they had refused. Gary asked how to decline a request he simply did
+// not want and found no honest way to say it.
+//
+// What is load-bearing is that the warning appears *before* the decision rather
+// than after it, and that refusing is never merely a delay: "not now" leaves the
+// request alive, "do not add it" does not.
 
 import { useState } from "react";
 import type { LinkRequest } from "../store/deviceLink";
@@ -123,6 +132,20 @@ export default function ApprovalCard({
         >
           {request.code}
         </code>
+        {/* Said here, where the decision is made, rather than in the message
+            afterwards. A warning that only appears once you have chosen is a
+            warning about a choice you have already made. */}
+        <p
+          style={{
+            margin: "8px 0 0",
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--ink-soft)",
+          }}
+        >
+          If it does not match, do not add it — something may be pretending to be
+          your device.
+        </p>
       </div>
       {error && (
         <p style={{ ...body, color: "var(--danger)" }}>{error}</p>
@@ -135,16 +158,15 @@ export default function ApprovalCard({
         >
           codes match, add it
         </button>
-        {/* Coloured as the cautious answer, not styled as the destructive one:
-            refusing costs nothing and can be repeated, so it should not look
-            frightening. */}
+        {/* Not styled as destructive. Refusing costs nothing, can be repeated, and
+            is the right answer to a request you did not expect — it should not
+            look frightening. */}
         <button
           className="miniBtn"
           disabled={busy}
-          style={{ color: "var(--danger)" }}
           onClick={() => void run(() => onReject(request.deviceId))}
         >
-          codes are different
+          do not add it
         </button>
         <button
           className="miniBtn"

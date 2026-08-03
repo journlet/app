@@ -20,9 +20,10 @@ import ApprovalCard from "./ApprovalCard";
  * How long the confirmation stays before clearing itself.
  *
  * It only reports that the thing just asked for happened, so it should not need
- * an action to get rid of. The rejection is not treated this way: it is the one
- * message that might mean something is wrong, and auto-hiding a warning is how
- * nobody reads it.
+ * an action to get rid of. A refusal is not treated this way: it is the one
+ * outcome that might mean something is wrong, and auto-hiding that is how nobody
+ * reads it. It stays until dismissed even though most refusals are simply "not
+ * that device", because the app cannot tell the two apart.
  */
 const CONFIRMATION_MS = 7_000;
 
@@ -110,11 +111,12 @@ export default function LinkPrompts() {
             alignItems: "flex-start",
           }}
         >
+          {/* Neutral about the reason, because the app does not know it. It used
+              to explain a code mismatch, which was wrong whenever the refusal was
+              simply "I did not want that device". */}
           <span style={{ flex: 1 }}>
-            Rejected, and nothing was shared. Codes that do not match mean either
-            the wrong request or something pretending to be your device. If you
-            meant to add one, start again on that device and check the code
-            carefully.
+            Not added, and nothing was shared. That device can ask again if you
+            change your mind.
           </span>
           {/* Manual only. See CONFIRMATION_MS above. */}
           <button className="miniBtn" onClick={() => setOutcome(null)}>
