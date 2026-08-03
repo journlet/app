@@ -33,6 +33,8 @@ export interface DeviceRecord {
    * leaves no mark and simply goes stale instead.
    */
   signedOutAt?: number;
+  /** Set when another device removed this one from the account. */
+  removedAt?: number;
   isThisDevice: boolean;
 }
 
@@ -241,6 +243,7 @@ export const listDevices = (): DeviceRecord[] => {
       firstSeen: (rec.get("firstSeen") as number) || 0,
       lastSeen: (rec.get("lastSeen") as number) || 0,
       signedOutAt: (rec.get("signedOutAt") as number) || undefined,
+      removedAt: (rec.get("removedAt") as number) || undefined,
       isThisDevice: id === here,
     });
   });
@@ -276,6 +279,20 @@ export const markThisDeviceSignedOut = (): void => {
   const rec = devices.get(thisDeviceId());
   if (!rec) return;
   rec.set("signedOutAt", Date.now());
+};
+
+/**
+ * Note that a device was removed from this account by another device.
+ *
+ * Written by the device doing the removing, since the removed one will never
+ * connect again to say so itself. Marked rather than deleted, like a sign-out: the
+ * row keeps its name and the date it was added, so the list can still answer "what
+ * happened to that laptop" months later.
+ */
+export const markDeviceRemoved = (id: string): void => {
+  const rec = devices.get(id);
+  if (!rec) return;
+  rec.set("removedAt", Date.now());
 };
 
 export const onDevicesChange = (fn: () => void): (() => void) => {

@@ -7,6 +7,7 @@ import QRCode from "qrcode";
 import jsQR from "jsqr";
 import {
   acceptJournalKey,
+  canRemoveDevices,
   deleteAccount,
   DeviceNotClearedError,
   getJournalKeyCode,
@@ -16,6 +17,7 @@ import {
   isConfigured,
   onSyncStatus,
   provideJournalKey,
+  removeDevice,
   signIn,
   signOutAndWipe,
   verifyEmailCode,
@@ -133,6 +135,23 @@ export default function SyncView() {
       );
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Which device the remove confirmation is open for, if any.
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
+
+  const confirmRemove = async (id: string) => {
+    setError(null);
+    setRemoveBusy(true);
+    try {
+      await removeDevice(id);
+      setRemoving(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That device was not removed");
+    } finally {
+      setRemoveBusy(false);
     }
   };
 
@@ -557,13 +576,20 @@ export default function SyncView() {
                           past on 31 Jul — true, and invisible. */}
                       <div
                         style={{
-                          fontWeight: d.signedOutAt ? 400 : 600,
-                          color: d.signedOutAt ? "var(--ink-soft)" : "var(--ink)",
+                          fontWeight: d.signedOutAt || d.removedAt ? 400 : 600,
+                          color:
+                            d.signedOutAt || d.removedAt
+                              ? "var(--ink-soft)"
+                              : "var(--ink)",
                         }}
                       >
                         {d.name}
-                        {d.signedOutAt && (
-                          <span style={ST.devGone}>signed out</span>
+                        {d.removedAt ? (
+                          <span style={ST.devGone}>removed</span>
+                        ) : (
+                          d.signedOutAt && (
+                            <span style={ST.devGone}>signed out</span>
+                          )
                         )}
                         {d.isThisDevice && (
                           <span style={ST.devHere}> this device</span>
@@ -578,15 +604,63 @@ export default function SyncView() {
                             a timestamp recorded up to an hour ago. Everything
                             else falls to the recorded time. Added is written
                             once and is exact, so it keeps its finer wording. */}
-                        {d.signedOutAt
-                          ? `signed out ${coarseTime(d.signedOutAt)}`
-                          : d.isThisDevice && status === "synced"
-                            ? "syncing now"
-                            : `last synced ${coarseTime(d.lastSeen)}`}
+                        {d.removedAt
+                          ? `removed ${coarseTime(d.removedAt)}`
+                          : d.signedOutAt
+                            ? `signed out ${coarseTime(d.signedOutAt)}`
+                            : d.isThisDevice && status === "synced"
+                              ? "syncing now"
+                              : `last synced ${coarseTime(d.lastSeen)}`}
                         {d.firstSeen
                           ? ` · added ${relativeTime(d.firstSeen)}`
                           : ""}
                       </div>
+                      {/* Offered only where it can actually be carried out.
+                          Removing means rotating the data key, and the new key
+                          has to be published under the recovery key first, so a
+                          device linked by approval cannot do it. A disabled
+                          button with an explanation would be worse than no
+                          button: the honest version is that the action lives on
+                          the device that holds your recovery code. */}
+                      {removing === d.id ? (
+                        <div style={{ marginTop: 6, maxWidth: 420 }}>
+                          <p style={{ ...ST.p, marginTop: 0 }}>
+                            Remove {d.name}? It will not be able to read anything
+                            written from now on, and it cannot be added back
+                            without approving it again. What it has already synced
+                            stays on that device — only signing out or wiping
+                            there removes that.
+                          </p>
+                          <div style={ST.row}>
+                            <button
+                              className="miniBtn"
+                              disabled={removeBusy}
+                              onClick={() => void confirmRemove(d.id)}
+                            >
+                              {removeBusy ? "removing…" : "remove it"}
+                            </button>
+                            <button
+                              className="miniBtn"
+                              disabled={removeBusy}
+                              onClick={() => setRemoving(null)}
+                            >
+                              keep it
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        !d.isThisDevice &&
+                        !d.removedAt &&
+                        canRemoveDevices() && (
+                          <button
+                            className="miniBtn"
+                            style={{ marginTop: 6 }}
+                            onClick={() => setRemoving(d.id)}
+                          >
+                            remove this device
+                          </button>
+                        )
+                      )}
                     </div>
                   </li>
                 ))}

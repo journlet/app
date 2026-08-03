@@ -29,9 +29,18 @@ vi.mock("../../src/store/sync", () => ({
     return () => {};
   },
   provideJournalKey: vi.fn(),
+  canRemoveDevices: () => canRemove,
+  removeDevice: vi.fn(),
   signIn: (...a: unknown[]) => signIn(...(a as [])),
   verifyEmailCode: vi.fn(),
 }));
+
+/**
+ * Whether this device holds the recovery key, which is what allows it to remove
+ * another. Only such a device can rotate, and removal without rotation does not
+ * remove anything (spec/device-identity-design.md, steps 4 and 5).
+ */
+let canRemove = false;
 
 interface Row {
   id: string;
@@ -39,6 +48,7 @@ interface Row {
   firstSeen: number;
   lastSeen: number;
   signedOutAt?: number;
+  removedAt?: number;
   isThisDevice: boolean;
 }
 
@@ -76,6 +86,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   status = "synced";
   signedIn = true;
+  canRemove = false;
   deviceRows = twoDevices();
 });
 
@@ -227,14 +238,54 @@ describe("the device register", () => {
     expect(screen.getByText(/nothing here signs a device out/i)).toBeTruthy();
   });
 
-  test("offers no actions at all: it is a list, not a control panel", () => {
-    // Renaming and removing were both offered and withdrawn (28 Jul, Gary).
-    // Renaming in particular worked against the point of the list: a name you
-    // chose is exactly what would disguise a device you did not recognise.
+  test("never offers renaming", () => {
+    // Withdrawn 28 Jul (Gary) and not coming back: a name you chose is exactly
+    // what would disguise a device you did not recognise, which is the one thing
+    // this list exists to show you.
     render(<SyncView />);
 
     expect(screen.queryByText(/rename/i)).toBeNull();
-    expect(screen.queryByText(/remove from list/i)).toBeNull();
+  });
+
+  test("offers no removal on a device that cannot carry it out", () => {
+    // A device linked by approval holds no recovery key, so it cannot publish the
+    // new epoch and therefore cannot rotate. Offering the action and failing
+    // would be worse than not offering it.
+    canRemove = false;
+    render(<SyncView />);
+
+    expect(screen.queryByText(/remove this device/i)).toBeNull();
+  });
+
+  test("offers removal on the device holding the recovery key", () => {
+    canRemove = true;
+    render(<SyncView />);
+
+    expect(screen.getAllByText(/remove this device/i).length).toBeGreaterThan(0);
+  });
+
+  test("never offers to remove the device you are using", () => {
+    // Sign out is that operation, and it wipes locally too. Rotating the key and
+    // then walking away would strand the journal on this device.
+    canRemove = true;
+    render(<SyncView />);
+
+    // Two devices in the fixture, one of them this one.
+    expect(screen.getAllByText(/remove this device/i)).toHaveLength(1);
+  });
+
+  test("spells out what removal does and does not do before doing it", () => {
+    // The wording is the feature. Tier one without rotation was deleted in July
+    // for claiming more than it did; this claims exactly what it does.
+    canRemove = true;
+    render(<SyncView />);
+
+    fireEvent.click(screen.getAllByText(/remove this device/i)[0]);
+
+    expect(
+      screen.getByText(/not be able to read anything written from now on/i)
+    ).toBeTruthy();
+    expect(screen.getByText(/already synced stays on that device/i)).toBeTruthy();
   });
 
   test("shows every client a device has been opened with", () => {

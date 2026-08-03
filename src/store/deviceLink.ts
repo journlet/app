@@ -454,6 +454,63 @@ export const claimWrappedDataKeys = async (
 };
 
 /**
+ * Take away a device's access: every key wrapped to it, and its public key.
+ *
+ * This alone does not stop it reading anything. It holds whatever data key it
+ * was given, and every row is encrypted under one of those, so removal is only
+ * half the operation — the caller must rotate afterwards. Kept as two functions
+ * because the ordering matters and is easy to get backwards: a rotation that
+ * fails after this leaves the device un-entitled, which is safe, whereas rotating
+ * first would leave it entitled to the new key it had just been sent.
+ */
+export const revokeDevice = async (
+  client: SupabaseClient,
+  deviceId: string
+): Promise<void> => {
+  const { error: wrappedError } = await client
+    .from("device_wrapped_keys")
+    .delete()
+    .eq("device_id", deviceId);
+  if (wrappedError)
+    throw new Error(`Could not remove its keys: ${wrappedError.message}`);
+
+  const { error } = await client
+    .from("device_keys")
+    .delete()
+    .eq("device_id", deviceId);
+  if (error)
+    throw new Error(`Could not remove its public key: ${error.message}`);
+};
+
+/**
+ * Publish a new epoch's key, wrapped under the keeper key.
+ *
+ * Done before any device is given the new key, so the recovery code covers the
+ * new epoch from the moment it exists. The reverse order would leave a window in
+ * which content is being written that the recovery code cannot reach, and that
+ * window would become permanent if the writing device were then lost.
+ *
+ * This is why only a device holding the keeper key can rotate, and therefore only
+ * such a device can remove another. The alternative — rotating without keeper
+ * coverage — would silently break the promise that the recovery code is the route
+ * back from losing every device.
+ */
+export const publishEpochKey = async (
+  client: SupabaseClient,
+  binding: DeviceBinding,
+  epoch: number,
+  wrappedKey: unknown
+): Promise<void> => {
+  const { error } = await client.from("journal_keys").insert({
+    user_id: binding.userId,
+    epoch,
+    wrapped_key: wrappedKey,
+  });
+  if (error)
+    throw new Error(`Could not publish the new journal key: ${error.message}`);
+};
+
+/**
  * The epoch the account is currently writing under.
  *
  * Zero when `journal_keys` is empty, which is every account that has never

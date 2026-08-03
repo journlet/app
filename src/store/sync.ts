@@ -13,6 +13,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
 import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
 import {
+  markDeviceRemoved,
   markThisDeviceSignedOut,
   thisClientLabel,
   thisDeviceId,
@@ -23,10 +24,12 @@ import {
   claimWrappedDataKeys,
   listLinkRequests,
   publishDeviceKey,
+  publishEpochKey,
   publishLinkRequest,
   readCurrentEpoch,
   readKeeperWrappedEpochs,
   rejectLinkRequest,
+  revokeDevice,
   shareDataKeyWithDevices,
   surrenderDeviceKeys,
 } from "./deviceLink";
@@ -34,6 +37,8 @@ import type { LinkRequest } from "./deviceLink";
 import {
   decryptUpdate,
   encryptUpdate,
+  generateDataKey,
+  wrapDataKey,
   LegacyPayloadError,
   readPayloadEpoch,
   unwrapDataKey,
@@ -708,6 +713,64 @@ export const approveDevice = async (request: LinkRequest): Promise<void> => {
   pendingRequests = pendingRequests.filter(
     (r) => r.deviceId !== request.deviceId
   );
+  notify();
+};
+
+/**
+ * Whether this device is able to remove another.
+ *
+ * Only a device holding the recovery key can, because removing means rotating,
+ * and the new epoch's key has to be published wrapped under that key before any
+ * device is given it. Rotating without it would leave content the recovery code
+ * cannot reach, which quietly breaks the one promise §6.1 makes about losing every
+ * device. So the constraint is real rather than an implementation shortcut, and
+ * the Sync screen says so instead of offering an action that would fail.
+ */
+export const canRemoveDevices = (): boolean =>
+  Boolean(ring?.keeperKey && keeperUsable);
+
+/**
+ * Remove another device from this account, and rotate the data key.
+ *
+ * The two halves are one operation from the user's point of view and must not be
+ * separable in the interface: revoking alone takes away future keys and nothing
+ * else, so the removed device would carry on reading and writing under the key it
+ * already holds. That is the version of this feature that was built and deleted
+ * in July for being dishonest.
+ *
+ * Order: revoke, publish the new epoch under the keeper key, hand it to the
+ * devices that remain, then adopt it here. Every step is safe to fail at — the
+ * worst outcome is a device that has lost access while the account has not yet
+ * moved on, which is the direction that does not leak.
+ */
+export const removeDevice = async (deviceId: string): Promise<void> => {
+  if (!supabase || !session || !ring?.keeperKey || !keeperUsable)
+    throw new Error(
+      "Only the device holding your recovery code can remove another device"
+    );
+  if (deviceId === thisDeviceId())
+    throw new Error("Use sign out to remove this device");
+
+  const binding = deviceBinding();
+  await revokeDevice(supabase, deviceId);
+
+  const epoch = (await readCurrentEpoch(supabase)) + 1;
+  const dataKey = await generateDataKey();
+  const wrapped = await wrapDataKey(dataKey, ring.keeperKey);
+  await publishEpochKey(supabase, binding, epoch, wrappedToJson(wrapped));
+
+  // The removed device is not among these: revokeDevice took away both its rows,
+  // so it is no longer entitled and the share loop passes over it.
+  await shareDataKeyWithDevices(supabase, dataKey, binding, epoch);
+
+  const dataKeys = new Map(ring.dataKeys);
+  dataKeys.set(epoch, dataKey);
+  ring = { ...ring, dataKeys, epoch };
+  await replaceKeyRing(ring);
+
+  // Recorded in the register so the other devices show what happened, and pushed
+  // under the new epoch as an ordinary edit.
+  markDeviceRemoved(deviceId);
   notify();
 };
 
