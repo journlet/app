@@ -365,3 +365,39 @@ describe("observing", () => {
     expect(calls).toBe(after);
   });
 });
+
+describe("a device that was removed and then approved again", () => {
+  test("clears the removed mark when it comes back", async () => {
+    // Reported by Gary, 3 August: the phone was re-approved and working, and the
+    // Mac still listed it as removed. The mark was written by the removing device
+    // because the removed one could not speak for itself; once it can, and has
+    // been let back in, the mark is simply out of date. Same argument as the
+    // sign-out mark, which has been cleared here since 29 July.
+    localStorage.setItem("journlet-device-id", "phone");
+    const d = await load();
+    d.touchThisDevice();
+    const rec = doc.getMap<Y.Map<unknown>>("devices").get("phone") as Y.Map<unknown>;
+    rec.set("removedAt", Date.now() - 60_000);
+
+    d.touchThisDevice();
+
+    expect(rec.get("removedAt")).toBeUndefined();
+    expect(d.listDevices()[0].removedAt).toBeUndefined();
+  });
+
+  test("leaves another device's removed mark alone", async () => {
+    // Only the device itself can say it is back. Clearing someone else's mark
+    // would hide a removal from the person who performed it.
+    localStorage.setItem("journlet-device-id", "phone");
+    const d = await load();
+    d.touchThisDevice();
+    const other = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set("laptop", other);
+    other.set("id", "laptop");
+    other.set("removedAt", Date.now() - 60_000);
+
+    d.touchThisDevice();
+
+    expect(other.get("removedAt")).toBeGreaterThan(0);
+  });
+});

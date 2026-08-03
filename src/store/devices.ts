@@ -177,6 +177,12 @@ export const touchThisDevice = (): void => {
     // longer describes it. Cleared before the interval check below, or a device
     // returning within the hour would keep claiming to have left.
     if (existing.get("signedOutAt")) existing.delete("signedOutAt");
+    // And back from a removal, which is the same argument. The removing device
+    // set this mark because the removed one could not speak for itself; now it
+    // can, and it has been approved again, so the mark is simply out of date.
+    // Reported by Gary on 3 August: the phone was working again and still listed
+    // as removed on the Mac.
+    if (existing.get("removedAt")) existing.delete("removedAt");
     noteClient(existing);
     const last = (existing.get("lastSeen") as number) || 0;
     if (now - last < TOUCH_INTERVAL_MS) return;

@@ -558,8 +558,7 @@ export default function SyncView() {
             <p style={{ ...ST.p, marginTop: 0 }}>
               This list is stored inside your encrypted journal, so the server
               never sees it. It is here so you can spot a device you do not
-              recognise — it is a record, not a lock, and nothing here signs a
-              device out.
+              recognise, and remove one you no longer want to have access.
             </p>
             {deviceList.length === 0 ? (
               <p style={ST.p}>No devices recorded yet.</p>

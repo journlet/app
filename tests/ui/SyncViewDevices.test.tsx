@@ -228,14 +228,15 @@ describe("the device register", () => {
     expect(screen.getByText(/server never sees it/i)).toBeTruthy();
   });
 
-  test("says plainly that it cannot sign anything out", () => {
-    // It cannot: per-device sign-out needs per-device keys, which do not exist
-    // yet. A list that implied otherwise would promise a protection it has not
-    // got, which is worse than offering nothing.
+  test("says what the list is for, including removal", () => {
+    // It used to say "a record, not a lock, and nothing here signs a device out",
+    // which was true and load-bearing while per-device keys did not exist. Steps 4
+    // and 5 made it false: the list now removes a device's access for real, so the
+    // sentence had to go rather than be softened.
     render(<SyncView />);
 
-    expect(screen.getByText(/record, not a lock/i)).toBeTruthy();
-    expect(screen.getByText(/nothing here signs a device out/i)).toBeTruthy();
+    expect(screen.getByText(/spot a device you do not recognise/i)).toBeTruthy();
+    expect(screen.queryByText(/nothing here signs a device out/i)).toBeNull();
   });
 
   test("never offers renaming", () => {
