@@ -16,12 +16,15 @@ interface UnlockViewProps {
   linkCode: string | null;
   /** "opening" once approval has landed and the journal is being fetched. */
   linkStage: LinkStage | null;
+  /** True when this device was removed from the account by another device. */
+  removed: boolean;
   children: ReactNode;
 }
 
 export default function UnlockView({
   linkCode,
   linkStage,
+  removed,
   children,
 }: UnlockViewProps) {
   const opening = linkStage === "opening";
@@ -36,16 +39,30 @@ export default function UnlockView({
           color: "var(--ink)",
         }}
       >
-        Unlock your journal
+        {removed ? "This device was removed" : "Unlock your journal"}
       </h2>
       {/* Said first and without hedging. An empty screen at this point reads as
           "my journal is gone", and the truthful reassurance is that the journal
-          is on the server, intact, and merely unopened. */}
-      <p style={S.onboardLede}>
-        You are signed in, and your journal is on the server where it was. This
-        device cannot read it yet, because the content is encrypted and the key
-        never leaves your devices.
-      </p>
+          is on the server, intact, and merely unopened.
+
+          A removed device gets a different first sentence, because the reassuring
+          one would be a lie by omission: it is not waiting on a key it is owed,
+          somebody took its access away on purpose. Its copy of the journal is
+          still here and comes back if it is approved again. */}
+      {removed ? (
+        <p style={S.onboardLede}>
+          Your journal was removed from this device from another of your devices.
+          You are still signed in, and nothing here has been erased — approve this
+          device again and everything comes back, including anything it had not
+          managed to sync.
+        </p>
+      ) : (
+        <p style={S.onboardLede}>
+          You are signed in, and your journal is on the server where it was. This
+          device cannot read it yet, because the content is encrypted and the key
+          never leaves your devices.
+        </p>
+      )}
 
       {/* Approval has landed and the journal is being fetched and decrypted.
           Reported as its own state because it used to be reported as nothing:
@@ -92,7 +109,7 @@ export default function UnlockView({
               marginBottom: 5,
             }}
           >
-            Waiting to be added
+            {removed ? "Waiting to be added back" : "Waiting to be added"}
           </div>
           <p style={{ ...S.onboardLede, marginTop: 0 }}>
             Open Journlet on a device you already use. It will ask whether to add

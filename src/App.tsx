@@ -32,6 +32,7 @@ import {
   isConfigured,
   getLinkCode,
   getLinkStage,
+  wasRemoved,
   onSyncStatus,
   retryConnect,
 } from "./store/sync";
@@ -611,11 +612,15 @@ export default function App() {
   // Signed in but unable to open the journal: ask for the key rather than
   // rendering an empty spread, which reads as a journal that has lost its
   // contents (see lib/onboarding).
+  const [removed, setRemoved] = useState(wasRemoved());
   const unlocking = needsJournalKey({
     configured: isConfigured(),
     status: syncStatus,
     loaded,
     hasLocalContent,
+    // The one case allowed to hide a journal that exists, because hiding it is
+    // the point: access was taken away deliberately from another device.
+    removed,
   });
 
   // Signed in, holding nothing, and has never managed to fetch the journal.
@@ -652,6 +657,7 @@ export default function App() {
       onSyncStatus(() => {
         setLinkCode(getLinkCode());
         setLinkStage(getLinkStage());
+        setRemoved(wasRemoved());
       }),
     []
   );
@@ -1202,7 +1208,7 @@ export default function App() {
           />
         )}
         {!onboarding && unlocking && (
-          <UnlockView linkCode={linkCode} linkStage={linkStage}>
+          <UnlockView linkCode={linkCode} linkStage={linkStage} removed={removed}>
             <SyncView />
           </UnlockView>
         )}

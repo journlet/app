@@ -26,6 +26,7 @@ import {
   publishDeviceKey,
   publishEpochKey,
   publishLinkRequest,
+  isStillEntitled,
   readCurrentEpoch,
   readKeeperWrappedEpochs,
   rejectLinkRequest,
@@ -226,6 +227,7 @@ const teardown = () => {
   // A pending-approval card left on screen after a sign-out would offer to
   // grant a device access with a data key this device no longer holds.
   keeperUsable = false;
+  removedFromAccount = false;
   linkCode = null;
   linkStage = null;
   pendingRequests = [];
@@ -516,13 +518,20 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   await withdrawLinkRequest();
 
   if (!currentDataKey(ring)) {
+    // Behind, or removed. Only the server can say which, and the two need
+    // opposite screens.
+    if (!(await isStillEntitled(supabase, deviceBinding()).catch(() => true))) {
+      await enterRemovedState();
+      return false;
+    }
     // Entitled, and behind. The journal reads to the last rotation and no
-    // further, which is a state worth naming rather than reporting as an outage:
-    // the fix is having another device open at the same time as this one.
+    // further, which is worth naming rather than reporting as an outage: the fix
+    // is having another device open at the same time as this one.
     setError(MISSING_EPOCH_KEY);
     setStatus(navigator.onLine ? "pending" : "offline");
     return false;
   }
+  removedFromAccount = false;
   return true;
 };
 
@@ -534,6 +543,18 @@ const deviceBinding = () => ({
 });
 
 const notify = () => listeners.forEach((fn) => fn(status));
+
+/**
+ * Has this device been removed from the account by another device?
+ *
+ * Kept separate from "cannot open the journal" because the two need opposite
+ * screens. A device that is behind should be told to wait; a removed one has to
+ * be told what happened and offered the way back, which is the same approval it
+ * used when it was new. Gary tried removal on 3 August and got the first message
+ * on a device in the second state, which reads as a fault in the app.
+ */
+let removedFromAccount = false;
+export const wasRemoved = (): boolean => removedFromAccount;
 
 /** The code this device is displaying while it waits, or null if not waiting. */
 let linkCode: string | null = null;
@@ -636,6 +657,44 @@ const watchForGrant = () => {
 };
 
 /**
+ * Fall back to waiting for approval, having been removed.
+ *
+ * The session is untouched — removal takes keys away, not sign-in — so this is
+ * the same state a new device sits in, reached from the other direction. The local
+ * journal is deliberately left on disk: hidden behind the waiting screen rather
+ * than erased, so nothing written here is destroyed and re-approval brings it
+ * straight back, including anything that never managed to sync (Gary's decision,
+ * 3 August).
+ */
+const enterRemovedState = async (): Promise<void> => {
+  if (removedFromAccount) return;
+  removedFromAccount = true;
+  clearError();
+  await askToBeAdded();
+  setStatus("needs-key");
+  notify();
+};
+
+/**
+ * Decide which of the two "cannot read the newest rows" stories is true, and say
+ * that one. Never assumes removal from a failed check.
+ */
+const explainMissingKey = async (): Promise<void> => {
+  if (!supabase || !session) return;
+  try {
+    if (await isStillEntitled(supabase, deviceBinding())) {
+      setError(MISSING_EPOCH_KEY);
+      return;
+    }
+  } catch {
+    // Could not tell. The safe assumption is the recoverable one.
+    setError(MISSING_EPOCH_KEY);
+    return;
+  }
+  await enterRemovedState();
+};
+
+/**
  * Ask another device to let this one in, and remember the code to display.
  *
  * Failure is not fatal and is not shown. The journal key remains a complete
@@ -710,6 +769,14 @@ export const approveDevice = async (request: LinkRequest): Promise<void> => {
     deviceBinding(),
     ring.epoch
   );
+  // And every earlier epoch this device holds, now that the row above has made
+  // the newcomer entitled. Without this it could read only what was written since
+  // the last rotation until some later connect happened to fill the gaps in,
+  // which on a re-approved device means its own history missing for a while.
+  for (const [epoch, epochKey] of ring.dataKeys) {
+    if (epoch === ring.epoch) continue;
+    await shareDataKeyWithDevices(supabase, epochKey, deviceBinding(), epoch);
+  }
   pendingRequests = pendingRequests.filter(
     (r) => r.deviceId !== request.deviceId
   );
@@ -950,8 +1017,9 @@ const reportTally = (tally: SkipTally): void => {
   else if (tally.behind > 0) {
     // Said instead of the message above, not alongside it: on a device that is
     // behind, both counts can be non-zero and the accurate, actionable one is
-    // this. The rows are intact and readable the moment the key arrives.
-    setError(MISSING_EPOCH_KEY);
+    // this. Which message it is depends on whether this device still has keys on
+    // the server, so it takes a round trip and cannot be answered here.
+    void explainMissingKey();
   }
   if (tally.legacy > 0) {
     // Not a fault: these are pre-AAD rows that are never read again. Logged

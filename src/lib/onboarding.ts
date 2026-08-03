@@ -18,6 +18,11 @@ export interface OnboardingInput {
   loaded: boolean;
   /** Does this device already hold entries, collections or habits? */
   hasLocalContent: boolean;
+  /**
+   * Has this device been removed from the account by another device? Only the
+   * unlock gate reads it, and only to override hasLocalContent.
+   */
+  removed?: boolean;
 }
 
 /**
@@ -55,9 +60,20 @@ export const needsOnboarding = (i: OnboardingInput): boolean =>
  * Gated on hasLocalContent for the same reason as needsOnboarding. A device that
  * holds entries and has *become* unlockable — an account whose key was changed
  * elsewhere, say — keeps showing them rather than hiding them behind a form.
+ *
+ * `removed` is the one case that overrides that gate, and it is not a weakening
+ * of it. Everywhere else, hiding a journal that exists would be indistinguishable
+ * from losing it. A device removed from the account is the exception because the
+ * hiding is the *point*: access has been taken away deliberately, by the account
+ * holder, on another device. The copy is not erased — it comes back if the device
+ * is approved again — but it must not be readable in the meantime, or removal
+ * means nothing on the device it was aimed at (Gary, 3 August).
  */
 export const needsJournalKey = (i: OnboardingInput): boolean =>
-  i.configured && i.loaded && i.status === "needs-key" && !i.hasLocalContent;
+  i.configured &&
+  i.loaded &&
+  i.status === "needs-key" &&
+  (!i.hasLocalContent || i.removed === true);
 
 export interface LoadGateInput {
   configured: boolean;

@@ -454,6 +454,32 @@ export const claimWrappedDataKeys = async (
 };
 
 /**
+ * Is this device still one of the account's, or has it been removed?
+ *
+ * The distinction the app previously could not draw. A device that is merely
+ * behind — offline during a rotation — still has keys wrapped to it and will
+ * catch up. A removed device has none, and will never catch up however long it
+ * waits. Telling the first story to the second device is what made removal read
+ * as a bug rather than as an action.
+ *
+ * Counted rather than inferred from the epoch, because being behind and being
+ * removed look identical from the epoch alone.
+ */
+export const isStillEntitled = async (
+  client: SupabaseClient,
+  binding: DeviceBinding
+): Promise<boolean> => {
+  const { data, error } = await client
+    .from("device_wrapped_keys")
+    .select("epoch")
+    .eq("device_id", binding.deviceId);
+  // An error is not evidence of removal. Reporting a device removed because the
+  // network hiccuped would hide a working journal behind a re-approval screen.
+  if (error) throw new Error(`Could not check this device: ${error.message}`);
+  return (data ?? []).length > 0;
+};
+
+/**
  * Take away a device's access: every key wrapped to it, and its public key.
  *
  * This alone does not stop it reading anything. It holds whatever data key it

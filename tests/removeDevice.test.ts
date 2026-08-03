@@ -8,10 +8,11 @@
 // rotating was built and deleted in July precisely because it passed every
 // obvious test and did not have that property.
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
 import {
   decryptUpdate,
+  encryptUpdate,
   generateDataKey,
   generateKeeperKey,
   readPayloadEpoch,
@@ -22,6 +23,7 @@ import {
   exportDevicePublicKey,
   generateDeviceKeyPair,
   unwrapDataKeyForDevice,
+  wrapDataKeyForDevice,
 } from "../src/lib/deviceKeys";
 import type { DeviceWrappedKeyJson } from "../src/lib/deviceKeys";
 
@@ -45,6 +47,10 @@ let tables: Record<string, Row[]> = {};
 let doc = new Y.Doc();
 let authCallback: ((e: string, s: unknown) => void) | null = null;
 let storedRing: { dataKeys: Map<number, CryptoKey>; epoch: number } | null = null;
+/** The realtime handler for journal_updates, so a test can deliver a row. */
+let rowHandler: ((m: { new: Row }) => void) | null = null;
+/** Set to boot as a device that was linked by approval rather than as the Mac. */
+let phoneRing: { dataKeys: Map<number, CryptoKey>; epoch: number } | null = null;
 
 /* oxlint-disable unicorn/no-thenable */
 vi.mock("@supabase/supabase-js", () => ({
@@ -141,7 +147,14 @@ vi.mock("@supabase/supabase-js", () => ({
     removeChannel: () => {},
     channel: () => {
       const ch = {
-        on: () => ch,
+        on: (
+          _e: string,
+          cfg: { table?: string },
+          handler: (m: { new: Row }) => void
+        ) => {
+          if (cfg?.table === "journal_updates") rowHandler = handler;
+          return ch;
+        },
         subscribe: (cb?: (s: string) => void) => {
           cb?.("SUBSCRIBED");
           return ch;
@@ -165,10 +178,16 @@ vi.mock("../src/store/journal", () => ({
 
 vi.mock("../src/lib/keystore", () => ({
   ensureKeys: async () => ({
-    keeperKey,
-    dataKeys: storedRing?.dataKeys ?? new Map([[0, dataKey]]),
-    epoch: storedRing?.epoch ?? 0,
-    wrapped: accountWrapped,
+    // phoneRing stands in for a device linked by approval: it holds a data key
+    // and no keeper key, so it can read but cannot rotate or recover.
+    ...(phoneRing
+      ? { dataKeys: phoneRing.dataKeys, epoch: phoneRing.epoch }
+      : {
+          keeperKey,
+          dataKeys: storedRing?.dataKeys ?? new Map([[0, dataKey]]),
+          epoch: storedRing?.epoch ?? 0,
+          wrapped: accountWrapped,
+        }),
     createdAt: 0,
   }),
   replaceKeyRing: async (r: unknown) => {
@@ -198,19 +217,41 @@ const phoneIsOnTheAccount = async () => {
   );
 };
 
-const boot = async () => {
+/**
+ * The engine booted by the current test, so it can be stopped afterwards.
+ *
+ * Without this, a device left waiting for approval keeps its poll running against
+ * the shared fixtures after its test ends, and the next test measures a connect
+ * driven by the previous one. The same isolation problem bit connectRetry.test.ts.
+ */
+let current: typeof import("../src/store/sync") | null = null;
+
+const start = async () => {
   vi.resetModules();
   const sync = await import("../src/store/sync");
+  current = sync;
   sync.startSync();
   authCallback?.("SIGNED_IN", { user: { id: USER_ID, email: "g@example.com" } });
+  return sync;
+};
+
+const boot = async () => {
+  const sync = await start();
   await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
   return sync;
 };
+
+afterEach(async () => {
+  await current?.signOutAndWipe().catch(() => undefined);
+  current = null;
+});
 
 beforeEach(async () => {
   tables = {};
   doc = new Y.Doc();
   storedRing = null;
+  phoneRing = null;
+  rowHandler = null;
   authCallback = null;
   localStorage.clear();
   localStorage.setItem("journlet-device-id", DEVICE_ID);
@@ -218,6 +259,205 @@ beforeEach(async () => {
   const pair = await generateDeviceKeyPair();
   phone = { pair, publicKey: await exportDevicePublicKey(pair.publicKey) };
   await phoneIsOnTheAccount();
+});
+
+describe("the removed device's own view", () => {
+  /**
+   * Boot as the phone: no keeper key, its epoch 0 key held locally, a journal
+   * already on disk, and nothing wrapped to it on the server any more. Exactly
+   * where a device lands the moment it is removed.
+   */
+  const bootAsRemovedPhone = async () => {
+    localStorage.setItem("journlet-device-id", "phone");
+    myPair = phone.pair;
+    tables.device_wrapped_keys = [];
+    tables.device_keys = [
+      { user_id: USER_ID, device_id: DEVICE_ID, public_key: "mac" },
+    ];
+    tables.journal_keys = [
+      {
+        user_id: USER_ID,
+        epoch: 1,
+        wrapped_key: { v: 1, iv: "", blob: "" },
+      },
+    ];
+    doc.getArray("entries").push(["written before it was removed"]);
+    phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
+    return start();
+  };
+
+  test("knows it was removed rather than merely behind", async () => {
+    // The two are identical from the epoch alone, and telling the wrong story is
+    // what made removal read as a fault: the phone was told to open another
+    // device so it could catch up, which it never could.
+    const sync = await bootAsRemovedPhone();
+
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+  });
+
+  test("stays signed in and asks to be added back", async () => {
+    // Gary's expectation, 3 August: removing a device should leave it signed in
+    // and needing approval again, not stranded with a stale journal.
+    const sync = await bootAsRemovedPhone();
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+
+    expect(sync.getSyncStatus()).toBe("needs-key");
+    expect(sync.getSessionEmail()).toBe("g@example.com");
+    expect(tables.device_link_requests?.[0]?.device_id).toBe("phone");
+    expect(sync.getLinkCode()).not.toBeNull();
+  });
+
+  test("does not tell it to wait for a key it will never be given", async () => {
+    const sync = await bootAsRemovedPhone();
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+
+    expect(sync.getSyncError()).toBeNull();
+  });
+
+  test("a device that is merely behind is told to wait, not that it was removed", async () => {
+    // The same epoch gap, but its key is still on the server. It will catch up as
+    // soon as an up-to-date device is open alongside it.
+    localStorage.setItem("journlet-device-id", "phone");
+    myPair = phone.pair;
+    tables.device_keys = [
+      { user_id: USER_ID, device_id: "phone", public_key: phone.publicKey },
+    ];
+    // A real blob, wrapped to this device. A placeholder would be deleted as
+    // unopenable and the device would then look removed rather than behind —
+    // which is correct behaviour, and not what this test is about.
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER_ID,
+        device_id: "phone",
+        epoch: 0,
+        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
+          userId: USER_ID,
+          deviceId: "phone",
+        }),
+      },
+    ];
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
+    phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
+    const sync = await start();
+
+    await vi.waitFor(() =>
+      expect(sync.getSyncError()).toMatch(/does not have the newest key/)
+    );
+    expect(sync.wasRemoved()).toBe(false);
+  });
+
+  test("clears the wait-for-a-key message once it turns out to be removal", async () => {
+    // The sequence that makes clearError load-bearing rather than defensive: a
+    // device that was legitimately behind has already been told to wait, and is
+    // then removed. Without clearing, the re-approval screen carries a message
+    // telling you to go and open another device so this one can catch up.
+    localStorage.setItem("journlet-device-id", "phone");
+    myPair = phone.pair;
+    tables.device_keys = [
+      { user_id: USER_ID, device_id: "phone", public_key: phone.publicKey },
+    ];
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER_ID,
+        device_id: "phone",
+        epoch: 0,
+        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
+          userId: USER_ID,
+          deviceId: "phone",
+        }),
+      },
+    ];
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
+    phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
+    const sync = await start();
+    await vi.waitFor(() =>
+      expect(sync.getSyncError()).toMatch(/does not have the newest key/)
+    );
+
+    // Now removed, and it looks again.
+    tables.device_wrapped_keys = [];
+    await sync.retryConnect();
+
+    expect(sync.wasRemoved()).toBe(true);
+    expect(sync.getSyncError()).toBeNull();
+  });
+
+  test("notices removal from a row it cannot read, while sitting open", async () => {
+    // The path Gary actually hit: the phone was open when the Mac removed it, so
+    // the first thing it learned was a realtime row under an epoch it has no key
+    // for. Reached without any reconnect, and it must not report that as a device
+    // that is merely behind.
+    localStorage.setItem("journlet-device-id", "phone");
+    myPair = phone.pair;
+    tables.device_keys = [
+      { user_id: USER_ID, device_id: "phone", public_key: phone.publicKey },
+    ];
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER_ID,
+        device_id: "phone",
+        epoch: 0,
+        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
+          userId: USER_ID,
+          deviceId: "phone",
+        }),
+      },
+    ];
+    phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
+    const sync = await start();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
+    await vi.waitFor(() => expect(rowHandler).not.toBeNull());
+
+    const rotated = await generateDataKey();
+    const state = new Y.Doc();
+    state.getArray("entries").push(["written after the removal"]);
+    const rowUnderEpoch1 = async (id: number) => ({
+      new: {
+        id,
+        volume: "v1",
+        payload: b64encode(
+          await encryptUpdate(
+            rotated,
+            Y.encodeStateAsUpdate(state),
+            { userId: USER_ID, volume: "v1" },
+            1
+          )
+        ),
+      },
+    });
+
+    // First, still entitled: a rotation it simply has not caught up with, so it
+    // is told to wait. This is the state the message is written for.
+    rowHandler?.(await rowUnderEpoch1(98));
+    await vi.waitFor(() =>
+      expect(sync.getSyncError()).toMatch(/does not have the newest key/)
+    );
+
+    // Then removed, and another row arrives.
+    tables.device_wrapped_keys = [];
+    rowHandler?.(await rowUnderEpoch1(99));
+
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+    // And the earlier message is gone. Left showing, it would tell someone to go
+    // and open another device so this one can catch up, on a screen explaining
+    // that it was removed.
+    expect(sync.getSyncError()).toBeNull();
+  });
+
+  test("does not erase the journal it holds", async () => {
+    // Hidden rather than wiped (Gary's decision): nothing written here can be
+    // lost, and re-approval brings it back including anything unsynced.
+    const sync = await bootAsRemovedPhone();
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+
+    expect(doc.getArray("entries").toArray()).toContain(
+      "written before it was removed"
+    );
+  });
 });
 
 describe("removing a device", () => {

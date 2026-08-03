@@ -88,6 +88,26 @@ describe("a signed-in device that cannot open the journal", () => {
     expect(needsJournalKey(locked)).toBe(true);
   });
 
+  test("is asked anyway when this device was removed from the account", () => {
+    // The one case allowed to hide a journal that exists. Everywhere else that
+    // would be indistinguishable from losing it; here the hiding is the point,
+    // because access was taken away deliberately from another device. The copy is
+    // not erased and comes back on re-approval (Gary, 3 Aug).
+    expect(needsJournalKey({ ...locked, hasLocalContent: true, removed: true })).toBe(
+      true
+    );
+  });
+
+  test("removal does not force the screen in any other state", () => {
+    // The flag is not a licence to hide the journal generally: it only overrides
+    // hasLocalContent once the engine has already reached needs-key.
+    for (const status of ["synced", "pending", "offline", "connecting"] as const) {
+      expect(
+        needsJournalKey({ ...locked, status, hasLocalContent: true, removed: true })
+      ).toBe(false);
+    }
+  });
+
   test("is not asked while it still holds content", () => {
     // A device with entries that has somehow become unlockable keeps showing
     // them rather than hiding them behind a form.
