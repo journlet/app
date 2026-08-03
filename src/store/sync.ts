@@ -521,7 +521,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     // Behind, or removed. Only the server can say which, and the two need
     // opposite screens.
     if (!(await isStillEntitled(supabase, deviceBinding()).catch(() => true))) {
-      await enterRemovedState();
+      enterRemovedState();
       return false;
     }
     // Entitled, and behind. The journal reads to the last rotation and no
@@ -665,14 +665,31 @@ const watchForGrant = () => {
  * than erased, so nothing written here is destroyed and re-approval brings it
  * straight back, including anything that never managed to sync (Gary's decision,
  * 3 August).
+ *
+ * It does *not* ask to be added back. Doing that was the obvious thing and it was
+ * wrong: removing a device produced an approval prompt for that same device on the
+ * device that had just removed it, seconds later, leaving no answer that made
+ * sense — "codes are different" is untrue and "not now" invites it to ask again
+ * (Gary, 3 August). A new device asking on sign-in is right, because signing in
+ * there *is* the request. Here the account holder has just said no, so asking again
+ * has to be a fresh decision taken on the removed device.
  */
-const enterRemovedState = async (): Promise<void> => {
+const enterRemovedState = (): void => {
   if (removedFromAccount) return;
   removedFromAccount = true;
   clearError();
-  await askToBeAdded();
   setStatus("needs-key");
   notify();
+};
+
+/**
+ * Ask to be let back in, from the removed device, because someone there chose to.
+ *
+ * The same request a new device makes. Separate from entering the removed state so
+ * that nothing automatic ever produces it.
+ */
+export const askToBeAddedBack = async (): Promise<void> => {
+  await askToBeAdded();
 };
 
 /**
@@ -691,7 +708,7 @@ const explainMissingKey = async (): Promise<void> => {
     setError(MISSING_EPOCH_KEY);
     return;
   }
-  await enterRemovedState();
+  enterRemovedState();
 };
 
 /**

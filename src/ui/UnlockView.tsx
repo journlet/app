@@ -12,6 +12,10 @@ import type { LinkStage } from "../store/sync";
 import { S } from "./styles";
 
 interface UnlockViewProps {
+  /** Ask to be let back in. Only ever called from a deliberate tap. */
+  onAskAgain: () => void;
+  /** True while that request is being published. */
+  asking: boolean;
   /** The code to compare, or null if the request could not be published. */
   linkCode: string | null;
   /** "opening" once approval has landed and the journal is being fetched. */
@@ -25,6 +29,8 @@ export default function UnlockView({
   linkCode,
   linkStage,
   removed,
+  onAskAgain,
+  asking,
   children,
 }: UnlockViewProps) {
   const opening = linkStage === "opening";
@@ -62,6 +68,18 @@ export default function UnlockView({
           device cannot read it yet, because the content is encrypted and the key
           never leaves your devices.
         </p>
+      )}
+
+      {/* Removed, and not asking yet. The request is a button rather than
+          something that happens on its own: asking automatically put an approval
+          prompt on the device that had just removed this one, seconds after it did
+          so, with no sensible answer available (Gary, 3 August). */}
+      {removed && !linkCode && !opening && (
+        <div style={{ margin: "14px 0" }}>
+          <button className="miniBtn" disabled={asking} onClick={onAskAgain}>
+            {asking ? "asking…" : "ask to be added again"}
+          </button>
+        </div>
       )}
 
       {/* Approval has landed and the journal is being fetched and decrypted.

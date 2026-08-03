@@ -295,14 +295,29 @@ describe("the removed device's own view", () => {
     await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
   });
 
-  test("stays signed in and asks to be added back", async () => {
+  test("stays signed in, and waits to be asked rather than asking", async () => {
     // Gary's expectation, 3 August: removing a device should leave it signed in
     // and needing approval again, not stranded with a stale journal.
+    //
+    // But it must not ask on its own. Asking automatically put an approval prompt
+    // for this device on the device that had just removed it, seconds later, with
+    // no answer that made sense — "codes are different" is untrue, "not now"
+    // invites it back. A vicious cycle, in Gary's words.
     const sync = await bootAsRemovedPhone();
     await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
 
     expect(sync.getSyncStatus()).toBe("needs-key");
     expect(sync.getSessionEmail()).toBe("g@example.com");
+    expect(tables.device_link_requests ?? []).toEqual([]);
+    expect(sync.getLinkCode()).toBeNull();
+  });
+
+  test("asks only when someone on that device chooses to", async () => {
+    const sync = await bootAsRemovedPhone();
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+
+    await sync.askToBeAddedBack();
+
     expect(tables.device_link_requests?.[0]?.device_id).toBe("phone");
     expect(sync.getLinkCode()).not.toBeNull();
   });

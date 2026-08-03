@@ -30,6 +30,7 @@ import {
   getSyncStatus,
   hasSyncedOnce,
   isConfigured,
+  askToBeAddedBack,
   getLinkCode,
   getLinkStage,
   wasRemoved,
@@ -613,6 +614,7 @@ export default function App() {
   // rendering an empty spread, which reads as a journal that has lost its
   // contents (see lib/onboarding).
   const [removed, setRemoved] = useState(wasRemoved());
+  const [asking, setAsking] = useState(false);
   const unlocking = needsJournalKey({
     configured: isConfigured(),
     status: syncStatus,
@@ -1208,7 +1210,16 @@ export default function App() {
           />
         )}
         {!onboarding && unlocking && (
-          <UnlockView linkCode={linkCode} linkStage={linkStage} removed={removed}>
+          <UnlockView
+            linkCode={linkCode}
+            linkStage={linkStage}
+            removed={removed}
+            asking={asking}
+            onAskAgain={() => {
+              setAsking(true);
+              void askToBeAddedBack().finally(() => setAsking(false));
+            }}
+          >
             <SyncView />
           </UnlockView>
         )}
