@@ -373,6 +373,30 @@ describe("asking to be added", () => {
     expect(code).toBe(await verificationCode(row?.public_key as string));
   });
 
+  test("the code is the same every time this device asks", async () => {
+    // Noticed by Gary, 3 August, and correct: it is a fingerprint of this device's
+    // public key, not a one-time password. Stability is the property that lets
+    // someone notice a device presenting a *different* key than last time, which
+    // means it was wiped or is not the device they think it is. A per-request
+    // random code would prove only that two screens agree right now.
+    const first = await publishLinkRequest(client, binding, "Safari (iOS)");
+    const second = await publishLinkRequest(client, binding, "Safari (iOS)");
+
+    expect(second).toBe(first);
+  });
+
+  test("and changes when the keypair does", async () => {
+    // Which is the only thing that should change it: a sign-out or a wipe takes
+    // the keystore with it. Removal does not, so a re-approved device shows the
+    // code it showed before.
+    const before = await publishLinkRequest(client, binding, "Safari (iOS)");
+
+    myPair = await generateDeviceKeyPair();
+    const after = await publishLinkRequest(client, binding, "Safari (iOS)");
+
+    expect(after).not.toBe(before);
+  });
+
   test("asking again restarts the clock", async () => {
     // A device that has been sitting on a stale request should get a fresh half
     // hour rather than expiring in the middle of somebody approving it.

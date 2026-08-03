@@ -111,6 +111,18 @@ const CODE_BYTES = 10;
  * Truncating SHA-256 is sound here: the property needed is preimage resistance
  * against a target, not collision resistance between two attacker-chosen keys,
  * so the birthday bound does not apply and 80 bits means 80 bits.
+ *
+ * Stable for the life of the keypair, and therefore the same every time a given
+ * device asks. Gary noticed this on 3 August and it is deliberate: this is a
+ * fingerprint, not a one-time password. A random code per request would prove only
+ * that two screens agree at that instant, whereas a stable one also lets someone
+ * notice that a device they recognise is presenting a *different* key than last
+ * time — which means it was wiped, or is not the device they think it is. Nothing
+ * is leaked by the stability either: it is a hash of a public key that every device
+ * on the account can already read.
+ *
+ * It changes when the keypair does, which is a sign-out or a wipe. Removal alone
+ * does not, so a re-approved device shows the code it showed before.
  */
 export const verificationCode = async (
   publicKeyB64: string
