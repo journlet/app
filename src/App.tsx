@@ -31,6 +31,7 @@ import {
   hasSyncedOnce,
   isConfigured,
   askToBeAddedBack,
+  signOutAndWipe,
   getLinkCode,
   getLinkStage,
   wasRemoved,
@@ -1215,6 +1216,7 @@ export default function App() {
             linkStage={linkStage}
             removed={removed}
             asking={asking}
+            onSignOut={() => void signOutAndWipe()}
             onAskAgain={() => {
               setAsking(true);
               void askToBeAddedBack().finally(() => setAsking(false));

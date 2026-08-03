@@ -454,6 +454,26 @@ export const claimWrappedDataKeys = async (
 };
 
 /**
+ * Is this device's own request still waiting to be answered?
+ *
+ * False covers two things — declined, or expired — and they are deliberately not
+ * distinguished. Both mean the same to the person holding the device: it was not
+ * added, and asking again is the way forward. Telling them which would require the
+ * refusal to leave a record on the server, which is a row nobody needs.
+ */
+export const hasPendingRequest = async (
+  client: SupabaseClient,
+  binding: DeviceBinding
+): Promise<boolean> => {
+  const { data, error } = await client
+    .from("device_link_requests")
+    .select("device_id")
+    .eq("device_id", binding.deviceId);
+  if (error) throw new Error(`Could not check the request: ${error.message}`);
+  return (data ?? []).length > 0;
+};
+
+/**
  * Is this device still one of the account's, or has it been removed?
  *
  * The distinction the app previously could not draw. A device that is merely

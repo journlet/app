@@ -605,6 +605,75 @@ describe("the removed device's own view", () => {
     );
   });
 
+  test("says so when its request is refused, rather than waiting it out", async () => {
+    // Gary, 3 August: a declined device carried on saying "waiting to be added
+    // back" until the thirty minutes lapsed, because it watched for a key rather
+    // than for its own request. Refusal and expiry are not distinguished: both
+    // mean not added, and ask again if you want in.
+    const sync = await bootAsRemovedPhone();
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+    await sync.askToBeAddedBack();
+    expect(sync.getLinkStage()).toBe("waiting");
+
+    // Refused on the other device: the request row goes, no key appears.
+    tables.device_link_requests = [];
+    await sync.retryConnect();
+
+    await vi.waitFor(() => expect(sync.wasDeclined()).toBe(true));
+    // And the code goes with it. There is nothing left to compare.
+    expect(sync.getLinkCode()).toBeNull();
+  });
+
+  test("reconnecting while it waits does not cancel its own request", async () => {
+    // Found by the test above rather than by reading the code. The withdraw ran
+    // before the key check, so any reconnect — a foreground, a retry — retracted
+    // the request: the card disappeared from the approving device while this one
+    // went on waiting for an answer to a question it had taken back.
+    const sync = await bootAsRemovedPhone();
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+    await sync.askToBeAddedBack();
+    const code = sync.getLinkCode();
+
+    await sync.retryConnect();
+
+    expect(tables.device_link_requests?.[0]?.device_id).toBe("phone");
+    expect(sync.getLinkCode()).toBe(code);
+    expect(sync.wasDeclined()).toBe(false);
+  });
+
+  test("an approval is never mistaken for a refusal", async () => {
+    // Approving deletes the request too, so the order of the two checks is the
+    // whole safety property: the wrapped key is published first, so a grant is
+    // always visible by the time the request disappears. Checking the request
+    // first would report a successful approval as a refusal.
+    const sync = await bootAsRemovedPhone();
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+    await sync.askToBeAddedBack();
+
+    const rotated = await generateDataKey();
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER_ID,
+        device_id: "phone",
+        epoch: 1,
+        wrapped: await wrapDataKeyForDevice(rotated, phone.publicKey, {
+          userId: USER_ID,
+          deviceId: "phone",
+        }),
+      },
+    ];
+    // Approval removes the request as its last step.
+    tables.device_link_requests = [];
+
+    await sync.retryConnect();
+
+    expect(sync.wasDeclined()).toBe(false);
+    expect(sync.getSyncStatus()).toBe("synced");
+  });
+
   test("does not erase the journal it holds", async () => {
     // Hidden rather than wiped (Gary's decision): nothing written here can be
     // lost, and re-approval brings it back including anything unsynced.

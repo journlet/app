@@ -25,6 +25,7 @@ import {
   listLinkRequests,
   publishDeviceKey,
   publishEpochKey,
+  hasPendingRequest,
   publishLinkRequest,
   isStillEntitled,
   readCurrentEpoch,
@@ -531,7 +532,6 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     epoch,
   };
   await replaceKeyRing(ring);
-  await withdrawLinkRequest();
 
   if (!currentDataKey(ring)) {
     // Behind, or removed. Only the server can say which, and the two need
@@ -541,6 +541,8 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     // test could reach.
     if (!(await isStillEntitled(supabase, deviceBinding()).catch(() => true))) {
       enterRemovedState();
+      // It may also have asked and been refused since. Same round trip either way.
+      await noticeIfDeclined();
       return false;
     }
     // Entitled, and behind. The journal reads to the last rotation and no
@@ -550,6 +552,12 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     setStatus(navigator.onLine ? "pending" : "offline");
     return false;
   }
+  // Withdrawn only now, having established that this device can actually read the
+  // journal. It used to happen before this check, which meant every reconnect on a
+  // device that was waiting for approval quietly cancelled its own request: the
+  // card vanished from the approving device and this one waited for an answer to a
+  // question it had retracted.
+  await withdrawLinkRequest();
   removedFromAccount = false;
   return true;
 };
@@ -586,8 +594,13 @@ export const getLinkCode = (): string | null => linkCode;
  * show, which takes a fetch and a decrypt. Reported rather than left blank
  * because that gap is exactly where the screen looked hung: the code sat there
  * saying "waiting for approval" for seconds after the approval had happened.
+ *
+ * "declined" is the request having gone without a key arriving. It covers both a
+ * refusal and an expiry, which are the same thing from here, and it exists because
+ * the alternative was a device saying "waiting" for half an hour after the answer
+ * had been given (Gary, 3 August).
  */
-export type LinkStage = "waiting" | "opening";
+export type LinkStage = "waiting" | "opening" | "declined";
 let linkStage: LinkStage | null = null;
 export const getLinkStage = (): LinkStage | null => linkStage;
 
@@ -626,8 +639,14 @@ const pollForGrant = async (): Promise<void> => {
   try {
     // Discarding the key is intentional: connect() re-claims and adopts it
     // properly, and duplicating that here is how the two paths drift apart.
-    if ((await claimWrappedDataKeys(supabase, deviceBinding())).size === 0)
+    if ((await claimWrappedDataKeys(supabase, deviceBinding())).size === 0) {
+      // No key. Is the request even still there? Checked in this order and never
+      // the other way round: approving publishes the wrapped key *before* deleting
+      // the request, so a grant is always visible by the time the request goes. The
+      // reverse order would report a successful approval as a refusal.
+      await noticeIfDeclined();
       return;
+    }
     stopWatchingForGrant();
     // Said before the work rather than after it. Fetching and decrypting the
     // journal takes a moment, and during that moment the screen would otherwise
@@ -715,6 +734,36 @@ const enterRemovedState = (): void => {
  */
 export const askToBeAddedBack = async (): Promise<void> => {
   await askToBeAdded();
+};
+
+/** True on a device whose request was answered with "do not add it", or lapsed. */
+export const wasDeclined = (): boolean => linkStage === "declined";
+
+/**
+ * Has the request this device is waiting on been answered with a refusal?
+ *
+ * Called from the poll and from a connect, because the two are the only moments
+ * this device looks at the server and either can be the first to find out. Doing
+ * it in the poll alone meant a foreground or a "try again" learned nothing.
+ *
+ * Only ever after a grant has been ruled out. Approving deletes the request as its
+ * last step, having published the wrapped key first, so a grant is always visible
+ * by the time the request disappears — checking in the other order would report a
+ * successful approval as a refusal.
+ */
+const noticeIfDeclined = async (): Promise<void> => {
+  if (!supabase || !session || linkStage !== "waiting") return;
+  try {
+    if (await hasPendingRequest(supabase, deviceBinding())) return;
+  } catch {
+    // Could not tell. Keep waiting rather than claim a refusal that may not have
+    // happened.
+    return;
+  }
+  stopWatchingForGrant();
+  linkCode = null;
+  linkStage = "declined";
+  notify();
 };
 
 /**

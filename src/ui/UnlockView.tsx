@@ -16,6 +16,8 @@ interface UnlockViewProps {
   onAskAgain: () => void;
   /** True while that request is being published. */
   asking: boolean;
+  /** Sign out and erase this device's copy. The other way out of here. */
+  onSignOut: () => void;
   /** The code to compare, or null if the request could not be published. */
   linkCode: string | null;
   /** "opening" once approval has landed and the journal is being fetched. */
@@ -31,9 +33,11 @@ export default function UnlockView({
   removed,
   onAskAgain,
   asking,
+  onSignOut,
   children,
 }: UnlockViewProps) {
   const opening = linkStage === "opening";
+  const declined = linkStage === "declined";
   return (
     <section style={{ maxWidth: 480 }}>
       <h2
@@ -70,11 +74,47 @@ export default function UnlockView({
         </p>
       )}
 
+      {/* The request was answered with "do not add it", or it lapsed. Said rather
+          than left as "waiting", which is what it used to do for the full half
+          hour after the answer had been given (Gary, 3 August). The two are not
+          distinguished because they mean the same thing here, and because telling
+          them apart would need the refusal to leave a record on the server. */}
+      {declined && (
+        <div
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            borderRadius: 10,
+            padding: "10px 14px",
+            margin: "14px 0",
+          }}
+        >
+          <div style={{ fontWeight: 600, color: "var(--ink)" }}>
+            This device was not added
+          </div>
+          <p style={{ ...S.onboardLede, marginTop: 4 }}>
+            The request was turned down, or it ran out of time. Nothing was shared
+            with this device. You can ask again, or sign out and leave it.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="miniBtn" disabled={asking} onClick={onAskAgain}>
+              {asking ? "asking…" : "ask again"}
+            </button>
+            {/* Says what it does. Sign-out is the only thing that erases the copy
+                held here, so on this screen it is the deliberate way to leave
+                rather than a way to give up. */}
+            <button className="miniBtn" onClick={onSignOut}>
+              sign out and erase this journal
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Removed, and not asking yet. The request is a button rather than
           something that happens on its own: asking automatically put an approval
           prompt on the device that had just removed this one, seconds after it did
           so, with no sensible answer available (Gary, 3 August). */}
-      {removed && !linkCode && !opening && (
+      {removed && !linkCode && !opening && !declined && (
         <div style={{ margin: "14px 0" }}>
           <button className="miniBtn" disabled={asking} onClick={onAskAgain}>
             {asking ? "asking…" : "ask to be added again"}
@@ -108,7 +148,7 @@ export default function UnlockView({
         </div>
       )}
 
-      {linkCode && !opening && (
+      {linkCode && !opening && !declined && (
         <div
           style={{
             background: "var(--surface)",
@@ -169,7 +209,7 @@ export default function UnlockView({
       {/* The fallback is hidden while opening. Offering a second way in at the
           moment the first one has succeeded invites someone to start over on top
           of work that is already underway. */}
-      {!opening && (
+      {!opening && !declined && (
         <>
           <p style={S.onboardLede}>
             {linkCode

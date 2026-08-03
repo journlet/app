@@ -7,18 +7,36 @@
 // because the honest reassurance is available: the journal is on the server,
 // intact, and merely unopened.
 
-import { afterEach, describe, expect, test } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import UnlockView from "../../src/ui/UnlockView";
+import type { LinkStage } from "../../src/store/sync";
 
 afterEach(cleanup);
 
-const renderView = () =>
+interface Options {
+  linkCode?: string | null;
+  linkStage?: LinkStage | null;
+  removed?: boolean;
+}
+
+const renderView = (o: Options = {}) => {
+  const onAskAgain = vi.fn();
+  const onSignOut = vi.fn();
   render(
-    <UnlockView>
+    <UnlockView
+      linkCode={o.linkCode ?? null}
+      linkStage={o.linkStage ?? null}
+      removed={o.removed ?? false}
+      asking={false}
+      onAskAgain={onAskAgain}
+      onSignOut={onSignOut}
+    >
       <div>key entry</div>
     </UnlockView>
   );
+  return { onAskAgain, onSignOut };
+};
 
 describe("what it says", () => {
   test("says the journal is still there, first", () => {
@@ -57,5 +75,63 @@ describe("what it renders", () => {
     renderView();
 
     expect(screen.getByText("key entry")).toBeTruthy();
+  });
+});
+
+describe("a device that was removed", () => {
+  test("says so, and does not pretend it is waiting on a key it is owed", () => {
+    renderView({ removed: true });
+
+    expect(screen.getByText(/This device was removed/i)).toBeTruthy();
+    expect(
+      screen.queryByText(/your journal is on the server where it was/i)
+    ).toBeNull();
+  });
+
+  test("says nothing here has been erased", () => {
+    // True, and the reason removal hides the journal rather than wiping it.
+    renderView({ removed: true });
+
+    expect(screen.getByText(/nothing here has been erased/i)).toBeTruthy();
+  });
+
+  test("offers to ask again rather than asking on its own", () => {
+    const { onAskAgain } = renderView({ removed: true });
+
+    fireEvent.click(screen.getByText(/ask to be added again/i));
+
+    expect(onAskAgain).toHaveBeenCalled();
+  });
+});
+
+describe("a device whose request was refused", () => {
+  test("says it was not added, instead of still saying waiting", () => {
+    // It used to go on saying "waiting to be added back" for the full half hour
+    // after the answer had been given (Gary, 3 August).
+    renderView({ removed: true, linkStage: "declined" });
+
+    expect(screen.getByText(/was not added/i)).toBeTruthy();
+    expect(screen.queryByText(/waiting to be added/i)).toBeNull();
+  });
+
+  test("offers both ways out: ask again, or sign out", () => {
+    // Gary asked for exactly these two. Signing out is the only thing that erases
+    // the copy held here, so it says so.
+    const { onAskAgain, onSignOut } = renderView({
+      removed: true,
+      linkStage: "declined",
+    });
+
+    fireEvent.click(screen.getByText(/^ask again$/i));
+    expect(onAskAgain).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText(/sign out and erase this journal/i));
+    expect(onSignOut).toHaveBeenCalled();
+  });
+
+  test("shows no code to compare, since there is nothing pending", () => {
+    renderView({ removed: true, linkStage: "declined", linkCode: "AAAA BBBB" });
+
+    expect(screen.queryByText("AAAA BBBB")).toBeNull();
   });
 });
