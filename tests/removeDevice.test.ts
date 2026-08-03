@@ -427,6 +427,12 @@ describe("the removed device's own view", () => {
     await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
     await vi.waitFor(() => expect(rowHandler).not.toBeNull());
 
+    // The account has rotated. Stated on the server as well as in the rows, since
+    // a reconnect reads the epoch from journal_keys and would otherwise conclude
+    // there was nothing wrong.
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
     const rotated = await generateDataKey();
     const state = new Y.Doc();
     state.getArray("entries").push(["written after the removal"]);
@@ -461,6 +467,142 @@ describe("the removed device's own view", () => {
     // and open another device so this one can catch up, on a screen explaining
     // that it was removed.
     expect(sync.getSyncError()).toBeNull();
+  });
+
+  /** The phone as it actually is before removal: synced, entitled to epoch 0. */
+  const bootPhoneSynced = async () => {
+    localStorage.setItem("journlet-device-id", "phone");
+    myPair = phone.pair;
+    tables.device_keys = [
+      { user_id: USER_ID, device_id: "phone", public_key: phone.publicKey },
+    ];
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER_ID,
+        device_id: "phone",
+        epoch: 0,
+        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
+          userId: USER_ID,
+          deviceId: "phone",
+        }),
+      },
+    ];
+    phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
+    const sync = await start();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
+    return sync;
+  };
+
+  test("opens the journal on being approved, without a restart", async () => {
+    // Reported by Gary, 3 August: after approving, the phone sat on "Approved.
+    // Opening your journal…" until the app was restarted. doConnect early-outs on
+    // `connectedUserId && channel`, and a device that had synced before removal
+    // still had both, so every later connect() did nothing at all. Restarting
+    // worked because it cleared this module's state.
+    // Synced first, which is the whole point: a device that has connected holds a
+    // channel and a connectedUserId, and those are what doConnect early-outs on. A
+    // fixture that starts already removed never sets them, so it cannot catch this
+    // — my first version of this test passed with the fix removed.
+    const sync = await bootPhoneSynced();
+    await vi.waitFor(() => expect(rowHandler).not.toBeNull());
+
+    // Removed, and it finds out the way it really does: a realtime row under an
+    // epoch it has no key for. That path never runs ensureJournalKeys, which is
+    // why dropping the connection had to happen where the state is entered.
+    tables.device_wrapped_keys = [];
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
+    const rotated = await generateDataKey();
+    const state = new Y.Doc();
+    state.getArray("entries").push(["written after the removal"]);
+    rowHandler?.({
+      new: {
+        id: 99,
+        volume: "v1",
+        payload: b64encode(
+          await encryptUpdate(
+            rotated,
+            Y.encodeStateAsUpdate(state),
+            { userId: USER_ID, volume: "v1" },
+            1
+          )
+        ),
+      },
+    });
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+    await sync.askToBeAddedBack();
+
+    // Approved: the current epoch's key, wrapped to this device.
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER_ID,
+        device_id: "phone",
+        epoch: 1,
+        wrapped: await wrapDataKeyForDevice(rotated, phone.publicKey, {
+          userId: USER_ID,
+          deviceId: "phone",
+        }),
+      },
+    ];
+
+    await sync.retryConnect();
+
+    expect(sync.getSyncStatus()).toBe("synced");
+    expect(sync.wasRemoved()).toBe(false);
+    // And it is not left mid-flight on the opening message.
+    expect(sync.getLinkStage()).toBeNull();
+    expect(sync.getLinkCode()).toBeNull();
+  });
+
+  test("a device that is only behind recovers without a restart too", async () => {
+    // Same shape of bug as the removed case: rows stop decrypting, the status
+    // still reads synced, and nothing re-runs the key check. It now drops the
+    // connection and goes back round the retry loop, so the key arriving is
+    // enough.
+    const sync = await bootPhoneSynced();
+    await vi.waitFor(() => expect(rowHandler).not.toBeNull());
+
+    // Rotated, and this device is still entitled but has not been given epoch 1.
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
+    const rotated = await generateDataKey();
+    const state = new Y.Doc();
+    state.getArray("entries").push(["written under the new key"]);
+    const payload = b64encode(
+      await encryptUpdate(
+        rotated,
+        Y.encodeStateAsUpdate(state),
+        { userId: USER_ID, volume: "v1" },
+        1
+      )
+    );
+    // On the server as well as delivered live, because recovery happens through a
+    // reconnect and a reconcile, which fetch rather than replay.
+    tables.journal_updates = [{ id: 99, volume: "v1", payload }];
+    rowHandler?.({ new: { id: 99, volume: "v1", payload } });
+    await vi.waitFor(() =>
+      expect(sync.getSyncError()).toMatch(/does not have the newest key/)
+    );
+    expect(sync.wasRemoved()).toBe(false);
+
+    // Another device hands the key over.
+    tables.device_wrapped_keys?.push({
+      user_id: USER_ID,
+      device_id: "phone",
+      epoch: 1,
+      wrapped: await wrapDataKeyForDevice(rotated, phone.publicKey, {
+        userId: USER_ID,
+        deviceId: "phone",
+      }),
+    });
+    await sync.retryConnect();
+
+    expect(sync.getSyncStatus()).toBe("synced");
+    expect(doc.getArray("entries").toArray()).toContain(
+      "written under the new key"
+    );
   });
 
   test("does not erase the journal it holds", async () => {

@@ -216,13 +216,29 @@ const wouldChangeServer = (sh: Y.Doc, diff: Uint8Array): boolean => {
   }
 };
 
-const teardown = () => {
+/**
+ * Drop the sync connection, leaving the session and the link state alone.
+ *
+ * Load-bearing rather than tidy-up. doConnect's early-out is
+ * `connectedUserId === session.user.id && channel`, so a device that has ever
+ * connected will refuse to run another connect until one of those is cleared. A
+ * device that has just discovered it cannot read the newest rows — removed, or
+ * merely behind a rotation — is in exactly that position, and every later
+ * connect() silently did nothing: approving it left "Opening your journal…" on
+ * screen until the app was restarted (Gary, 3 August). Restarting worked because
+ * it cleared this module's state, which is to say the fix was here all along.
+ */
+const dropConnection = () => {
   if (channel && supabase) void supabase.removeChannel(channel);
   channel = null;
   connectedUserId = null;
   shadow?.destroy();
   shadow = null;
   lastMaxId = 0;
+};
+
+const teardown = () => {
+  dropConnection();
   // Link state belongs to a session and a keyring, both of which are going.
   // A pending-approval card left on screen after a sign-out would offer to
   // grant a device access with a data key this device no longer holds.
@@ -519,7 +535,10 @@ const ensureJournalKeys = async (): Promise<boolean> => {
 
   if (!currentDataKey(ring)) {
     // Behind, or removed. Only the server can say which, and the two need
-    // opposite screens.
+    // opposite screens. No dropConnection here: this branch is only reached from
+    // inside a connect, which by definition has not set connectedUserId yet, so
+    // there is nothing to drop. Adding it anyway looked prudent and was code no
+    // test could reach.
     if (!(await isStillEntitled(supabase, deviceBinding()).catch(() => true))) {
       enterRemovedState();
       return false;
@@ -677,6 +696,12 @@ const watchForGrant = () => {
 const enterRemovedState = (): void => {
   if (removedFromAccount) return;
   removedFromAccount = true;
+  // This device is not synced any more, and saying so here is what lets it
+  // connect again later. Reached mostly from the realtime path, which never runs
+  // ensureJournalKeys, so dropping the connection there alone was not enough —
+  // approving left "Opening your journal…" on screen until a restart. See
+  // dropConnection.
+  dropConnection();
   clearError();
   setStatus("needs-key");
   notify();
@@ -701,6 +726,13 @@ const explainMissingKey = async (): Promise<void> => {
   try {
     if (await isStillEntitled(supabase, deviceBinding())) {
       setError(MISSING_EPOCH_KEY);
+      // Behind, not removed. Reconnect rather than sitting there: a device whose
+      // realtime rows have stopped decrypting still reads "synced", applies
+      // nothing, and had no way back short of a restart. Dropping the connection
+      // and asking again puts it on the ordinary retry backoff, so it recovers by
+      // itself the moment another device passes the key along.
+      dropConnection();
+      void connect();
       return;
     }
   } catch {
