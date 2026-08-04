@@ -838,13 +838,41 @@ const withdrawLinkRequest = async (): Promise<void> => {
  * that cannot open the journal itself has nothing to grant, and showing it an
  * approval prompt would be offering a decision it cannot carry out.
  */
+const sameRequest = (a: LinkRequest, b: LinkRequest | undefined): boolean =>
+  b !== undefined &&
+  a.deviceId === b.deviceId &&
+  a.code === b.code &&
+  a.requestedAt === b.requestedAt;
+
 const refreshLinkRequests = async (): Promise<void> => {
   if (!supabase || !session || !connectedUserId || !ring) return;
   try {
     const next = await listLinkRequests(supabase, deviceBinding());
+    /**
+     * Compare the code and the timestamp, not just the device id.
+     *
+     * publishLinkRequest upserts on (user_id, device_id) and rewrites
+     * public_key and requested_at in place, so a re-ask changes what the row
+     * says while leaving the id and the list length alone. Comparing ids only
+     * meant this returned early and kept the old row.
+     *
+     * The consequence landed on the one screen that cannot afford it. A device
+     * that signs out and wipes destroys its keypair but keeps its device id in
+     * localStorage, so asking again produces a new public key and therefore a
+     * new verification code. The approving device went on showing the old one.
+     * Two screens, two different codes, and the correct response to that is to
+     * refuse — so the mechanism taught the person to distrust a legitimate
+     * device. Nothing leaked, because approveDevice wraps to the key it is
+     * holding, but a comparison people learn to see fail is a comparison they
+     * stop reading.
+     *
+     * requestedAt is in here for its own reason: it resets on every ask, and
+     * LinkPrompts counts down from the cached copy, so a renewed request was
+     * displaying "expires in 0 minutes".
+     */
     const unchanged =
       next.length === pendingRequests.length &&
-      next.every((r, i) => r.deviceId === pendingRequests[i]?.deviceId);
+      next.every((r, i) => sameRequest(r, pendingRequests[i]));
     if (unchanged) return;
     pendingRequests = next;
     notify();

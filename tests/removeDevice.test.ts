@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 //
-// Removing a device (spec/device-identity-design.md, steps 4 and 5).
+// Removing a device (spec/device-identity-design.md, steps 4 and 5), and the
+// approving device's view of the link requests it is asked to judge.
 //
-// The assertion that justifies the whole of steps 4 and 5 is the last one here:
-// after removal, the removed device cannot read what is written next. Everything
-// before it is bookkeeping. A version of this feature that revoked without
-// rotating was built and deleted in July precisely because it passed every
-// obvious test and did not have that property.
+// The assertion that justifies the whole of steps 4 and 5 is the last one in
+// the "removing a device" block: after removal, the removed device cannot read
+// what is written next. Everything before it is bookkeeping. A version of this
+// feature that revoked without rotating was built and deleted in July precisely
+// because it passed every obvious test and did not have that property.
+//
+// The link-request block at the foot is here rather than in its own file because
+// it needs this same harness: an engine that is connected, holds the keeper key,
+// and is therefore allowed to be shown a request at all.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
@@ -23,6 +28,7 @@ import {
   exportDevicePublicKey,
   generateDeviceKeyPair,
   unwrapDataKeyForDevice,
+  verificationCode,
   wrapDataKeyForDevice,
 } from "../src/lib/deviceKeys";
 import type { DeviceWrappedKeyJson } from "../src/lib/deviceKeys";
@@ -819,5 +825,105 @@ describe("removing a device", () => {
 
     expect([...(storedRing?.dataKeys.keys() ?? [])]).toEqual([0, 1]);
     expect(storedRing?.epoch).toBe(1);
+  });
+});
+
+describe("what the approving device is shown", () => {
+  /**
+   * Foreground the app, which is one of the three things that refreshes the
+   * list in production. Driven this way rather than by exporting
+   * refreshLinkRequests, so the test exercises a path that actually runs.
+   */
+  const foreground = async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    await Promise.resolve();
+  };
+
+  /**
+   * A request from a device that is not on the account yet.
+   *
+   * agoMs rather than a fixed timestamp: listLinkRequests drops anything older
+   * than the thirty minute TTL, so a hard-coded date makes the test pass today
+   * and silently stop testing anything later.
+   */
+  const asks = (deviceId: string, publicKey: string, agoMs = 0) => {
+    tables.device_link_requests = [
+      {
+        user_id: USER_ID,
+        device_id: deviceId,
+        public_key: publicKey,
+        client: "Safari on iOS",
+        requested_at: new Date(Date.now() - agoMs).toISOString(),
+      },
+    ];
+  };
+
+  test("shows the code for the key that arrived, not the one that used to", async () => {
+    // The regression. publishLinkRequest upserts on (user_id, device_id) and
+    // rewrites public_key in place, so a device that signs out, wipes its
+    // keypair, signs back in and asks again keeps its device id and arrives with
+    // a new key and therefore a new code. refreshLinkRequests compared device
+    // ids only, found the list unchanged, and returned early holding the old
+    // row — so this screen showed a code the asking device was no longer
+    // displaying, and the only correct response to two different codes is to
+    // refuse a device that should have been let in.
+    const first = await generateDeviceKeyPair();
+    const second = await generateDeviceKeyPair();
+    const firstKey = await exportDevicePublicKey(first.publicKey);
+    const secondKey = await exportDevicePublicKey(second.publicKey);
+    expect(firstKey).not.toBe(secondKey);
+
+    asks("laptop", firstKey, 10 * 60 * 1000);
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getLinkRequests()).toHaveLength(1));
+    const before = sync.getLinkRequests()[0].code;
+
+    asks("laptop", secondKey, 10 * 60 * 1000);
+    await foreground();
+
+    await vi.waitFor(() =>
+      expect(sync.getLinkRequests()[0].code).not.toBe(before)
+    );
+    // And it is the code for the key actually on the table, not merely a change.
+    expect(sync.getLinkRequests()[0].code).toBe(
+      await verificationCode(secondKey)
+    );
+  });
+
+  test("a renewed request stops counting down from the old timestamp", async () => {
+    // requested_at resets on every ask, and the countdown reads the cached copy,
+    // so a device that re-asked was told it had no time left.
+    const pair = await generateDeviceKeyPair();
+    const key = await exportDevicePublicKey(pair.publicKey);
+
+    asks("laptop", key, 10 * 60 * 1000);
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getLinkRequests()).toHaveLength(1));
+    const before = sync.getLinkRequests()[0].requestedAt;
+
+    asks("laptop", key, 0);
+    await foreground();
+
+    await vi.waitFor(() =>
+      expect(sync.getLinkRequests()[0].requestedAt).toBeGreaterThan(before)
+    );
+  });
+
+  test("still returns early when nothing about the request changed", async () => {
+    // The early-out is worth keeping. Widening the comparison must not turn
+    // every poll into a re-render.
+    const pair = await generateDeviceKeyPair();
+    const key = await exportDevicePublicKey(pair.publicKey);
+
+    asks("laptop", key, 10 * 60 * 1000);
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getLinkRequests()).toHaveLength(1));
+
+    const held = sync.getLinkRequests();
+    await foreground();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
+
+    // Same array identity: nothing was reassigned, so no listener was notified.
+    expect(sync.getLinkRequests()).toBe(held);
   });
 });
