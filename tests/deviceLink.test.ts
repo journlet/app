@@ -11,12 +11,12 @@ import { generateDataKey } from "../src/lib/crypto";
 import {
   exportDevicePublicKey,
   generateDeviceKeyPair,
+  signGrant,
   unwrapDataKeyForDevice,
   verificationCode,
   wrapDataKeyForDevice,
 } from "../src/lib/deviceKeys";
 import type { DeviceWrappedKeyJson } from "../src/lib/deviceKeys";
-import type { EntitlementEvidence } from "../src/store/deviceLink";
 
 const USER = "11111111-1111-4111-8111-111111111111";
 
@@ -139,8 +139,54 @@ const otherDevice = async (id: string) => {
   return { id, pair, publicKey };
 };
 
-/** Give a device an entitlement: a wrapped key it already holds. */
-const alreadyGranted = (id: string, epoch = 0) => {
+/** Every epoch this device holds. Tests add epochs as they need them. */
+let ring: Map<number, CryptoKey>;
+
+/** The account's data key for an epoch, created on first mention. */
+const keyFor = async (epoch: number): Promise<CryptoKey> => {
+  const existing = ring.get(epoch);
+  if (existing) return existing;
+  const made = await generateDataKey();
+  ring.set(epoch, made);
+  return made;
+};
+
+/**
+ * Give a device a real entitlement: a row at `epoch` carrying a grant that
+ * verifies under that epoch's key.
+ *
+ * The rest of the blob is left empty on purpose. Entitlement reads the grant and
+ * nothing else, so a stub row makes the tests say which part is load-bearing. The
+ * tests that care whether the recipient can open what it is given assert that by
+ * opening it, further down.
+ */
+const alreadyGranted = async (id: string, epoch = 0) => {
+  (tables.device_wrapped_keys ??= []).push({
+    user_id: USER,
+    device_id: id,
+    epoch,
+    wrapped: {
+      v: 1,
+      epk: "",
+      salt: "",
+      iv: "",
+      blob: "",
+      grant: await signGrant(
+        await keyFor(epoch),
+        { userId: USER, deviceId: id },
+        epoch
+      ),
+    },
+  });
+};
+
+/**
+ * A row with no grant, which is two things at once: what anyone holding only the
+ * account can write, and what every row written before grants existed looks like.
+ * The payload is the junk this file used to hand to alreadyGranted, which is the
+ * point — it was never read, and that was the whole of the problem.
+ */
+const grantlessRow = (id: string, epoch = 0) => {
   (tables.device_wrapped_keys ??= []).push({
     user_id: USER,
     device_id: id,
@@ -149,23 +195,11 @@ const alreadyGranted = (id: string, epoch = 0) => {
   });
 };
 
-/**
- * Evidence saying every device that has published a key is also in the encrypted
- * register, which is the ordinary state of an account.
- *
- * The tests about wrapping should not also have to describe the register, so they
- * pass this. What the register is there to stop has its own block at the foot.
- */
-const allRegistered = (): EntitlementEvidence => ({
-  registered: new Set(
-    (tables.device_keys ?? []).map((r) => r.device_id as string)
-  ),
-});
-
 beforeEach(async () => {
   writes = [];
   tables = {};
   failing = new Set();
+  ring = new Map();
   myPair = await generateDeviceKeyPair();
 });
 
@@ -250,11 +284,11 @@ describe("sharing the data key", () => {
   test("the other device can open what it is given", async () => {
     // The end-to-end assertion: not that a row appeared, but that the device it
     // names can actually read the journal with it.
-    const dataKey = await generateDataKey();
     const laptop = await otherDevice("laptop");
-    alreadyGranted(laptop.id, 0);
+    await alreadyGranted(laptop.id, 0);
+    const dataKey = await keyFor(1);
 
-    const written = await shareDataKeyWithDevices(client, dataKey, binding, 1, allRegistered());
+    const written = await shareDataKeyWithDevices(client, ring, binding, 1);
 
     expect(written).toBe(1);
     const row = tables.device_wrapped_keys?.find((r) => r.epoch === 1);
@@ -276,64 +310,152 @@ describe("sharing the data key", () => {
     // nothing shown to anyone. Publishing a key is not being entitled to one.
     const stranger = await otherDevice("removed-phone");
     expect(stranger.id).toBe("removed-phone");
+    await keyFor(1);
+
+    expect(await shareDataKeyWithDevices(client, ring, binding, 1)).toBe(0);
+    expect(tables.device_wrapped_keys ?? []).toEqual([]);
+  });
+
+  test("refuses a row with no grant, at an epoch it could have checked", async () => {
+    // The missing-grant arm on its own. The row sits at epoch 0, which this device
+    // holds, so it is checked and found wanting rather than merely unreadable.
+    // Separate from the test below because the two arms fail for different reasons
+    // and a fixture that trips both proves neither.
+    const intruder = await otherDevice("intruder");
+    grantlessRow(intruder.id, 0);
+    await keyFor(0);
+    await keyFor(1);
+
+    expect(await shareDataKeyWithDevices(client, ring, binding, 1)).toBe(0);
+  });
+
+  test("refuses a row at an epoch it cannot check", async () => {
+    // The other arm, and the shape the live attack actually took. RLS on
+    // device_wrapped_keys can only see auth.uid(), so anyone holding the account
+    // could write a row for a device id of their choosing at an epoch nobody was
+    // using, with anything at all in it — the contents were never read. Publish a
+    // public key you hold the private half of, insert this row, and the next device
+    // to connect wrapped the genuine data key to you. No prompt, because this path
+    // compares no verification code, and no trace, because it never touches the
+    // register.
+    //
+    // An epoch nobody is using is one this device cannot hold, so the grant on it
+    // cannot be checked. Unproven is refused.
+    const intruder = await otherDevice("intruder");
+    grantlessRow(intruder.id, 9);
+    await keyFor(1);
+
+    const written = await shareDataKeyWithDevices(client, ring, binding, 1);
+
+    expect(written).toBe(0);
+    expect(
+      tables.device_wrapped_keys?.filter((r) => r.epoch === 1) ?? []
+    ).toEqual([]);
+  });
+
+  test("refuses a grant issued for a different device", async () => {
+    // A grant names the device it is for, so one lifted off a legitimate row and
+    // dropped onto your own proves nothing. This is the version of the attack
+    // available to someone who can read the table, which is anyone on the account.
+    const laptop = await otherDevice("laptop");
+    await alreadyGranted(laptop.id, 0);
+    const intruder = await otherDevice("intruder");
+    const legitimate = tables.device_wrapped_keys?.find(
+      (r) => r.device_id === laptop.id
+    );
+    const stolen = (legitimate?.wrapped as DeviceWrappedKeyJson | undefined)
+      ?.grant;
+    expect(stolen).toBeTruthy();
+    tables.device_wrapped_keys?.push({
+      user_id: USER,
+      device_id: intruder.id,
+      epoch: 0,
+      wrapped: { v: 1, epk: "", salt: "", iv: "", blob: "", grant: stolen },
+    });
+    await keyFor(1);
+
+    await shareDataKeyWithDevices(client, ring, binding, 1);
 
     expect(
-      await shareDataKeyWithDevices(
-        client,
-        await generateDataKey(),
-        binding,
-        1,
-        allRegistered()
-      )
-    ).toBe(0);
-    expect(tables.device_wrapped_keys ?? []).toEqual([]);
+      tables.device_wrapped_keys
+        ?.filter((r) => r.epoch === 1)
+        .map((r) => r.device_id)
+    ).toEqual(["laptop"]);
+  });
+
+  test("refuses a grant issued for a different epoch", async () => {
+    // And it names its epoch, so a grant for one cannot be replayed at another.
+    const laptop = await otherDevice("laptop");
+    await keyFor(0);
+    await keyFor(1);
+    tables.device_wrapped_keys?.push?.({} as never);
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER,
+        device_id: laptop.id,
+        epoch: 0,
+        // Signed for epoch 1 and filed under epoch 0.
+        wrapped: {
+          v: 1,
+          epk: "",
+          salt: "",
+          iv: "",
+          blob: "",
+          grant: await signGrant(
+            await keyFor(1),
+            { userId: USER, deviceId: laptop.id },
+            1
+          ),
+        },
+      },
+    ];
+
+    expect(await shareDataKeyWithDevices(client, ring, binding, 1)).toBe(0);
+  });
+
+  test("passes over a row at an epoch this device does not hold", async () => {
+    // Unproven is refused, not assumed. A device that cannot check a grant has no
+    // business acting on it, and the top-up happens on the next connect of one
+    // that can. Wrong in the safe direction.
+    const laptop = await otherDevice("laptop");
+    await alreadyGranted(laptop.id, 7);
+    const seven = ring.get(7);
+    ring.delete(7);
+    await keyFor(1);
+    expect(seven).toBeTruthy();
+
+    expect(await shareDataKeyWithDevices(client, ring, binding, 1)).toBe(0);
   });
 
   test("skips this device", async () => {
     // This device already has the key, and after a sign-out its keypair is gone,
     // so a row wrapped to itself could never be opened by anything.
-    const dataKey = await generateDataKey();
     await publishDeviceKey(client, binding);
-    alreadyGranted(binding.deviceId, 0);
+    await alreadyGranted(binding.deviceId, 0);
+    await keyFor(1);
     writes = [];
 
-    expect(await shareDataKeyWithDevices(client, dataKey, binding, 1, allRegistered())).toBe(0);
+    expect(await shareDataKeyWithDevices(client, ring, binding, 1)).toBe(0);
     expect(writes).toEqual([]);
   });
 
   test("skips an epoch the device already holds", async () => {
     const laptop = await otherDevice("laptop");
-    alreadyGranted(laptop.id, 1);
+    await alreadyGranted(laptop.id, 1);
 
-    expect(
-      await shareDataKeyWithDevices(
-        client,
-        await generateDataKey(),
-        binding,
-        1,
-        allRegistered()
-      )
-    ).toBe(0);
+    expect(await shareDataKeyWithDevices(client, ring, binding, 1)).toBe(0);
   });
 
   test("reaches every entitled device that is missing the new epoch", async () => {
     await otherDevice("laptop");
     await otherDevice("tablet");
     await otherDevice("desktop");
-    alreadyGranted("laptop", 0);
-    alreadyGranted("tablet", 0);
-    alreadyGranted("tablet", 1);
-    alreadyGranted("desktop", 0);
+    await alreadyGranted("laptop", 0);
+    await alreadyGranted("tablet", 0);
+    await alreadyGranted("tablet", 1);
+    await alreadyGranted("desktop", 0);
 
-    expect(
-      await shareDataKeyWithDevices(
-        client,
-        await generateDataKey(),
-        binding,
-        1,
-        allRegistered()
-      )
-    ).toBe(2);
+    expect(await shareDataKeyWithDevices(client, ring, binding, 1)).toBe(2);
     expect(
       tables.device_wrapped_keys
         ?.filter((r) => r.epoch === 1)
@@ -342,13 +464,25 @@ describe("sharing the data key", () => {
     ).toEqual(["desktop", "laptop", "tablet"]);
   });
 
+  test("one proven row is enough, whatever else the device has", async () => {
+    // Entitlement is "any row proves it", so a device with a good row and a junk
+    // one alongside is still a device. The junk row is not evidence, but it is not
+    // grounds for refusing the evidence that is there either.
+    const laptop = await otherDevice("laptop");
+    await alreadyGranted(laptop.id, 0);
+    grantlessRow(laptop.id, 5);
+    await keyFor(1);
+
+    expect(await shareDataKeyWithDevices(client, ring, binding, 1)).toBe(1);
+  });
+
   test("each device gets a blob only it can open", async () => {
-    const dataKey = await generateDataKey();
     const laptop = await otherDevice("laptop");
     await otherDevice("tablet");
-    alreadyGranted("laptop", 0);
-    alreadyGranted("tablet", 0);
-    await shareDataKeyWithDevices(client, dataKey, binding, 1, allRegistered());
+    await alreadyGranted("laptop", 0);
+    await alreadyGranted("tablet", 0);
+    await keyFor(1);
+    await shareDataKeyWithDevices(client, ring, binding, 1);
 
     const tabletRow = tables.device_wrapped_keys?.find(
       (r) => r.device_id === "tablet" && r.epoch === 1
@@ -362,82 +496,39 @@ describe("sharing the data key", () => {
     ).rejects.toThrow();
   });
 
-  test("refuses a device the register has never heard of", async () => {
-    // The attack this check exists for. RLS on device_wrapped_keys can only see
-    // auth.uid(), so anyone with the account can insert a row for any device id
-    // at any epoch with anything in it. Note the fixture uses alreadyGranted,
-    // whose payload is { v: 1, note: "granted earlier" } — junk that is never
-    // read. Before the register was consulted, that junk row plus a public key
-    // of your own was the whole of what it took to be handed the real data key.
-    const intruder = await otherDevice("intruder");
-    alreadyGranted(intruder.id, 9);
-
-    const written = await shareDataKeyWithDevices(
-      client,
-      await generateDataKey(),
-      binding,
-      1,
-      { registered: new Set() }
+  test("what it writes can prove itself next time", async () => {
+    // Otherwise the first rotation after a device was topped up would refuse it,
+    // and every device would need re-approving on every rotation.
+    const laptop = await otherDevice("laptop");
+    await alreadyGranted(laptop.id, 0);
+    await keyFor(1);
+    await shareDataKeyWithDevices(client, ring, binding, 1);
+    // Now forget the epoch that proved it, leaving only the row just written.
+    tables.device_wrapped_keys = (tables.device_wrapped_keys ?? []).filter(
+      (r) => r.epoch === 1
     );
+    await keyFor(2);
 
-    expect(written).toBe(0);
-    expect(
-      tables.device_wrapped_keys?.filter((r) => r.epoch === 1) ?? []
-    ).toEqual([]);
+    expect(await shareDataKeyWithDevices(client, ring, binding, 2)).toBe(1);
   });
 
-  test("allows the one device being approved by hand right now", async () => {
-    // A device cannot be in the register before it has connected, because only
-    // it can write its own row, and it cannot connect until it has a key. So
-    // approval names it for this call. What stands in for the register is a
-    // person having compared two verification codes.
-    const laptop = await otherDevice("laptop");
-    alreadyGranted(laptop.id, 0);
+  test("refuses to share an epoch this device does not hold", async () => {
+    // A caller bug rather than an attack, and it must be loud: silently wrapping
+    // the wrong key would produce rows that look right and open to nothing.
+    await otherDevice("laptop");
+    await alreadyGranted("laptop", 0);
 
-    const written = await shareDataKeyWithDevices(
-      client,
-      await generateDataKey(),
-      binding,
-      1,
-      { registered: new Set(), approvingNow: laptop.id }
-    );
-
-    expect(written).toBe(1);
-  });
-
-  test("naming one device does not let any other in", async () => {
-    const laptop = await otherDevice("laptop");
-    alreadyGranted(laptop.id, 0);
-    const intruder = await otherDevice("intruder");
-    alreadyGranted(intruder.id, 9);
-
-    await shareDataKeyWithDevices(
-      client,
-      await generateDataKey(),
-      binding,
-      1,
-      { registered: new Set(), approvingNow: laptop.id }
-    );
-
-    expect(
-      tables.device_wrapped_keys
-        ?.filter((r) => r.epoch === 1)
-        .map((r) => r.device_id)
-    ).toEqual(["laptop"]);
+    await expect(
+      shareDataKeyWithDevices(client, ring, binding, 3)
+    ).rejects.toThrow(/does not hold/i);
   });
 
   test("does nothing on an account with no other devices", async () => {
-    expect(
-      await shareDataKeyWithDevices(
-        client,
-        await generateDataKey(),
-        binding,
-        0,
-        allRegistered()
-      )
-    ).toBe(0);
+    await keyFor(0);
+    expect(await shareDataKeyWithDevices(client, ring, binding, 0)).toBe(0);
   });
 });
+
 
 // ---------- step 3 ----------
 
@@ -834,16 +925,11 @@ describe("when the server refuses", () => {
   test("a failed share names the device it could not reach", async () => {
     await otherDevice("laptop");
     // Entitled, or the share loop would correctly skip it and never fail.
-    alreadyGranted("laptop", 0);
+    await alreadyGranted("laptop", 0);
+    await keyFor(1);
     failing.add("device_wrapped_keys:upsert");
     await expect(
-      shareDataKeyWithDevices(
-        client,
-        await generateDataKey(),
-        binding,
-        1,
-        allRegistered()
-      )
+      shareDataKeyWithDevices(client, ring, binding, 1)
     ).rejects.toThrow(/laptop/);
   });
 

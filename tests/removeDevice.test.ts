@@ -27,6 +27,7 @@ import {
 import {
   exportDevicePublicKey,
   generateDeviceKeyPair,
+  signGrant,
   unwrapDataKeyForDevice,
   verificationCode,
   wrapDataKeyForDevice,
@@ -204,19 +205,23 @@ vi.mock("../src/lib/keystore", () => ({
 }));
 
 /**
- * Put a device in the encrypted register, the way it would put itself there on
- * its first connect. Needed because entitlement now requires the register to
- * corroborate the tables, so a fixture that writes only the tables is describing
- * the forged-row attack rather than a device.
+ * A row that proves its device belongs here: a grant at `epoch` under that
+ * epoch's key. A fixture that writes a row without one is describing the
+ * forged-row attack, not a device, which is what the block at the foot uses.
  */
-const inTheRegister = (id: string): void => {
-  const devices = doc.getMap<Y.Map<unknown>>("devices");
-  const rec = new Y.Map<unknown>();
-  devices.set(id, rec);
-  rec.set("id", id);
-  rec.set("firstSeen", 1);
-  rec.set("lastSeen", 1);
-};
+const grantedRow = async (id: string, epoch: number, key: CryptoKey) => ({
+  user_id: USER_ID,
+  device_id: id,
+  epoch,
+  wrapped: {
+    v: 1,
+    epk: "",
+    salt: "",
+    iv: "",
+    blob: "",
+    grant: await signGrant(key, { userId: USER_ID, deviceId: id }, epoch),
+  },
+});
 
 /** The phone: on the account, entitled to epoch 0, and about to be removed. */
 const phoneIsOnTheAccount = async () => {
@@ -228,9 +233,7 @@ const phoneIsOnTheAccount = async () => {
       public_key: await exportDevicePublicKey(myPair.publicKey),
     },
   ];
-  tables.device_wrapped_keys = [
-    { user_id: USER_ID, device_id: "phone", epoch: 0, wrapped: { v: 1 } },
-  ];
+  tables.device_wrapped_keys = [await grantedRow("phone", 0, dataKey)];
   doc.getMap<Y.Map<unknown>>("devices").set("phone", new Y.Map());
   (doc.getMap<Y.Map<unknown>>("devices").get("phone") as Y.Map<unknown>).set(
     "id",
@@ -795,13 +798,9 @@ describe("removing a device", () => {
       device_id: "laptop",
       public_key: await exportDevicePublicKey(laptopPair.publicKey),
     });
-    tables.device_wrapped_keys?.push({
-      user_id: USER_ID,
-      device_id: "laptop",
-      epoch: 0,
-      wrapped: { v: 1 },
-    });
-    inTheRegister("laptop");
+    tables.device_wrapped_keys?.push(
+      await grantedRow("laptop", 0, dataKey)
+    );
     const sync = await boot();
 
     await sync.removeDevice("phone");
@@ -967,19 +966,20 @@ describe("who the data key is handed to", () => {
     return pair;
   };
 
-  test("not to a device that only exists in the tables", async () => {
+  test("not to a device whose row proves nothing", async () => {
     // End to end through a connect, which is how this fires in practice: nothing
     // is asked of the person, because this path deliberately compares no
     // verification code, and nothing appears in the register, because it never
-    // writes there. So there is no prompt to refuse and no trace afterwards.
+    // writes there. So there was no prompt to refuse and no trace afterwards.
     await forgedRowsFor("intruder");
 
     await boot();
 
-    const granted = tables.device_wrapped_keys?.filter(
-      (r) => r.device_id === "intruder" && r.epoch === 0
-    );
-    expect(granted ?? []).toEqual([]);
+    expect(
+      tables.device_wrapped_keys?.filter(
+        (r) => r.device_id === "intruder" && r.epoch === 0
+      ) ?? []
+    ).toEqual([]);
   });
 
   test("not even after a rotation, which is when new rows are written anyway", async () => {
@@ -988,38 +988,77 @@ describe("who the data key is handed to", () => {
 
     await sync.removeDevice("phone");
 
-    const granted = tables.device_wrapped_keys?.find(
-      (r) => r.device_id === "intruder" && r.epoch === 1
-    );
-    expect(granted).toBeUndefined();
-    // And to be explicit about what would have been lost: the row that is absent
-    // is one this keypair could have opened.
+    expect(
+      tables.device_wrapped_keys?.find(
+        (r) => r.device_id === "intruder" && r.epoch === 1
+      )
+    ).toBeUndefined();
+    // Explicit about what is absent: a row this keypair could have opened.
     expect(intruder.privateKey).toBeTruthy();
   });
 
-  test("not to a device the register says was removed", async () => {
-    // Removal deletes both rows, so an id reused by someone who read
-    // device_keys before it went would otherwise look brand new.
-    await forgedRowsFor("phone-again");
-    const devices = doc.getMap<Y.Map<unknown>>("devices");
-    const rec = new Y.Map<unknown>();
-    devices.set("phone-again", rec);
-    rec.set("id", "phone-again");
-    rec.set("firstSeen", 1);
-    rec.set("removedAt", 2);
+  test("not on the strength of a grant lifted off another device", async () => {
+    // The version available to anyone who can read the table, which is anyone on
+    // the account. A grant names its device, so moving it proves nothing.
+    await forgedRowsFor("intruder");
+    const real = tables.device_wrapped_keys?.find(
+      (r) => r.device_id === "phone"
+    );
+    tables.device_wrapped_keys?.push({
+      user_id: USER_ID,
+      device_id: "intruder",
+      epoch: 0,
+      wrapped: (real as { wrapped: unknown }).wrapped,
+    });
 
-    await boot();
+    const sync = await boot();
+    await sync.removeDevice("phone");
 
     expect(
-      tables.device_wrapped_keys?.filter(
-        (r) => r.device_id === "phone-again" && r.epoch === 0
-      ) ?? []
-    ).toEqual([]);
+      tables.device_wrapped_keys?.find(
+        (r) => r.device_id === "intruder" && r.epoch === 1
+      )
+    ).toBeUndefined();
+  });
+
+  test("and a device linked before grants existed needs approving again", async () => {
+    // The migration, stated as behaviour rather than left to be discovered. An
+    // older row carries no grant, so the device stops being topped up. It keeps
+    // every epoch it already holds, so nothing it could read becomes unreadable.
+    tables.device_wrapped_keys = [
+      { user_id: USER_ID, device_id: "phone", epoch: 0, wrapped: { v: 1 } },
+    ];
+    const laptopPair = await generateDeviceKeyPair();
+    tables.device_keys?.push({
+      user_id: USER_ID,
+      device_id: "laptop",
+      public_key: await exportDevicePublicKey(laptopPair.publicKey),
+    });
+    tables.device_wrapped_keys.push({
+      user_id: USER_ID,
+      device_id: "laptop",
+      epoch: 0,
+      wrapped: { v: 1 },
+    });
+
+    const sync = await boot();
+    await sync.removeDevice("phone");
+
+    expect(
+      tables.device_wrapped_keys?.find(
+        (r) => r.device_id === "laptop" && r.epoch === 1
+      )
+    ).toBeUndefined();
+    // And the old row is still there, so it reads what it always could.
+    expect(
+      tables.device_wrapped_keys?.some(
+        (r) => r.device_id === "laptop" && r.epoch === 0
+      )
+    ).toBe(true);
   });
 
   // The positive case is "a device that stays gets the new key" above, whose
-  // fixture now registers the laptop as a real one would. That test and the two
-  // here are the same fixture with and without the register entry, which is the
-  // whole of what this check changes.
-
+  // fixture grants the laptop properly as a real one would. That test and these
+  // are the same fixture with and without a valid grant, which is the whole of
+  // what this rule changes.
 });

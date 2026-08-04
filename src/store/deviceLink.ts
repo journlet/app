@@ -17,7 +17,8 @@ import {
   exportDevicePublicKey,
   unwrapDataKeyForDevice,
   verificationCode,
-  wrapDataKeyForDevice,
+  verifyGrant,
+  wrapAndGrant,
 } from "../lib/deviceKeys";
 import type { DeviceBinding, DeviceWrappedKeyJson } from "../lib/deviceKeys";
 
@@ -93,31 +94,6 @@ export const publishDeviceKey = async (
 };
 
 /**
- * What this function is allowed to treat as evidence that a device belongs here.
- *
- * Passed in rather than read here, for the reason at the top of this file: the
- * register lives in the encrypted journal, and importing the journal store back
- * into this module would make a cycle.
- */
-export interface EntitlementEvidence {
-  /**
-   * Device ids the encrypted device register knows and has not marked removed.
-   *
-   * This is the load-bearing part. Writing to the register means writing to the
-   * journal, which means holding the data key, so a caller who only has the
-   * account cannot put an id in here.
-   */
-  registered: ReadonlySet<string>;
-  /**
-   * The one device being approved by hand in this same call, which is not in the
-   * register yet because only that device can register itself, on its first
-   * connect. A person just compared two verification codes and pressed approve,
-   * which is stronger evidence than the register, so it stands in for it once.
-   */
-  approvingNow?: string;
-}
-
-/**
  * Wrap the data key for every device that is entitled to it and has not been
  * given it at this epoch.
  *
@@ -125,31 +101,29 @@ export interface EntitlementEvidence {
  * keeper key, so there was nobody new to authenticate and no verification code to
  * compare. It has outgrown that: since approval-based linking it also tops up
  * devices that hold no keeper key, and it runs unattended on every connect. So
- * what counts as entitlement is now a security decision rather than bookkeeping.
+ * what counts as entitlement is a security decision rather than bookkeeping.
  *
- * Two independent things must agree before the data key is wrapped for anyone.
+ * Two things must hold before the data key is wrapped for anyone.
  *
- * A row in `device_wrapped_keys`, which removal and sign-out both delete. That
- * was the whole test until now, and on its own it is not one: RLS on that table
- * can only see `auth.uid()`, so any session on the account can insert a row for
- * any device id at any epoch, with anything at all in `wrapped` — the contents
- * are never read. An attacker holding only the mailbox could publish a public key
- * of their own, insert a junk row at an unused epoch, and wait for a real device
- * to connect and wrap the genuine key to them. No prompt, no code, and no trace,
- * since this path never touches the register.
+ * A row in `device_wrapped_keys`, which removal and sign-out both delete. That is
+ * necessary and it is not sufficient: RLS on that table can only see
+ * `auth.uid()`, so any session on the account can insert a row for any device id
+ * at any epoch, with anything at all in `wrapped`.
  *
- * And corroboration from `evidence`, which is the encrypted register. That is the
- * part an attacker with the account cannot forge, because writing it requires the
- * data key they are trying to obtain.
+ * And a grant on that row that verifies. That is the part account access cannot
+ * produce, because issuing one requires the data key for the epoch the row names,
+ * which is the thing an attacker is trying to obtain. See lib/deviceKeys.ts.
  *
- * This is an interim measure and is meant to be deleted. Inferring authorisation
- * from CRDT state is the pattern spec §6.1b warns about: the register is
- * legitimately inconsistent in windows, and a rule that reads it has to be right
- * in all of them. Here being wrong costs a delayed top-up rather than a lockout,
- * because a skipped device keeps every epoch it already holds, so the failure is
- * in the safe direction and self-heals on the next connect. The durable fix is a
- * grant tag on the row itself, which proves the writer held the data key, and
- * this check comes out when that lands.
+ * A device is entitled if any one of its rows carries a grant that verifies. Rows
+ * at epochs this device does not hold cannot be checked, so they are passed over
+ * rather than believed: entitlement unproven is entitlement refused, and the
+ * top-up happens on the next connect of a device that can check it. Wrong in the
+ * safe direction, and self-healing.
+ *
+ * Rows written before grants existed carry none and are therefore refused. A
+ * device in that state keeps every epoch it already holds, so nothing it can
+ * already read becomes unreadable; it stops receiving new epochs until it is
+ * approved once more.
  *
  * Its own device is skipped. This device already has the data key, and after a
  * sign-out its keypair is gone, so a row wrapped to itself could never be opened
@@ -161,11 +135,19 @@ export interface EntitlementEvidence {
  */
 export const shareDataKeyWithDevices = async (
   client: SupabaseClient,
-  dataKey: CryptoKey,
+  /**
+   * Every epoch this device holds, not just the one being handed out. Verifying a
+   * grant means holding the key for the epoch that grant names, and a device is
+   * usually proved by a row at an older epoch than the one it is owed.
+   */
+  dataKeys: ReadonlyMap<number, CryptoKey>,
   binding: DeviceBinding,
-  epoch: number,
-  evidence: EntitlementEvidence
+  epoch: number
 ): Promise<number> => {
+  const dataKey = dataKeys.get(epoch);
+  if (!dataKey)
+    throw new Error(`Cannot share epoch ${epoch}: this device does not hold it`);
+
   const { data: keys, error: keysError } = await client
     .from("device_keys")
     .select("device_id, public_key");
@@ -175,41 +157,48 @@ export const shareDataKeyWithDevices = async (
 
   const { data: held, error: heldError } = await client
     .from("device_wrapped_keys")
-    .select("device_id, epoch");
+    .select("device_id, epoch, wrapped");
   if (heldError)
     throw new Error(`Could not list shared keys: ${heldError.message}`);
 
-  const rows = (held ?? []) as { device_id: string; epoch: number | null }[];
-  /**
-   * Entitlement, and the reason this function no longer grants to anyone with a
-   * published public key.
-   *
-   * Until 3 August, a row in `device_keys` was treated as permission, and
-   * `publishDeviceKey` writes that row on every connect. So a removed device that
-   * still held a session would republish its key and the next device to launch
-   * would wrap the current key for it, with no approval and nothing shown to
-   * anyone — quietly undoing the removal. A device is entitled only if it already
-   * holds a wrapped key for some epoch, which removal deletes.
-   */
-  const entitled = new Set(rows.map((r) => r.device_id));
+  const rows = (held ?? []) as {
+    device_id: string;
+    epoch: number | null;
+    wrapped: DeviceWrappedKeyJson | null;
+  }[];
   const holds = new Set(rows.map((r) => `${r.device_id}@${r.epoch ?? 0}`));
 
-  /** The half of the test that the account alone cannot satisfy. */
-  const corroborated = (deviceId: string): boolean =>
-    deviceId === evidence.approvingNow || evidence.registered.has(deviceId);
+  const proven = new Set<string>();
+  for (const row of rows) {
+    if (proven.has(row.device_id)) continue;
+    const at = row.epoch ?? 0;
+    const key = dataKeys.get(at);
+    if (!key || !row.wrapped) continue;
+    if (
+      await verifyGrant(
+        key,
+        row.wrapped,
+        { userId: binding.userId, deviceId: row.device_id },
+        at
+      )
+    )
+      proven.add(row.device_id);
+  }
 
   let written = 0;
   for (const row of keys as { device_id: string; public_key: string }[]) {
     if (row.device_id === binding.deviceId) continue;
-    if (!entitled.has(row.device_id)) continue;
-    if (!corroborated(row.device_id)) continue;
+    if (!proven.has(row.device_id)) continue;
     if (holds.has(`${row.device_id}@${epoch}`)) continue;
     // Bound to the recipient, not to us. The recipient rebuilds this binding
-    // from its own ids and will refuse anything addressed elsewhere.
-    const wrapped = await wrapDataKeyForDevice(dataKey, row.public_key, {
-      userId: binding.userId,
-      deviceId: row.device_id,
-    });
+    // from its own ids and will refuse anything addressed elsewhere. The grant
+    // rides along, so the row this writes can prove itself next time.
+    const wrapped = await wrapAndGrant(
+      dataKey,
+      row.public_key,
+      { userId: binding.userId, deviceId: row.device_id },
+      epoch
+    );
     const { error } = await client.from("device_wrapped_keys").upsert(
       {
         user_id: binding.userId,
@@ -353,10 +342,12 @@ export const approveLinkRequest = async (
   binding: DeviceBinding,
   epoch: number
 ): Promise<void> => {
-  const wrapped = await wrapDataKeyForDevice(dataKey, request.publicKey, {
-    userId: binding.userId,
-    deviceId: request.deviceId,
-  });
+  const wrapped = await wrapAndGrant(
+    dataKey,
+    request.publicKey,
+    { userId: binding.userId, deviceId: request.deviceId },
+    epoch
+  );
   // Only the current epoch. A newly added device gets the key it needs to read
   // and write now; earlier epochs follow from the ordinary share loop on the next
   // connect, which is also what fills in a device that missed a rotation.

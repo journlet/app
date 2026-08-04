@@ -13,7 +13,6 @@ import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
 import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
 import {
-  listDevices,
   markDeviceRemoved,
   markThisDeviceSignedOut,
   thisClientLabel,
@@ -36,7 +35,7 @@ import {
   shareDataKeyWithDevices,
   surrenderDeviceKeys,
 } from "./deviceLink";
-import type { EntitlementEvidence, LinkRequest } from "./deviceLink";
+import type { LinkRequest } from "./deviceLink";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -879,27 +878,6 @@ const refreshLinkRequests = async (): Promise<void> => {
   }
 };
 
-/**
- * What this device is willing to vouch for when handing out the data key.
- *
- * The register, minus anything marked removed. Removal already deletes a
- * device's rows, so the mark is belt: it stops the id of a device you removed
- * being reused by someone who saw it in `device_keys` before it went.
- *
- * `signedOutAt` is deliberately not filtered. A device that signed out deleted
- * its own rows on the way, so it fails the first half of the test anyway, and
- * excluding it here would only add a window in which a device that has been let
- * back in is skipped before it has had a chance to clear its own mark.
- */
-const registerEvidence = (approvingNow?: string): EntitlementEvidence => ({
-  registered: new Set(
-    listDevices()
-      .filter((d) => !d.removedAt)
-      .map((d) => d.id)
-  ),
-  approvingNow,
-});
-
 /** Grant a request, after the person has compared the codes. */
 export const approveDevice = async (request: LinkRequest): Promise<void> => {
   const key = ring && currentDataKey(ring);
@@ -918,17 +896,18 @@ export const approveDevice = async (request: LinkRequest): Promise<void> => {
   // the newcomer entitled. Without this it could read only what was written since
   // the last rotation until some later connect happened to fill the gaps in,
   // which on a re-approved device means its own history missing for a while.
-  for (const [epoch, epochKey] of ring.dataKeys) {
+  //
+  // The row above is what proves the newcomer: it carries a grant at the current
+  // epoch, which this device can verify because it holds that epoch. So no
+  // exemption is needed here for a device that is too new to have registered
+  // itself. The approval is the evidence, and it is written down.
+  for (const epoch of ring.dataKeys.keys()) {
     if (epoch === ring.epoch) continue;
     await shareDataKeyWithDevices(
       supabase,
-      epochKey,
+      ring.dataKeys,
       deviceBinding(),
-      epoch,
-      // Named explicitly: it cannot be in the register yet, because only that
-      // device can register itself and it has not connected. The approval that
-      // just happened is what stands in for the register here.
-      registerEvidence(request.deviceId)
+      epoch
     );
   }
   pendingRequests = pendingRequests.filter(
@@ -985,16 +964,15 @@ export const removeDevice = async (deviceId: string): Promise<void> => {
   // still unmarked in the register at this point, since markDeviceRemoved is the
   // last step, so the row deletion is what excludes it here and the register mark
   // is what keeps its id from being reused later.
-  await shareDataKeyWithDevices(
-    supabase,
-    dataKey,
-    binding,
-    epoch,
-    registerEvidence()
-  );
-
+  // Built before the share, not after, because verifying another device's grant
+  // needs the key for the epoch that grant names and the share needs the new one
+  // to hand out. Building the map is not adopting it: the ring below is still
+  // the last thing to change, so the ordering guarantee is unaffected.
   const dataKeys = new Map(ring.dataKeys);
   dataKeys.set(epoch, dataKey);
+
+  await shareDataKeyWithDevices(supabase, dataKeys, binding, epoch);
+
   ring = { ...ring, dataKeys, epoch };
   await replaceKeyRing(ring);
 
@@ -1405,10 +1383,9 @@ const shareThisDevicesKeys = async (): Promise<void> => {
     if (key)
       await shareDataKeyWithDevices(
         supabase,
-        key,
+        ring.dataKeys,
         binding,
-        ring.epoch,
-        registerEvidence()
+        ring.epoch
       );
   } catch (e) {
     console.warn("[devices] key sharing deferred to the next launch", e);
