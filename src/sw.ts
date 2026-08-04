@@ -3,8 +3,13 @@
 // Tapping a reminder notification focuses the app — or opens it (spec
 // success criterion 6).
 
-import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
+import {
+  cleanupOutdatedCaches,
+  createHandlerBoundToURL,
+  precacheAndRoute,
+} from "workbox-precaching";
 import { clientsClaim } from "workbox-core";
+import { NavigationRoute, registerRoute } from "workbox-routing";
 
 declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Parameters<typeof precacheAndRoute>[0];
@@ -12,6 +17,21 @@ declare let self: ServiceWorkerGlobalScope & {
 
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
+
+// Serve every navigation from the precached shell.
+//
+// Precaching alone only answers URLs that are in the manifest. Workbox rewrites
+// a bare navigation to /index.html via directoryIndex, so "/" worked, but it
+// strips only utm_* and fbclid from the query string. The manifest shortcut
+// /?capture — the Android app-icon long-press that exists to make capture fast
+// — therefore missed the precache entirely and went to the network, which
+// offline means it failed. The entry point advertised as the quick one was the
+// one that needed a connection.
+//
+// Any deep path had the same problem. The dist/404.html copied for Pages' SPA
+// fallback is written after vite build, so it is not in the manifest either and
+// could never have covered this.
+registerRoute(new NavigationRoute(createHandlerBoundToURL("/index.html")));
 
 // Prompt-mode update flow: a new build installs and then *waits* rather than
 // taking over silently. It only activates when the page asks it to, via this
