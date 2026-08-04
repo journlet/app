@@ -65,11 +65,28 @@ export const thisDeviceId = (): string => {
 // devices a row is without building a fingerprint. No version numbers, no
 // screen dimensions, no user-agent string verbatim.
 //
-// Both halves are recorded, because one device can hold the journal more than
-// once: the installed app and a browser tab on the same Mac are separate
-// installs with separate storage, so they are separate rows, and "Mac" twice
-// would be unreadable. Named after the client, as WhatsApp's linked-device
-// list does: "Chrome (macOS)", "Installed app (iOS)".
+// Both halves are recorded, because one platform can hold the journal more than
+// once and "Mac" twice would be unreadable. Named after the client, as
+// WhatsApp's linked-device list does: "Chrome (macOS)", "Installed app (iOS)".
+//
+// Whether two clients share a row is a platform question, and the answer really
+// does differ: on macOS an installed PWA runs in the browser's profile and
+// shares its storage, so the installed app and Chrome are one container and one
+// row naming both. On iOS the home-screen app shares nothing with Safari — not
+// storage, not cookies, not even the service worker instance — so it is its own
+// container and its own row. The model lives in noteClient() below; this note
+// exists only so the top of the file does not imply a simpler rule than there
+// is.
+//
+// Corrected 4 August 2026, because this comment asserted the macOS case the
+// other way round: separate storage, separate rows. That was true of the design
+// that preceded the collected-clients refactor and false the moment the
+// refactor landed, and it sat sixty lines above the note that contradicted it.
+// Gary hit the consequence from the other end — the register showing one row
+// for macOS and separate rows for iOS reads as a bug until you know both
+// behaviours are real, and this file was the obvious place to check and told
+// him the wrong thing. A stale comment about storage boundaries is worse than
+// none, because the boundaries are the reason the register looks odd.
 const platformName = (): string => {
   const ua = navigator.userAgent;
   if (/iPhone/.test(ua)) return "iOS";
@@ -84,7 +101,9 @@ const platformName = (): string => {
 // Installed home-screen apps report standalone display mode; iOS Safari uses a
 // non-standard navigator flag instead. Worth distinguishing because on iOS the
 // installed app and the browser have separate storage, so they behave as two
-// devices and someone looking at this list needs to see why.
+// devices and someone looking at this list needs to see why. On desktop the
+// same distinction is only a label: the installed app shares the browser's
+// storage there, so it names a second way into one row rather than a second row.
 const isInstalled = (): boolean => {
   try {
     if (window.matchMedia("(display-mode: standalone)").matches) return true;
