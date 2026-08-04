@@ -93,13 +93,63 @@ export const publishDeviceKey = async (
 };
 
 /**
- * Wrap the data key for every published device that has not been given one.
+ * What this function is allowed to treat as evidence that a device belongs here.
  *
- * This is the migration in step 2, and it is deliberately invisible. Every
- * device it reaches already holds the keeper key, so no new trust is being
- * granted and there is nobody new to authenticate — which is why no verification
- * code is compared here. It runs on whichever device happens to launch first
- * after the update, and is a no-op on every launch after that.
+ * Passed in rather than read here, for the reason at the top of this file: the
+ * register lives in the encrypted journal, and importing the journal store back
+ * into this module would make a cycle.
+ */
+export interface EntitlementEvidence {
+  /**
+   * Device ids the encrypted device register knows and has not marked removed.
+   *
+   * This is the load-bearing part. Writing to the register means writing to the
+   * journal, which means holding the data key, so a caller who only has the
+   * account cannot put an id in here.
+   */
+  registered: ReadonlySet<string>;
+  /**
+   * The one device being approved by hand in this same call, which is not in the
+   * register yet because only that device can register itself, on its first
+   * connect. A person just compared two verification codes and pressed approve,
+   * which is stronger evidence than the register, so it stands in for it once.
+   */
+  approvingNow?: string;
+}
+
+/**
+ * Wrap the data key for every device that is entitled to it and has not been
+ * given it at this epoch.
+ *
+ * Originally the step 2 migration, where every device it reached already held the
+ * keeper key, so there was nobody new to authenticate and no verification code to
+ * compare. It has outgrown that: since approval-based linking it also tops up
+ * devices that hold no keeper key, and it runs unattended on every connect. So
+ * what counts as entitlement is now a security decision rather than bookkeeping.
+ *
+ * Two independent things must agree before the data key is wrapped for anyone.
+ *
+ * A row in `device_wrapped_keys`, which removal and sign-out both delete. That
+ * was the whole test until now, and on its own it is not one: RLS on that table
+ * can only see `auth.uid()`, so any session on the account can insert a row for
+ * any device id at any epoch, with anything at all in `wrapped` — the contents
+ * are never read. An attacker holding only the mailbox could publish a public key
+ * of their own, insert a junk row at an unused epoch, and wait for a real device
+ * to connect and wrap the genuine key to them. No prompt, no code, and no trace,
+ * since this path never touches the register.
+ *
+ * And corroboration from `evidence`, which is the encrypted register. That is the
+ * part an attacker with the account cannot forge, because writing it requires the
+ * data key they are trying to obtain.
+ *
+ * This is an interim measure and is meant to be deleted. Inferring authorisation
+ * from CRDT state is the pattern spec §6.1b warns about: the register is
+ * legitimately inconsistent in windows, and a rule that reads it has to be right
+ * in all of them. Here being wrong costs a delayed top-up rather than a lockout,
+ * because a skipped device keeps every epoch it already holds, so the failure is
+ * in the safe direction and self-heals on the next connect. The durable fix is a
+ * grant tag on the row itself, which proves the writer held the data key, and
+ * this check comes out when that lands.
  *
  * Its own device is skipped. This device already has the data key, and after a
  * sign-out its keypair is gone, so a row wrapped to itself could never be opened
@@ -113,7 +163,8 @@ export const shareDataKeyWithDevices = async (
   client: SupabaseClient,
   dataKey: CryptoKey,
   binding: DeviceBinding,
-  epoch: number
+  epoch: number,
+  evidence: EntitlementEvidence
 ): Promise<number> => {
   const { data: keys, error: keysError } = await client
     .from("device_keys")
@@ -143,10 +194,15 @@ export const shareDataKeyWithDevices = async (
   const entitled = new Set(rows.map((r) => r.device_id));
   const holds = new Set(rows.map((r) => `${r.device_id}@${r.epoch ?? 0}`));
 
+  /** The half of the test that the account alone cannot satisfy. */
+  const corroborated = (deviceId: string): boolean =>
+    deviceId === evidence.approvingNow || evidence.registered.has(deviceId);
+
   let written = 0;
   for (const row of keys as { device_id: string; public_key: string }[]) {
     if (row.device_id === binding.deviceId) continue;
     if (!entitled.has(row.device_id)) continue;
+    if (!corroborated(row.device_id)) continue;
     if (holds.has(`${row.device_id}@${epoch}`)) continue;
     // Bound to the recipient, not to us. The recipient rebuilds this binding
     // from its own ids and will refuse anything addressed elsewhere.

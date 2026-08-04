@@ -203,6 +203,21 @@ vi.mock("../src/lib/keystore", () => ({
   ensureDeviceKeyPair: async () => myPair,
 }));
 
+/**
+ * Put a device in the encrypted register, the way it would put itself there on
+ * its first connect. Needed because entitlement now requires the register to
+ * corroborate the tables, so a fixture that writes only the tables is describing
+ * the forged-row attack rather than a device.
+ */
+const inTheRegister = (id: string): void => {
+  const devices = doc.getMap<Y.Map<unknown>>("devices");
+  const rec = new Y.Map<unknown>();
+  devices.set(id, rec);
+  rec.set("id", id);
+  rec.set("firstSeen", 1);
+  rec.set("lastSeen", 1);
+};
+
 /** The phone: on the account, entitled to epoch 0, and about to be removed. */
 const phoneIsOnTheAccount = async () => {
   tables.device_keys = [
@@ -786,6 +801,7 @@ describe("removing a device", () => {
       epoch: 0,
       wrapped: { v: 1 },
     });
+    inTheRegister("laptop");
     const sync = await boot();
 
     await sync.removeDevice("phone");
@@ -926,4 +942,84 @@ describe("what the approving device is shown", () => {
     // Same array identity: nothing was reassigned, so no listener was notified.
     expect(sync.getLinkRequests()).toBe(held);
   });
+});
+
+describe("who the data key is handed to", () => {
+  /**
+   * Someone who has the mailbox and nothing else. They can sign in, so RLS lets
+   * them write both per-device tables: a public key they hold the private half
+   * of, and a wrapped row at an epoch nobody is using, with junk in it. Then they
+   * wait for a real device to connect.
+   */
+  const forgedRowsFor = async (id: string) => {
+    const pair = await generateDeviceKeyPair();
+    tables.device_keys?.push({
+      user_id: USER_ID,
+      device_id: id,
+      public_key: await exportDevicePublicKey(pair.publicKey),
+    });
+    tables.device_wrapped_keys?.push({
+      user_id: USER_ID,
+      device_id: id,
+      epoch: 9,
+      wrapped: { v: 1, note: "granted earlier" },
+    });
+    return pair;
+  };
+
+  test("not to a device that only exists in the tables", async () => {
+    // End to end through a connect, which is how this fires in practice: nothing
+    // is asked of the person, because this path deliberately compares no
+    // verification code, and nothing appears in the register, because it never
+    // writes there. So there is no prompt to refuse and no trace afterwards.
+    await forgedRowsFor("intruder");
+
+    await boot();
+
+    const granted = tables.device_wrapped_keys?.filter(
+      (r) => r.device_id === "intruder" && r.epoch === 0
+    );
+    expect(granted ?? []).toEqual([]);
+  });
+
+  test("not even after a rotation, which is when new rows are written anyway", async () => {
+    const intruder = await forgedRowsFor("intruder");
+    const sync = await boot();
+
+    await sync.removeDevice("phone");
+
+    const granted = tables.device_wrapped_keys?.find(
+      (r) => r.device_id === "intruder" && r.epoch === 1
+    );
+    expect(granted).toBeUndefined();
+    // And to be explicit about what would have been lost: the row that is absent
+    // is one this keypair could have opened.
+    expect(intruder.privateKey).toBeTruthy();
+  });
+
+  test("not to a device the register says was removed", async () => {
+    // Removal deletes both rows, so an id reused by someone who read
+    // device_keys before it went would otherwise look brand new.
+    await forgedRowsFor("phone-again");
+    const devices = doc.getMap<Y.Map<unknown>>("devices");
+    const rec = new Y.Map<unknown>();
+    devices.set("phone-again", rec);
+    rec.set("id", "phone-again");
+    rec.set("firstSeen", 1);
+    rec.set("removedAt", 2);
+
+    await boot();
+
+    expect(
+      tables.device_wrapped_keys?.filter(
+        (r) => r.device_id === "phone-again" && r.epoch === 0
+      ) ?? []
+    ).toEqual([]);
+  });
+
+  // The positive case is "a device that stays gets the new key" above, whose
+  // fixture now registers the laptop as a real one would. That test and the two
+  // here are the same fixture with and without the register entry, which is the
+  // whole of what this check changes.
+
 });

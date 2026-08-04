@@ -16,6 +16,7 @@ import {
   wrapDataKeyForDevice,
 } from "../src/lib/deviceKeys";
 import type { DeviceWrappedKeyJson } from "../src/lib/deviceKeys";
+import type { EntitlementEvidence } from "../src/store/deviceLink";
 
 const USER = "11111111-1111-4111-8111-111111111111";
 
@@ -148,6 +149,19 @@ const alreadyGranted = (id: string, epoch = 0) => {
   });
 };
 
+/**
+ * Evidence saying every device that has published a key is also in the encrypted
+ * register, which is the ordinary state of an account.
+ *
+ * The tests about wrapping should not also have to describe the register, so they
+ * pass this. What the register is there to stop has its own block at the foot.
+ */
+const allRegistered = (): EntitlementEvidence => ({
+  registered: new Set(
+    (tables.device_keys ?? []).map((r) => r.device_id as string)
+  ),
+});
+
 beforeEach(async () => {
   writes = [];
   tables = {};
@@ -240,7 +254,7 @@ describe("sharing the data key", () => {
     const laptop = await otherDevice("laptop");
     alreadyGranted(laptop.id, 0);
 
-    const written = await shareDataKeyWithDevices(client, dataKey, binding, 1);
+    const written = await shareDataKeyWithDevices(client, dataKey, binding, 1, allRegistered());
 
     expect(written).toBe(1);
     const row = tables.device_wrapped_keys?.find((r) => r.epoch === 1);
@@ -264,7 +278,13 @@ describe("sharing the data key", () => {
     expect(stranger.id).toBe("removed-phone");
 
     expect(
-      await shareDataKeyWithDevices(client, await generateDataKey(), binding, 1)
+      await shareDataKeyWithDevices(
+        client,
+        await generateDataKey(),
+        binding,
+        1,
+        allRegistered()
+      )
     ).toBe(0);
     expect(tables.device_wrapped_keys ?? []).toEqual([]);
   });
@@ -277,7 +297,7 @@ describe("sharing the data key", () => {
     alreadyGranted(binding.deviceId, 0);
     writes = [];
 
-    expect(await shareDataKeyWithDevices(client, dataKey, binding, 1)).toBe(0);
+    expect(await shareDataKeyWithDevices(client, dataKey, binding, 1, allRegistered())).toBe(0);
     expect(writes).toEqual([]);
   });
 
@@ -286,7 +306,13 @@ describe("sharing the data key", () => {
     alreadyGranted(laptop.id, 1);
 
     expect(
-      await shareDataKeyWithDevices(client, await generateDataKey(), binding, 1)
+      await shareDataKeyWithDevices(
+        client,
+        await generateDataKey(),
+        binding,
+        1,
+        allRegistered()
+      )
     ).toBe(0);
   });
 
@@ -300,7 +326,13 @@ describe("sharing the data key", () => {
     alreadyGranted("desktop", 0);
 
     expect(
-      await shareDataKeyWithDevices(client, await generateDataKey(), binding, 1)
+      await shareDataKeyWithDevices(
+        client,
+        await generateDataKey(),
+        binding,
+        1,
+        allRegistered()
+      )
     ).toBe(2);
     expect(
       tables.device_wrapped_keys
@@ -316,7 +348,7 @@ describe("sharing the data key", () => {
     await otherDevice("tablet");
     alreadyGranted("laptop", 0);
     alreadyGranted("tablet", 0);
-    await shareDataKeyWithDevices(client, dataKey, binding, 1);
+    await shareDataKeyWithDevices(client, dataKey, binding, 1, allRegistered());
 
     const tabletRow = tables.device_wrapped_keys?.find(
       (r) => r.device_id === "tablet" && r.epoch === 1
@@ -330,9 +362,79 @@ describe("sharing the data key", () => {
     ).rejects.toThrow();
   });
 
+  test("refuses a device the register has never heard of", async () => {
+    // The attack this check exists for. RLS on device_wrapped_keys can only see
+    // auth.uid(), so anyone with the account can insert a row for any device id
+    // at any epoch with anything in it. Note the fixture uses alreadyGranted,
+    // whose payload is { v: 1, note: "granted earlier" } — junk that is never
+    // read. Before the register was consulted, that junk row plus a public key
+    // of your own was the whole of what it took to be handed the real data key.
+    const intruder = await otherDevice("intruder");
+    alreadyGranted(intruder.id, 9);
+
+    const written = await shareDataKeyWithDevices(
+      client,
+      await generateDataKey(),
+      binding,
+      1,
+      { registered: new Set() }
+    );
+
+    expect(written).toBe(0);
+    expect(
+      tables.device_wrapped_keys?.filter((r) => r.epoch === 1) ?? []
+    ).toEqual([]);
+  });
+
+  test("allows the one device being approved by hand right now", async () => {
+    // A device cannot be in the register before it has connected, because only
+    // it can write its own row, and it cannot connect until it has a key. So
+    // approval names it for this call. What stands in for the register is a
+    // person having compared two verification codes.
+    const laptop = await otherDevice("laptop");
+    alreadyGranted(laptop.id, 0);
+
+    const written = await shareDataKeyWithDevices(
+      client,
+      await generateDataKey(),
+      binding,
+      1,
+      { registered: new Set(), approvingNow: laptop.id }
+    );
+
+    expect(written).toBe(1);
+  });
+
+  test("naming one device does not let any other in", async () => {
+    const laptop = await otherDevice("laptop");
+    alreadyGranted(laptop.id, 0);
+    const intruder = await otherDevice("intruder");
+    alreadyGranted(intruder.id, 9);
+
+    await shareDataKeyWithDevices(
+      client,
+      await generateDataKey(),
+      binding,
+      1,
+      { registered: new Set(), approvingNow: laptop.id }
+    );
+
+    expect(
+      tables.device_wrapped_keys
+        ?.filter((r) => r.epoch === 1)
+        .map((r) => r.device_id)
+    ).toEqual(["laptop"]);
+  });
+
   test("does nothing on an account with no other devices", async () => {
     expect(
-      await shareDataKeyWithDevices(client, await generateDataKey(), binding, 0)
+      await shareDataKeyWithDevices(
+        client,
+        await generateDataKey(),
+        binding,
+        0,
+        allRegistered()
+      )
     ).toBe(0);
   });
 });
@@ -735,7 +837,13 @@ describe("when the server refuses", () => {
     alreadyGranted("laptop", 0);
     failing.add("device_wrapped_keys:upsert");
     await expect(
-      shareDataKeyWithDevices(client, await generateDataKey(), binding, 1)
+      shareDataKeyWithDevices(
+        client,
+        await generateDataKey(),
+        binding,
+        1,
+        allRegistered()
+      )
     ).rejects.toThrow(/laptop/);
   });
 

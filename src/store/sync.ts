@@ -13,6 +13,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
 import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
 import {
+  listDevices,
   markDeviceRemoved,
   markThisDeviceSignedOut,
   thisClientLabel,
@@ -35,7 +36,7 @@ import {
   shareDataKeyWithDevices,
   surrenderDeviceKeys,
 } from "./deviceLink";
-import type { LinkRequest } from "./deviceLink";
+import type { EntitlementEvidence, LinkRequest } from "./deviceLink";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -878,6 +879,27 @@ const refreshLinkRequests = async (): Promise<void> => {
   }
 };
 
+/**
+ * What this device is willing to vouch for when handing out the data key.
+ *
+ * The register, minus anything marked removed. Removal already deletes a
+ * device's rows, so the mark is belt: it stops the id of a device you removed
+ * being reused by someone who saw it in `device_keys` before it went.
+ *
+ * `signedOutAt` is deliberately not filtered. A device that signed out deleted
+ * its own rows on the way, so it fails the first half of the test anyway, and
+ * excluding it here would only add a window in which a device that has been let
+ * back in is skipped before it has had a chance to clear its own mark.
+ */
+const registerEvidence = (approvingNow?: string): EntitlementEvidence => ({
+  registered: new Set(
+    listDevices()
+      .filter((d) => !d.removedAt)
+      .map((d) => d.id)
+  ),
+  approvingNow,
+});
+
 /** Grant a request, after the person has compared the codes. */
 export const approveDevice = async (request: LinkRequest): Promise<void> => {
   const key = ring && currentDataKey(ring);
@@ -898,7 +920,16 @@ export const approveDevice = async (request: LinkRequest): Promise<void> => {
   // which on a re-approved device means its own history missing for a while.
   for (const [epoch, epochKey] of ring.dataKeys) {
     if (epoch === ring.epoch) continue;
-    await shareDataKeyWithDevices(supabase, epochKey, deviceBinding(), epoch);
+    await shareDataKeyWithDevices(
+      supabase,
+      epochKey,
+      deviceBinding(),
+      epoch,
+      // Named explicitly: it cannot be in the register yet, because only that
+      // device can register itself and it has not connected. The approval that
+      // just happened is what stands in for the register here.
+      registerEvidence(request.deviceId)
+    );
   }
   pendingRequests = pendingRequests.filter(
     (r) => r.deviceId !== request.deviceId
@@ -950,8 +981,17 @@ export const removeDevice = async (deviceId: string): Promise<void> => {
   await publishEpochKey(supabase, binding, epoch, wrappedToJson(wrapped));
 
   // The removed device is not among these: revokeDevice took away both its rows,
-  // so it is no longer entitled and the share loop passes over it.
-  await shareDataKeyWithDevices(supabase, dataKey, binding, epoch);
+  // so it is no longer entitled and the share loop passes over it. Note it is
+  // still unmarked in the register at this point, since markDeviceRemoved is the
+  // last step, so the row deletion is what excludes it here and the register mark
+  // is what keeps its id from being reused later.
+  await shareDataKeyWithDevices(
+    supabase,
+    dataKey,
+    binding,
+    epoch,
+    registerEvidence()
+  );
 
   const dataKeys = new Map(ring.dataKeys);
   dataKeys.set(epoch, dataKey);
@@ -1363,7 +1403,13 @@ const shareThisDevicesKeys = async (): Promise<void> => {
     await publishDeviceKey(supabase, binding);
     const key = currentDataKey(ring);
     if (key)
-      await shareDataKeyWithDevices(supabase, key, binding, ring.epoch);
+      await shareDataKeyWithDevices(
+        supabase,
+        key,
+        binding,
+        ring.epoch,
+        registerEvidence()
+      );
   } catch (e) {
     console.warn("[devices] key sharing deferred to the next launch", e);
   }
