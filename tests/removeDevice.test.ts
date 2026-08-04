@@ -30,6 +30,7 @@ import {
   signGrant,
   unwrapDataKeyForDevice,
   verificationCode,
+  wrapAndGrant,
   wrapDataKeyForDevice,
 } from "../src/lib/deviceKeys";
 import type { DeviceWrappedKeyJson } from "../src/lib/deviceKeys";
@@ -369,10 +370,12 @@ describe("the removed device's own view", () => {
         user_id: USER_ID,
         device_id: "phone",
         epoch: 0,
-        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
-          userId: USER_ID,
-          deviceId: "phone",
-        }),
+        wrapped: await wrapAndGrant(
+          dataKey,
+          phone.publicKey,
+          { userId: USER_ID, deviceId: "phone" },
+          0
+        ),
       },
     ];
     tables.journal_keys = [
@@ -402,10 +405,12 @@ describe("the removed device's own view", () => {
         user_id: USER_ID,
         device_id: "phone",
         epoch: 0,
-        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
-          userId: USER_ID,
-          deviceId: "phone",
-        }),
+        wrapped: await wrapAndGrant(
+          dataKey,
+          phone.publicKey,
+          { userId: USER_ID, deviceId: "phone" },
+          0
+        ),
       },
     ];
     tables.journal_keys = [
@@ -440,10 +445,12 @@ describe("the removed device's own view", () => {
         user_id: USER_ID,
         device_id: "phone",
         epoch: 0,
-        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
-          userId: USER_ID,
-          deviceId: "phone",
-        }),
+        wrapped: await wrapAndGrant(
+          dataKey,
+          phone.publicKey,
+          { userId: USER_ID, deviceId: "phone" },
+          0
+        ),
       },
     ];
     phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
@@ -505,10 +512,12 @@ describe("the removed device's own view", () => {
         user_id: USER_ID,
         device_id: "phone",
         epoch: 0,
-        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
-          userId: USER_ID,
-          deviceId: "phone",
-        }),
+        wrapped: await wrapAndGrant(
+          dataKey,
+          phone.publicKey,
+          { userId: USER_ID, deviceId: "phone" },
+          0
+        ),
       },
     ];
     phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
@@ -563,10 +572,12 @@ describe("the removed device's own view", () => {
         user_id: USER_ID,
         device_id: "phone",
         epoch: 1,
-        wrapped: await wrapDataKeyForDevice(rotated, phone.publicKey, {
-          userId: USER_ID,
-          deviceId: "phone",
-        }),
+        wrapped: await wrapAndGrant(
+          rotated,
+          phone.publicKey,
+          { userId: USER_ID, deviceId: "phone" },
+          1
+        ),
       },
     ];
 
@@ -616,10 +627,12 @@ describe("the removed device's own view", () => {
       user_id: USER_ID,
       device_id: "phone",
       epoch: 1,
-      wrapped: await wrapDataKeyForDevice(rotated, phone.publicKey, {
-        userId: USER_ID,
-        deviceId: "phone",
-      }),
+      wrapped: await wrapAndGrant(
+        rotated,
+        phone.publicKey,
+        { userId: USER_ID, deviceId: "phone" },
+        1
+      ),
     });
     await sync.retryConnect();
 
@@ -683,10 +696,12 @@ describe("the removed device's own view", () => {
         user_id: USER_ID,
         device_id: "phone",
         epoch: 1,
-        wrapped: await wrapDataKeyForDevice(rotated, phone.publicKey, {
-          userId: USER_ID,
-          deviceId: "phone",
-        }),
+        wrapped: await wrapAndGrant(
+          rotated,
+          phone.publicKey,
+          { userId: USER_ID, deviceId: "phone" },
+          1
+        ),
       },
     ];
     // Approval removes the request as its last step.
@@ -1061,4 +1076,128 @@ describe("who the data key is handed to", () => {
   // fixture grants the laptop properly as a real one would. That test and these
   // are the same fixture with and without a valid grant, which is the whole of
   // what this rule changes.
+});
+
+describe("telling apart behind, unproven and removed", () => {
+  /**
+   * The phone as it stands after the grant change and before it is approved
+   * again: a real blob it can open, at an epoch it holds, with no grant on it.
+   * That is every device linked before grants existed.
+   */
+  const bootAsUnprovenPhone = async () => {
+    localStorage.setItem("journlet-device-id", "phone");
+    myPair = phone.pair;
+    tables.device_keys = [
+      { user_id: USER_ID, device_id: "phone", public_key: phone.publicKey },
+      { user_id: USER_ID, device_id: DEVICE_ID, public_key: "mac" },
+    ];
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER_ID,
+        device_id: "phone",
+        epoch: 0,
+        wrapped: await wrapDataKeyForDevice(dataKey, phone.publicKey, {
+          userId: USER_ID,
+          deviceId: "phone",
+        }),
+      },
+    ];
+    // Rotated away from the epoch it holds, so it cannot read the newest rows.
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
+    doc.getArray("entries").push(["written before the rotation"]);
+    phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
+    return start();
+  };
+
+  test("an unproven device asks to be approved rather than told to wait", async () => {
+    // The whole point. Before this it was told "open another device and it will
+    // catch up", which cannot work: no other device will top up a row that proves
+    // nothing. Telling someone to wait for something that cannot arrive is what
+    // got the lost-device feature deleted twice in July, and the natural response
+    // to it is to sign out and back in, which wipes unsynced writes.
+    const sync = await bootAsUnprovenPhone();
+
+    await vi.waitFor(() => expect(sync.getLinkStage()).toBe("waiting"));
+    expect(sync.getSyncError()).toMatch(/needs approving again/i);
+    expect(sync.getSyncError()).not.toMatch(/it will catch up/i);
+  });
+
+  test("and it publishes a code, so there is something to compare", async () => {
+    // A device with entries never reaches the unlock screen, so without this the
+    // person is asked to compare two codes and shown one.
+    const sync = await bootAsUnprovenPhone();
+
+    await vi.waitFor(() => expect(sync.getLinkCode()).toBeTruthy());
+    expect(tables.device_link_requests?.[0]?.device_id).toBe("phone");
+  });
+
+  test("and it is not reported as removed", async () => {
+    const sync = await bootAsUnprovenPhone();
+
+    await vi.waitFor(() => expect(sync.getLinkStage()).toBe("waiting"));
+    expect(sync.wasRemoved()).toBe(false);
+  });
+
+  test("and it keeps the journal it already had", async () => {
+    // Nothing it could read becomes unreadable. Hiding the journal here would be
+    // indistinguishable from losing it.
+    await bootAsUnprovenPhone();
+
+    expect(doc.getArray("entries").length).toBe(1);
+  });
+
+  test("a device with a proven row is still told it is merely behind", async () => {
+    // The regression guard: the new arm must not swallow the old one.
+    localStorage.setItem("journlet-device-id", "phone");
+    myPair = phone.pair;
+    tables.device_keys = [
+      { user_id: USER_ID, device_id: "phone", public_key: phone.publicKey },
+    ];
+    // Openable as well as granted. grantedRow leaves the blob empty, and an
+    // unopenable row is deleted as useless, which would make this look removed.
+    tables.device_wrapped_keys = [
+      {
+        user_id: USER_ID,
+        device_id: "phone",
+        epoch: 0,
+        wrapped: await wrapAndGrant(
+          dataKey,
+          phone.publicKey,
+          { userId: USER_ID, deviceId: "phone" },
+          0
+        ),
+      },
+    ];
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
+    doc.getArray("entries").push(["something"]);
+    phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
+    const sync = await start();
+
+    await vi.waitFor(() =>
+      expect(sync.getSyncError()).toMatch(/it will catch up/i)
+    );
+    expect(sync.getLinkStage()).toBeNull();
+  });
+
+  test("and no rows at all still means removed", async () => {
+    // The third arm, unchanged.
+    localStorage.setItem("journlet-device-id", "phone");
+    myPair = phone.pair;
+    tables.device_wrapped_keys = [];
+    tables.device_keys = [
+      { user_id: USER_ID, device_id: DEVICE_ID, public_key: "mac" },
+    ];
+    tables.journal_keys = [
+      { user_id: USER_ID, epoch: 1, wrapped_key: { v: 1, iv: "", blob: "" } },
+    ];
+    doc.getArray("entries").push(["written before it was removed"]);
+    phoneRing = { dataKeys: new Map([[0, dataKey]]), epoch: 0 };
+    const sync = await start();
+
+    await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+  });
 });

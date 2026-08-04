@@ -1,16 +1,24 @@
-// Everything the approving device shows about devices asking to be added: the
-// prompt, what happened after answering it, and the reminder that something is
-// still waiting.
+// Everything shown in the page flow about devices being added: the prompt on the
+// approving device, what happened after answering it, the reminder that something
+// is still waiting, and — the one that is about *this* device rather than another
+// — the code to compare while this device waits to be approved.
 //
-// One component so App.tsx gains a single line, and so the three states cannot
-// drift out of step with each other.
+// That last one exists because a device can need approving while still holding a
+// readable journal. A brand new device shows its code on the unlock screen, but a
+// device that already has entries never reaches that screen, and asking someone to
+// compare two codes while showing them only one is not a comparison.
+//
+// One component so App.tsx gains a single line, and so the states cannot drift out
+// of step with each other.
 
 import { useEffect, useState } from "react";
 import { LINK_REQUEST_TTL_MS } from "../store/deviceLink";
 import type { LinkRequest } from "../store/deviceLink";
 import {
   approveDevice,
+  getLinkCode,
   getLinkRequests,
+  getLinkStage,
   onSyncStatus,
   rejectDevice,
 } from "../store/sync";
@@ -55,8 +63,18 @@ export default function LinkPrompts() {
   const [requests, setRequests] = useState<LinkRequest[]>(getLinkRequests());
   const [deferred, setDeferred] = useState<string[]>([]);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [ownCode, setOwnCode] = useState<string | null>(getLinkCode());
+  const [ownStage, setOwnStage] = useState(getLinkStage());
 
-  useEffect(() => onSyncStatus(() => setRequests(getLinkRequests())), []);
+  useEffect(
+    () =>
+      onSyncStatus(() => {
+        setRequests(getLinkRequests());
+        setOwnCode(getLinkCode());
+        setOwnStage(getLinkStage());
+      }),
+    []
+  );
 
   useEffect(() => {
     if (outcome?.kind !== "added") return;
@@ -154,6 +172,22 @@ export default function LinkPrompts() {
           </button>
         </div>
       ))}
+
+      {/* This device, waiting on someone else. Only when it has a journal to show
+          behind this: a device with nothing gets the unlock screen instead, which
+          says the same thing with more room. */}
+      {ownStage === "waiting" && ownCode && (
+        <div style={line}>
+          <span style={{ flex: 1 }}>
+            This device is waiting to be approved. Open Journlet on a device you
+            already use, and check the code it shows you matches{" "}
+            <strong style={{ fontVariantNumeric: "tabular-nums" }}>
+              {ownCode}
+            </strong>
+            . What you can already read here is unaffected.
+          </span>
+        </div>
+      )}
     </>
   );
 }

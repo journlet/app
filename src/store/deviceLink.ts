@@ -532,18 +532,52 @@ export const hasPendingRequest = async (
  * Counted rather than inferred from the epoch, because being behind and being
  * removed look identical from the epoch alone.
  */
-export const isStillEntitled = async (
+/**
+ * Why this device cannot read the newest rows. Three answers, not two.
+ *
+ * It used to be two: a row exists, so you are behind, or it does not, so you were
+ * removed. Grants add a third that sits between them, and it is the one that
+ * matters for the migration. A device whose only rows predate grants has not been
+ * removed and is not going to catch up either, because no other device will top it
+ * up on the strength of a row that proves nothing.
+ *
+ * Told apart from "behind" because the remedies are opposite. Behind is fixed by
+ * opening another device and waiting. Unproven is fixed by approving this one
+ * again, and telling someone to wait for something that cannot arrive is the
+ * failure that got the lost-device feature deleted twice in July.
+ */
+export type DeviceStanding = "removed" | "unproven" | "behind";
+
+export const checkStanding = async (
   client: SupabaseClient,
-  binding: DeviceBinding
-): Promise<boolean> => {
+  binding: DeviceBinding,
+  dataKeys: ReadonlyMap<number, CryptoKey>
+): Promise<DeviceStanding> => {
   const { data, error } = await client
     .from("device_wrapped_keys")
-    .select("epoch")
+    .select("epoch, wrapped")
     .eq("device_id", binding.deviceId);
-  // An error is not evidence of removal. Reporting a device removed because the
-  // network hiccuped would hide a working journal behind a re-approval screen.
+  // An error is not evidence of anything. Callers treat a throw as "behind",
+  // which is the recoverable assumption: reporting removal because the network
+  // hiccuped would hide a working journal behind a re-approval screen.
   if (error) throw new Error(`Could not check this device: ${error.message}`);
-  return (data ?? []).length > 0;
+
+  const rows = (data ?? []) as {
+    epoch: number | null;
+    wrapped: DeviceWrappedKeyJson | null;
+  }[];
+  if (rows.length === 0) return "removed";
+
+  for (const row of rows) {
+    const at = row.epoch ?? 0;
+    const key = dataKeys.get(at);
+    if (!key || !row.wrapped) continue;
+    if (await verifyGrant(key, row.wrapped, binding, at)) return "behind";
+  }
+  // Rows, but none this device can hold up as proof. Either they predate grants,
+  // or they are at epochs this device no longer holds. Both need approving again,
+  // and neither is removal.
+  return "unproven";
 };
 
 /**
