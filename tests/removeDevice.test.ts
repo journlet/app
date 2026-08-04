@@ -76,6 +76,11 @@ vi.mock("@supabase/supabase-js", () => ({
         return {
           select: () => ({
             maybeSingle: async () => ({
+              ...(journalsDelayMs
+                ? await new Promise((r) => setTimeout(r, journalsDelayMs)).then(
+                    () => ({})
+                  )
+                : {}),
               data: {
                 wrapped_key: {
                   v: accountWrapped.v,
@@ -249,6 +254,9 @@ const phoneIsOnTheAccount = async () => {
  * the shared fixtures after its test ends, and the next test measures a connect
  * driven by the previous one. The same isolation problem bit connectRetry.test.ts.
  */
+/** Holds the journals read open, so a test can interleave with a live connect. */
+let journalsDelayMs = 0;
+
 let current: typeof import("../src/store/sync") | null = null;
 
 const start = async () => {
@@ -278,6 +286,7 @@ beforeEach(async () => {
   phoneRing = null;
   rowHandler = null;
   authCallback = null;
+  journalsDelayMs = 0;
   localStorage.clear();
   localStorage.setItem("journlet-device-id", DEVICE_ID);
   myPair = await generateDeviceKeyPair();
@@ -1199,5 +1208,46 @@ describe("telling apart behind, unproven and removed", () => {
     const sync = await start();
 
     await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
+  });
+});
+
+describe("a connect that outlives its keyring", () => {
+  test("abandons quietly instead of throwing", async () => {
+    // The bug that broke the build on 4 August. ensureJournalKeys guards `ring`
+    // once at the top, and TypeScript keeps that narrowing across all dozen of its
+    // awaits, so every read below compiled. wipeThisDevice() sets ring to null, so
+    // a sign-out or an account deletion lands in the middle of one of those awaits
+    // and the next read throws TypeError: Cannot read properties of null.
+    //
+    // It surfaced as a flaky test rather than as a bug report, because the only
+    // thing that reliably opens the window is a device still polling after its
+    // test ended. It is a real path in the app all the same: signing out while the
+    // app is connecting does exactly this.
+    journalsDelayMs = 30;
+    const sync = await start();
+
+    // Inside the journals read by now, with the keyring about to go.
+    await sync.signOutAndWipe();
+    await new Promise((r) => setTimeout(r, 80));
+
+    // The real assertion is that nothing threw: an unhandled rejection fails the
+    // run on its own, which is what this test is here to trip. Alongside it, the
+    // abandoned connect must not have reported success. Not asserted as
+    // "signed-out" because this harness's signOut mock does not fire the auth
+    // state change that would set it; real Supabase does.
+    expect(sync.getSyncStatus()).not.toBe("synced");
+  });
+
+  test("and does not write a keyring back for the account just left", async () => {
+    // The other half. Abandoning has to mean not publishing: a connect that
+    // finished after the wipe would restore a keyring for an account the person
+    // has signed out of, and the next launch would open their journal.
+    journalsDelayMs = 30;
+    const sync = await start();
+
+    await sync.signOutAndWipe();
+    await new Promise((r) => setTimeout(r, 80));
+
+    expect(storedRing).toBeNull();
   });
 });
