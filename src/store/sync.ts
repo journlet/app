@@ -402,6 +402,21 @@ let keeperUsable = false;
 // Returns true when this device's keys are good for the remote journal
 const ensureJournalKeys = async (): Promise<boolean> => {
   if (!supabase || !ring) return false;
+  /**
+   * The keyring this connect belongs to, held rather than re-read.
+   *
+   * `ring` is module state and wipeThisDevice() sets it to null, so a sign-out or
+   * an account deletion can take it away from under this function at any of its
+   * dozen awaits. TypeScript keeps the narrowing from the guard above across every
+   * one of them, so `ring.epoch` compiles and then throws at runtime. It did: an
+   * unhandled TypeError in CI, from a test whose device was still polling after
+   * teardown, which is the same shape as a user signing out while this runs.
+   *
+   * Reads below use `held`, which cannot become null. The publish checks that
+   * `ring` is still this ring, because a connect whose keyring has been wiped must
+   * abandon rather than write one back for an account that has just been left.
+   */
+  const held = ring;
   const { data, error } = await supabase
     .from("journals")
     .select("wrapped_key")
@@ -419,7 +434,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     // journal existed. If the row has gone missing under it, creating a new one
     // would abandon the old ciphertext and look like total data loss, so it says
     // so instead.
-    if (!ring.keeperKey || !ring.wrapped) {
+    if (!held.keeperKey || !held.wrapped) {
       setError(
         "This account's journal record is missing. This device was linked by another device, so it cannot recreate it."
       );
@@ -428,7 +443,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     }
     const { error: insErr } = await supabase.from("journals").insert({
       user_id: session?.user.id,
-      wrapped_key: wrappedToJson(ring.wrapped),
+      wrapped_key: wrappedToJson(held.wrapped),
     });
     if (insErr) {
       setError(`Server error saving your journal key: ${insErr.message}`);
@@ -448,10 +463,10 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   let epoch0Wrapped: WrappedDataKey | undefined;
   let keeperKey0: CryptoKey | undefined;
 
-  if (ring.keeperKey) {
+  if (held.keeperKey) {
     try {
       epoch0Wrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
-      keeperKey0 = await unwrapDataKey(epoch0Wrapped, ring.keeperKey);
+      keeperKey0 = await unwrapDataKey(epoch0Wrapped, held.keeperKey);
       keeperUsable = true;
     } catch {
       // This device holds a keeper key that will not open the account's journal.
@@ -476,7 +491,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
    * keys by another device, so those are genuine.
    */
   const keys = new Map(
-    ring.keeperKey && !keeperUsable ? [] : ring.dataKeys
+    held.keeperKey && !keeperUsable ? [] : held.dataKeys
   );
   if (keeperKey0) keys.set(0, keeperKey0);
 
@@ -496,7 +511,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   }
 
   // Later epochs under the keeper key, for the device holding the recovery code.
-  if (keeperUsable && ring.keeperKey) {
+  if (keeperUsable && held.keeperKey) {
     try {
       for (const [epoch, wrappedJson] of await readKeeperWrappedEpochs(supabase)) {
         if (keys.has(epoch)) continue;
@@ -504,7 +519,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
           epoch,
           await unwrapDataKey(
             wrappedFromJson(wrappedJson as WrappedKeyJson),
-            ring.keeperKey
+            held.keeperKey
           )
         );
       }
@@ -520,7 +535,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     return false;
   }
 
-  let epoch = ring.epoch;
+  let epoch = held.epoch;
   try {
     epoch = await readCurrentEpoch(supabase);
   } catch (e) {
@@ -530,19 +545,27 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     console.warn("[devices] could not read the current epoch", e);
   }
 
-  ring = {
-    ...ring,
+  // Still ours? If not, a sign-out or a deletion happened while we were reading
+  // and this connect is stale. Publishing here would restore a keyring for an
+  // account the user has just left.
+  if (ring !== held) return false;
+  // Built as a const and then published, so everything after this point reads a
+  // value that cannot be nulled underneath it. The awaits below are the same
+  // hazard as the ones above, one line later.
+  const next: KeyRing = {
+    ...held,
     // The keeper key goes if it did not work, deliberately. It never opened this
     // journal, and keeping it would leave something that looks like a recovery
     // code on a device that has no business displaying one.
-    keeperKey: keeperUsable ? ring.keeperKey : undefined,
+    keeperKey: keeperUsable ? held.keeperKey : undefined,
     wrapped: epoch0Wrapped,
     dataKeys: keys,
     epoch,
   };
-  await replaceKeyRing(ring);
+  ring = next;
+  await replaceKeyRing(next);
 
-  if (!currentDataKey(ring)) {
+  if (!currentDataKey(next)) {
     // Behind, or removed. Only the server can say which, and the two need
     // opposite screens. No dropConnection here: this branch is only reached from
     // inside a connect, which by definition has not set connectedUserId yet, so
@@ -551,7 +574,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     const standing = await checkStanding(
       supabase,
       deviceBinding(),
-      ring.dataKeys
+      next.dataKeys
     ).catch(() => "behind" as const);
 
     if (standing === "removed") {
