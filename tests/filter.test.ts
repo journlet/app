@@ -11,7 +11,6 @@ import {
   applyFilter,
   entryVisible,
   filterBadge,
-  filterDays,
   loadFilter,
   loadFilterOpen,
   saveFilter,
@@ -135,25 +134,6 @@ describe("applyFilter", () => {
   test("a visible parent does not drag a hidden child back into view", () => {
     const rows = [entry("parent"), entry("child", { parentId: "parent", state: "done" })];
     expect(applyFilter(rows, "open").map((e) => e.id)).toEqual(["parent"]);
-  });
-});
-
-describe("filterDays", () => {
-  const days = {
-    "2026-08-04": [entry("a"), entry("b", { state: "done" })],
-    "2026-08": [entry("c", { state: "done" })],
-  };
-
-  test("filters every page and keeps pages that empty out", () => {
-    const out = filterDays(days, "open");
-    expect(out["2026-08-04"].map((e) => e.id)).toEqual(["a"]);
-    // the page stays, empty — a section still has to say it is hiding things
-    expect(out["2026-08"]).toEqual([]);
-    expect(Object.keys(out)).toEqual(Object.keys(days));
-  });
-
-  test("'all' hands back the same snapshot", () => {
-    expect(filterDays(days, "all")).toBe(days);
   });
 });
 

@@ -900,7 +900,7 @@ const INK = "var(--ink)";
 const INK_SOFT = "var(--ink-soft)";
 const LINE = "var(--line)";
 
-const ST: Record<string, CSSProperties> = {
+const ST = {
   head: {
     display: "flex",
     alignItems: "baseline",
@@ -1004,4 +1004,4 @@ const ST: Record<string, CSSProperties> = {
     padding: "8px 10px",
   },
   error: { fontSize: 13, color: "var(--danger)" },
-};
+} as const satisfies Record<string, CSSProperties>;

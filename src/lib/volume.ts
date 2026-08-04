@@ -1,5 +1,5 @@
 // Volume axis for the journal (remediation item 15; see
-// docs/volume-schema-design.md). A "volume" is a notebook: entries and
+// spec/volume-schema-design.md). A "volume" is a notebook: entries and
 // recurrences belong to the active volume, and the server update log is
 // partitioned by volume so opening a new volume never re-encrypts an old one.
 //

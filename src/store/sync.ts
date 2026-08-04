@@ -736,9 +736,6 @@ export const askToBeAddedBack = async (): Promise<void> => {
   await askToBeAdded();
 };
 
-/** True on a device whose request was answered with "do not add it", or lapsed. */
-export const wasDeclined = (): boolean => linkStage === "declined";
-
 /**
  * Has the request this device is waiting on been answered with a refusal?
  *
@@ -838,13 +835,41 @@ const withdrawLinkRequest = async (): Promise<void> => {
  * that cannot open the journal itself has nothing to grant, and showing it an
  * approval prompt would be offering a decision it cannot carry out.
  */
+const sameRequest = (a: LinkRequest, b: LinkRequest | undefined): boolean =>
+  b !== undefined &&
+  a.deviceId === b.deviceId &&
+  a.code === b.code &&
+  a.requestedAt === b.requestedAt;
+
 const refreshLinkRequests = async (): Promise<void> => {
   if (!supabase || !session || !connectedUserId || !ring) return;
   try {
     const next = await listLinkRequests(supabase, deviceBinding());
+    /**
+     * Compare the code and the timestamp, not just the device id.
+     *
+     * publishLinkRequest upserts on (user_id, device_id) and rewrites
+     * public_key and requested_at in place, so a re-ask changes what the row
+     * says while leaving the id and the list length alone. Comparing ids only
+     * meant this returned early and kept the old row.
+     *
+     * The consequence landed on the one screen that cannot afford it. A device
+     * that signs out and wipes destroys its keypair but keeps its device id in
+     * localStorage, so asking again produces a new public key and therefore a
+     * new verification code. The approving device went on showing the old one.
+     * Two screens, two different codes, and the correct response to that is to
+     * refuse — so the mechanism taught the person to distrust a legitimate
+     * device. Nothing leaked, because approveDevice wraps to the key it is
+     * holding, but a comparison people learn to see fail is a comparison they
+     * stop reading.
+     *
+     * requestedAt is in here for its own reason: it resets on every ask, and
+     * LinkPrompts counts down from the cached copy, so a renewed request was
+     * displaying "expires in 0 minutes".
+     */
     const unchanged =
       next.length === pendingRequests.length &&
-      next.every((r, i) => r.deviceId === pendingRequests[i]?.deviceId);
+      next.every((r, i) => sameRequest(r, pendingRequests[i]));
     if (unchanged) return;
     pendingRequests = next;
     notify();
@@ -1422,7 +1447,7 @@ export const startSync = (): void => {
     session = s;
     if (!s) {
       teardown();
-      // handleRevoked() signs out locally, so this fires straight after it.
+      // signOutAndWipe() signs out locally, so this fires straight after it.
       // "Not signed in" would be true and useless — it would read as a
       // spontaneous logout with no cause given, which is precisely the
       // confusion this whole change exists to remove.
@@ -1484,14 +1509,6 @@ export const verifyEmailCode = async (
   if (error) throw new Error(error.message);
 };
 
-// Routine sign-out of THIS device only. The default scope is global, which
-// would silently sign out every other device too — see signOutOtherDevices()
-// for the deliberate "others" case.
-export const signOut = async (): Promise<void> => {
-  if (!supabase) return;
-  teardown();
-  await supabase.auth.signOut({ scope: "local" });
-};
 
 // Explicit sign-out (item 11): tear down sync, sign out of Supabase, and
 // erase this device's journal and keys. Unsynced local changes and the

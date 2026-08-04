@@ -21,12 +21,17 @@
 --
 -- What was already verified off-project on 4 Aug, so you are not checking it
 -- again: schema.sql applied twice to a scratch Postgres 16 (idempotent, clean
--- both times), all 34 checks below green against it, and each check confirmed
+-- both times), all 34 checks below green against it (35 now, see the note below), and each check confirmed
 -- to fail when the thing it checks is deliberately broken (publishing
 -- journals, dropping a policy, granting anon execute, unpinning search_path,
 -- disabling RLS, recreating the old index) and to recover when undone.
 -- delete_account() was also run end to end there: it cleared all six tables
 -- and the auth user, and raised "Not signed in" with no claim set.
+--
+-- Note, 4 Aug 2026: the journals UPDATE policy was dropped, so check 1's
+-- expected count for that table went from 3 to 2. Re-run schema.sql on the live
+-- project before this file, or check 1 will fail on the old policy still being
+-- there. That is the failure doing its job.
 --
 -- So the function body is not in question. The single thing (a) can still
 -- tell you is whether the function's OWNER may delete from auth.users on this
@@ -34,8 +39,12 @@
 -- thing no amount of off-project testing can answer.
 --
 -- Expected policy counts, and why each is what it is:
---   journals              3  select, insert, update. No delete: the row goes
---                            with the account via delete_account().
+--   journals              2  select, insert only. No update and no delete.
+--                            wrapped_key holds the epoch 0 data key, so an
+--                            update destroys access to everything written
+--                            before the first rotation; the client only ever
+--                            selects and inserts here. The row goes with the
+--                            account via delete_account().
 --   journal_updates       2  select, insert only. Append-only by design, which
 --                            is what stops a client rewriting history
 --                            (remediation item 23).
@@ -52,7 +61,7 @@ with tables(t) as (
          ('device_wrapped_keys'), ('journal_keys'), ('device_link_requests')
 ),
 expected_policies(t, n) as (
-  values ('journals', 3), ('journal_updates', 2), ('device_keys', 4),
+  values ('journals', 2), ('journal_updates', 2), ('device_keys', 4),
          ('device_wrapped_keys', 4), ('journal_keys', 2),
          ('device_link_requests', 4)
 ),
@@ -91,6 +100,16 @@ checks as (
          '0',
          (select count(*)::text from pg_policies
           where schemaname = 'public' and tablename = 'journal_keys'
+            and cmd in ('UPDATE', 'DELETE'))
+
+  -- (c) journals is write-once too, for the same reason: wrapped_key is the
+  -- epoch 0 data key. Stated as its own check rather than left to the policy
+  -- count above, so that re-adding an UPDATE policy fails by name.
+  union all
+  select 4, '(c) journals has no update/delete policy',
+         '0',
+         (select count(*)::text from pg_policies
+          where schemaname = 'public' and tablename = 'journals'
             and cmd in ('UPDATE', 'DELETE'))
 
   -- (c) delete_account exists and is hardened

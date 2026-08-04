@@ -5,25 +5,38 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+# No workflow-level permissions block, deliberately. One at this level applies
+# to every job, which handed the build job — the job that executes ~486
+# packages of dependency code — a token scoped to pages: write plus the ability
+# to mint an OIDC identity token. For an app whose whole security model is
+# "the JavaScript we serve you is honest", write access to the Pages
+# deployment is the thing most worth stealing. So the capability lives only in
+# the job that has no third-party code in it.
+permissions: {}
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # A deployment is not a cancellable build. Two quick pushes cancelling an
+  # in-flight deploy-pages step is worse than queueing behind it.
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # --ignore-scripts because no package in the tree defines preinstall,
+      # install or postinstall today. That is worth making enforced rather than
+      # incidental: a dependency that starts wanting one should fail here and be
+      # looked at, not run quietly.
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v5
@@ -33,6 +46,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

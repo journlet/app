@@ -36,9 +36,3 @@ export const splitLinks = (text: string): LinkSegment[] => {
   if (last < text.length) out.push({ kind: "text", value: text.slice(last) });
   return out;
 };
-
-/** True if the text contains at least one linkable URL. */
-export const hasLink = (text: string): boolean => {
-  URL_RE.lastIndex = 0;
-  return URL_RE.test(text);
-};

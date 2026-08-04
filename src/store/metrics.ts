@@ -1,5 +1,5 @@
 // Lightweight, non-user-facing instrumentation for sizing the volume-close
-// nudge (remediation item 15; see docs/volume-schema-design.md). We do not yet
+// nudge (remediation item 15; see spec/volume-schema-design.md). We do not yet
 // know the threshold at which a journal is "full" — these numbers, gathered as
 // a real journal grows, are what we will set it from. Pure measurement: it is
 // logged to the console and exposed on `window.__journletMetrics` for

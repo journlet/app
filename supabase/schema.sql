@@ -20,16 +20,24 @@ create policy "select own journal" on public.journals
 drop policy if exists "insert own journal" on public.journals;
 create policy "insert own journal" on public.journals
   for insert with check (auth.uid() = user_id);
+-- No update policy, and no delete policy. journals.wrapped_key is the data key
+-- for epoch 0, which is where an account that has never rotated keeps
+-- everything. Overwriting it destroys access to that stretch of the journal
+-- irrecoverably, and nothing in the client ever wanted to: the only statements
+-- against this table are two selects and one insert. journal_keys is already
+-- write-once for exactly this reason (see below); this makes the table holding
+-- epoch 0 match the rule rather than sit outside it.
+--
+-- Re-running this file on a project created before 4 Aug 2026 drops the old
+-- policy, which is the point.
 drop policy if exists "update own journal" on public.journals;
-create policy "update own journal" on public.journals
-  for update using (auth.uid() = user_id);
 
 -- Append-only log of encrypted CRDT updates (base64 text payloads).
 -- `volume` partitions the log into notebooks (remediation item 15): entries and
 -- recurrences belong to a volume, so opening a new volume never re-encrypts an
 -- old one. All current data is volume 'v1' (the default keeps existing rows and
 -- the local IndexedDB doc name unchanged). Collections/habits will later use a
--- permanent 'shared' volume; see docs/volume-schema-design.md.
+-- permanent 'shared' volume; see spec/volume-schema-design.md.
 create table if not exists public.journal_updates (
   id bigint generated always as identity primary key,
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,

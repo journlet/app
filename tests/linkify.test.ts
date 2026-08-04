@@ -1,7 +1,7 @@
 // URL segmentation for entry details (src/lib/linkify.ts).
 
 import { describe, expect, test } from "vitest";
-import { hasLink, splitLinks } from "../src/lib/linkify";
+import { splitLinks } from "../src/lib/linkify";
 
 describe("splitLinks", () => {
   test("plain text yields a single text segment", () => {
@@ -33,10 +33,5 @@ describe("splitLinks", () => {
     const url = segs.find((s) => s.kind === "url");
     expect(url?.value).toBe("https://example.com");
     expect(segs[segs.length - 1]).toEqual({ kind: "text", value: ")." });
-  });
-
-  test("hasLink detects presence of a url", () => {
-    expect(hasLink("no link here")).toBe(false);
-    expect(hasLink("go to https://a.com")).toBe(true);
   });
 });
