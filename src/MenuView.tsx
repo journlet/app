@@ -3,7 +3,7 @@
 // plus the future home for preferences (item 12). Kept deliberately lean:
 // a notebook has no settings, so every row here earns its place.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { SyncStatus } from "./store/sync";
 import { countUpdates } from "./store/sync";
@@ -46,6 +46,9 @@ interface Props {
   onOpenSearch: () => void;
   onOpenSync: () => void;
   onExport: () => void;
+  onBackup: () => void;
+  /** Returns what to tell the user, whether it worked or not. */
+  onRestore: (file: File) => Promise<string>;
 }
 
 export default function MenuView({
@@ -59,7 +62,14 @@ export default function MenuView({
   onOpenSearch,
   onOpenSync,
   onExport,
+  onBackup,
+  onRestore,
 }: Props) {
+  // What the last restore said. Held here rather than in a toast because the
+  // answer is the point of the action: "added 412 entries" and "that file is not
+  // a Journlet backup" are both things to read rather than glance at.
+  const [restoreNote, setRestoreNote] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [perm, setPerm] = useState<NotificationPermission>(
     notificationPermission()
   );
@@ -191,18 +201,69 @@ export default function MenuView({
       </section>
 
       <section style={ST.group}>
-        <div style={ST.groupLabel}>Export</div>
+        <div style={ST.groupLabel}>Export and backup</div>
         <div style={ST.row}>
           <div style={ST.rowText}>
             <div style={ST.rowLabel}>Export journal</div>
             <div style={ST.rowDesc}>
               Download the whole journal as a Markdown file, in purist notation.
-              Runs on this device — nothing leaves unencrypted.
+              For reading and keeping, not for restoring: it leaves out timestamps,
+              signifiers, migration history, repeats and reminders, and Journlet
+              cannot read it back in. Use a backup below for that.
             </div>
           </div>
           <div style={ST.rowBtn}>
             <button className="miniBtn" onClick={onExport}>
               export journal
+            </button>
+          </div>
+        </div>
+        <div style={ST.row}>
+          <div style={ST.rowText}>
+            <div style={ST.rowLabel}>Back up journal</div>
+            <div style={ST.rowDesc}>
+              Download a backup file that Journlet can restore from, holding
+              everything the export leaves out. The file is not encrypted, so keep
+              it somewhere you would keep the journal itself.
+            </div>
+          </div>
+          <div style={ST.rowBtn}>
+            <button className="miniBtn" onClick={onBackup}>
+              back up journal
+            </button>
+          </div>
+        </div>
+        <div style={ST.row}>
+          <div style={ST.rowText}>
+            <div style={ST.rowLabel}>Restore from a backup</div>
+            <div style={ST.rowDesc}>
+              Adds anything the backup holds that this journal is missing. It never
+              removes or overwrites: entries written since the backup was taken stay
+              exactly as they are, so restoring twice does nothing the second time.
+            </div>
+            {restoreNote && <div style={ST.rowNote}>{restoreNote}</div>}
+          </div>
+          <div style={ST.rowBtn}>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".journlet"
+              style={{ display: "none" }}
+              onChange={(ev) => {
+                const file = ev.target.files?.[0];
+                // Cleared so choosing the same file twice fires again, which is
+                // what someone retrying after an error will do.
+                ev.target.value = "";
+                if (!file) return;
+                setRestoreNote("Reading…");
+                void onRestore(file).then(setRestoreNote);
+              }}
+            />
+            <button
+              className="miniBtn"
+              onClick={() => fileRef.current?.click()}
+            >
+              choose a backup file
             </button>
           </div>
         </div>
@@ -377,6 +438,13 @@ const ST: Record<string, CSSProperties> = {
     fontSize: 11.5,
     lineHeight: "16px",
     color: INK_SOFT,
+    paddingBottom: 4,
+  },
+  /** What the last restore said. Full ink, because it is an answer to a question
+   *  the person just asked, not supporting detail. */
+  rowNote: {
+    fontSize: 12,
+    lineHeight: "16px",
     paddingBottom: 4,
   },
   empty: {

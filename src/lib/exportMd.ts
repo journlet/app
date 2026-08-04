@@ -1,7 +1,11 @@
 // Client-side Markdown export (spec §11 Q3, resolved 20 July 2026).
-// E2EE means backup must be client-driven; this renders the whole journal
-// in purist Ryder Carroll notation. Weekly download = belt-and-braces
-// backup against the free tier's lack of server backups (spec §8).
+//
+// A rendering of the journal in purist Ryder Carroll notation, for reading and
+// keeping. Not a backup, though this comment used to call it one: it writes type,
+// state, text, details, threads, id and parentId, and drops createdAt,
+// signifiers, migration chains, repeats, reminders and habit marks. Nothing can
+// read it back in either. lib/snapshot.ts is the backup, and the Menu says which
+// is which.
 
 import { SCOPES, keyScope, pageLabel } from "./dates";
 import type { Scope } from "./dates";
