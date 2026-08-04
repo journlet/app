@@ -14,7 +14,13 @@ import IndexView from "./IndexView";
 import CollectionView from "./CollectionView";
 import SyncView from "./SyncView";
 import MenuView from "./MenuView";
+import { download } from "./lib/download";
 import { buildMarkdown } from "./lib/exportMd";
+import {
+  restoreSnapshot,
+  snapshotBytes,
+  snapshotFilename,
+} from "./lib/snapshot";
 import { useInstallState, markCaptured } from "./lib/install";
 import {
   applyTheme,
@@ -1347,12 +1353,39 @@ export default function App() {
             onOpenSync={() => setView("sync")}
             onExport={() => {
               const md = buildMarkdown(days, collections, habits);
-              const blob = new Blob([md], { type: "text/markdown" });
-              const a = document.createElement("a");
-              a.href = URL.createObjectURL(blob);
-              a.download = `journlet-export-${todayKey()}.md`;
-              a.click();
-              URL.revokeObjectURL(a.href);
+              download(
+                new Blob([md], { type: "text/markdown" }),
+                `journlet-export-${todayKey()}.md`
+              );
+            }}
+            onBackup={() => {
+              download(
+                // Copied into a fresh array because Yjs may hand back a view over
+                // a larger buffer, and Blob would then write the whole thing.
+                new Blob([new Uint8Array(snapshotBytes())], {
+                  type: "application/octet-stream",
+                }),
+                snapshotFilename(todayKey())
+              );
+            }}
+            onRestore={async (file) => {
+              try {
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                const { before, after } = restoreSnapshot(bytes);
+                const added = after - before;
+                if (added === 0)
+                  return "That backup held nothing this journal was missing.";
+                return `Restored ${added} ${
+                  added === 1 ? "entry" : "entries"
+                } from that backup.`;
+              } catch (e) {
+                // Shown rather than swallowed: the person chose a file and is
+                // owed an answer about that file. NotASnapshotError already reads
+                // as a sentence; anything else is unexpected and says so.
+                return e instanceof Error
+                  ? e.message
+                  : "That file could not be read.";
+              }
             }}
           />
         )}
