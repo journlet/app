@@ -3,11 +3,18 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Gate the merge, not just the deploy. Without this, lint, tests and typecheck
+  # ran only after a merge, as part of the deploy: main went red, Pages kept
+  # serving the previous artifact, and the signal arrived from a failed run rather
+  # than a blocked merge. That is not hypothetical: it happened on 4 August, and
+  # the fix for it sat behind a broken main for as long as it took to notice.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # No workflow-level permissions block, deliberately. One at this level applies
-# to every job, which handed the build job — the job that executes ~486
-# packages of dependency code — a token scoped to pages: write plus the ability
+# to every job, which handed the build job, the job that executes ~486
+# packages of dependency code, a token scoped to pages: write plus the ability
 # to mint an OIDC identity token. For an app whose whole security model is
 # "the JavaScript we serve you is honest", write access to the Pages
 # deployment is the thing most worth stealing. So the capability lives only in
@@ -45,6 +52,9 @@ jobs:
 
   deploy:
     needs: build
+    # Never on a pull request. The build above is what a PR wants; deploying one
+    # would publish unmerged work to the live site.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       pages: write
