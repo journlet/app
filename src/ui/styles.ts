@@ -9,7 +9,12 @@ const INK_SOFT = "var(--ink-soft)";
 const PAPER = "var(--paper)";
 const LINE = "var(--line)";
 
-export const S: Record<string, CSSProperties> = {
+// `satisfies` rather than a `Record<string, CSSProperties>` annotation. With the
+// annotation, S.sheetGropuLabel compiled cleanly and yielded undefined at
+// runtime: an unstyled element, no error, across sixty-odd keys. This still
+// checks every value is a valid CSSProperties, and now a typo is a build
+// failure. Zero behaviour change; every existing usage already resolves.
+export const S = {
   page: {
     height: "100%",
     display: "flex",
@@ -511,4 +516,4 @@ export const S: Record<string, CSSProperties> = {
     fontFamily: "inherit",
     marginBottom: 10,
   },
-};
+} as const satisfies Record<string, CSSProperties>;
