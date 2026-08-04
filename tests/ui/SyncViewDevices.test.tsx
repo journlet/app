@@ -106,7 +106,7 @@ describe("getting back in after the other devices were signed out", () => {
     fireEvent.change(screen.getByLabelText(/Email address/i), {
       target: { value: "gary@example.com" },
     });
-    fireEvent.click(screen.getByText(/Send sign-in link/i));
+    fireEvent.click(screen.getByText(/Email me a sign-in code/i));
   };
 
   test("says which address the code went to", async () => {

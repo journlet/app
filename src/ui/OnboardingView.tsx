@@ -33,7 +33,7 @@ export default function OnboardingView({ children }: OnboardingViewProps) {
       </p>
       <p style={S.onboardLede}>
         That needs an account, so sign in with your email to begin. There is no
-        password: you will get a link and a six-digit code, and either will do.
+        password: we email you a six-digit code, and you type it in here.
       </p>
       {/* Deliberately said before the email field rather than after it: someone
           setting up a second device needs to know the first one has a part to

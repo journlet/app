@@ -1,4 +1,4 @@
-// Sync screen: magic-link sign in, sync status, journal key save/entry,
+// Sync screen: emailed-code sign in, sync status, journal key save/entry,
 // sign out. Every action plainly labelled (spec §4.1 no-guessing rule).
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -82,7 +82,7 @@ const STATUS_LABEL: Record<SyncStatus, string> = {
 export default function SyncView() {
   const [status, setStatus] = useState<SyncStatus>(getSyncStatus());
   const [email, setEmail] = useState("");
-  const [linkSent, setLinkSent] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [signOutOpen, setSignOutOpen] = useState(false);
   // Acknowledgement that unsynced entries will be lost. Only asked for when
@@ -120,12 +120,12 @@ export default function SyncView() {
     }).then(setQrUrl);
   }, [keyCode]);
 
-  const sendLink = async () => {
+  const sendCode = async () => {
     setError(null);
     setBusy(true);
     try {
       await signIn(email.trim());
-      setLinkSent(true);
+      setCodeSent(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       setError(
@@ -383,13 +383,18 @@ export default function SyncView() {
               device links itself.
             </p>
           )}
-          {linkSent ? (
+          {codeSent ? (
             <>
+              {/* One instruction, not two. The email held a link as well
+                  until 4 August 2026, so this had to explain which of the two
+                  to use and when — and the branch it described was itself the
+                  bug, since tapping the link in the home-screen app signs you
+                  in inside the default browser instead. The email now carries
+                  the code alone, so there is one thing to do and it works the
+                  same everywhere. */}
               <p style={ST.p}>
-                Check the email sent to <strong>{email.trim()}</strong>. In a
-                normal browser, tapping the link signs you in. In the
-                home-screen app, type the 6-digit code from the same email
-                here instead:
+                We have emailed a 6-digit code to{" "}
+                <strong>{email.trim()}</strong>. Type it in here to sign in:
               </p>
               <div style={ST.row}>
                 <input
@@ -429,13 +434,13 @@ export default function SyncView() {
                   a lost device drops every surviving device into this flow at
                   the same time. */}
               <div style={{ ...ST.row, marginTop: 8 }}>
-                <button className="miniBtn" disabled={busy} onClick={sendLink}>
+                <button className="miniBtn" disabled={busy} onClick={sendCode}>
                   send a new code
                 </button>
                 <button
                   className="miniBtn"
                   onClick={() => {
-                    setLinkSent(false);
+                    setCodeSent(false);
                     setOtpCode("");
                     setError(null);
                   }}
@@ -452,15 +457,15 @@ export default function SyncView() {
                 value={email}
                 placeholder="you@example.com"
                 onChange={(ev) => setEmail(ev.target.value)}
-                onKeyDown={(ev) => ev.key === "Enter" && sendLink()}
+                onKeyDown={(ev) => ev.key === "Enter" && sendCode()}
                 aria-label="Email address"
               />
               <button
                 className="addBtn"
                 disabled={busy || !email.includes("@")}
-                onClick={sendLink}
+                onClick={sendCode}
               >
-                Send sign-in link
+                Email me a sign-in code
               </button>
             </div>
           )}

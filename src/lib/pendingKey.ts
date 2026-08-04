@@ -2,22 +2,27 @@
 //
 // The other device shows a link like https://app.journlet.com/#jk=J1-…; the
 // phone camera opens it here. The fragment never reaches any server. We stash
-// the key locally — it must survive the magic-link redirect — and apply it
-// once signed in (see store/sync.ts connect()).
+// the key locally and apply it once signed in (see store/sync.ts connect()).
 //
 // The stashed value is the master keeper key in plaintext, the credential that
 // unwraps the data key and therefore the whole journal, so it carries a hard
 // expiry. sessionStorage would be the obvious home for something this
-// short-lived, but the magic link opens in a new tab, which is a fresh
-// sessionStorage container, and that would break the very flow this exists
-// for. So: localStorage with a timestamp, swept on launch and enforced on
-// read. Without the expiry, a scan that never completes sign-in — common,
-// since the user scans and then has to go and find the email — leaves the key
-// sitting on disk indefinitely.
+// short-lived, and localStorage is still the right choice, but the reason
+// changed on 4 August 2026 and is worth restating rather than leaving a stale
+// one in place. It used to be that the magic link opened a new tab with a
+// fresh sessionStorage container. There is no link in the email any more, so
+// that particular tab switch is gone. What remains is the gap between scanning
+// and signing in: the user leaves for their email client and comes back, and
+// iOS is free to discard a backgrounded tab under memory pressure, which would
+// empty sessionStorage and break the very flow this exists for. So:
+// localStorage with a timestamp, swept on launch and enforced on read. Without
+// the expiry, a scan that never completes sign-in — common, since the user
+// scans and then has to go and find the code — leaves the key sitting on disk
+// indefinitely.
 
 const PENDING_KEY = "journlet-pending-journal-key";
 
-/** Generous enough for a slow magic-link round trip, short enough to matter. */
+/** Generous enough to go and fetch the emailed code, short enough to matter. */
 export const PENDING_TTL_MS = 30 * 60 * 1000;
 
 interface PendingKeyRecord {
@@ -75,7 +80,7 @@ export const pendingJournalKey = (): string | null => {
  * data key has to be read from the server before anything can be unwrapped. So
  * a device that has been signed out — including one locked out by a lost-device
  * report — can scan first and sign in second, which is the natural order when
- * the key is on a screen in front of you and the email is not.
+ * the key is on a screen in front of you and the code is not.
  */
 export const stashKey = (code: string): void => {
   try {

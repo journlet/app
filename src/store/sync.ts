@@ -1452,18 +1452,25 @@ export const startSync = (): void => {
   });
 };
 
+// Ask Supabase to email a sign-in code. Despite the name, this starts sign-in
+// rather than completing it: the session is created by verifyEmailCode() below.
+//
+// No `emailRedirectTo` (removed 4 August 2026). It only ever populated the link
+// in the email, and both templates now send the code alone — so the option was
+// configuring a link that no longer exists, while implying the redirect path
+// was still live. The templates are the enforcement point: a link cannot be
+// tapped into the wrong storage container if the email does not contain one.
 export const signIn = async (email: string): Promise<void> => {
   if (!supabase) throw new Error("Sync is not configured");
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: { emailRedirectTo: window.location.origin },
-  });
+  const { error } = await supabase.auth.signInWithOtp({ email });
   if (error) throw new Error(error.message);
 };
 
 // Sign in by typing the 6-digit code from the email — the only way to get
 // a session INSIDE an iOS home-screen app, since email links always open
-// in the default browser (whose storage is a different container).
+// in the default browser (whose storage is a different container). `type:
+// "email"` covers a first-time signup confirmation as well as a returning
+// sign-in, so there is one path for both.
 export const verifyEmailCode = async (
   email: string,
   code: string
