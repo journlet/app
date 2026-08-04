@@ -140,6 +140,80 @@ describe("getting back in after the other devices were signed out", () => {
     expect(signIn).toHaveBeenCalledTimes(2);
     expect(screen.getByLabelText(/Sign-in code/i)).toBeTruthy();
   });
+
+  // Reported by Gary: his wife tried to sign in with the journal key. The two
+  // credentials arrive minutes apart and both go into a text box, and the
+  // journal key is the one she had just been made to save, so it is the one in
+  // her head. Naming was never the problem; saying nothing at the moment of the
+  // mistake was.
+  test("names the journal key when it is typed into the sign-in box", async () => {
+    render(<SyncView />);
+    requestCode();
+    const box = await screen.findByLabelText(/Sign-in code/i);
+
+    fireEvent.change(box, { target: { value: "J1-ABCD-EFGH-JKMN" } });
+
+    expect(screen.getByText(/That is your journal key/i)).toBeTruthy();
+    // Not sent. The server would answer "invalid", which names neither what was
+    // typed nor where the right thing is.
+    expect(
+      (screen.getByText(/Sign in with code/i) as HTMLButtonElement).disabled
+    ).toBe(true);
+  });
+
+  test("says nothing while a real code is being typed", async () => {
+    // The correction must not flash at everyone entering a code normally, so
+    // this pins the quiet case as firmly as the loud one.
+    render(<SyncView />);
+    requestCode();
+    const box = await screen.findByLabelText(/Sign-in code/i);
+
+    fireEvent.change(box, { target: { value: "123456" } });
+
+    expect(screen.queryByText(/That is your journal key/i)).toBeNull();
+    expect(
+      (screen.getByText(/Sign in with code/i) as HTMLButtonElement).disabled
+    ).toBe(false);
+  });
+});
+
+describe("the same mix-up from the other side", () => {
+  // A device that is signed in but cannot open the journal. Here the box wants
+  // the journal key, and the thing most recently typed was the sign-in code.
+  beforeEach(() => {
+    status = "needs-key";
+    signedIn = true;
+  });
+
+  test("names the sign-in code when it is typed into the journal key box", () => {
+    render(<SyncView />);
+
+    fireEvent.change(screen.getByLabelText(/Journal key/i), {
+      target: { value: "123456" },
+    });
+
+    expect(screen.getByText(/That is the sign-in code/i)).toBeTruthy();
+    // The length guard already refused this. What it did not do was say so,
+    // which left the screen looking broken rather than particular.
+    expect(
+      (screen.getByText(/Unlock with this journal key/i) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+  });
+
+  test("says nothing while a real journal key is being typed", () => {
+    render(<SyncView />);
+
+    fireEvent.change(screen.getByLabelText(/Journal key/i), {
+      target: { value: "J1-ABCD-EFGH-JKMN" },
+    });
+
+    expect(screen.queryByText(/That is the sign-in code/i)).toBeNull();
+    expect(
+      (screen.getByText(/Unlock with this journal key/i) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
+  });
 });
 
 describe("signing out of this device", () => {

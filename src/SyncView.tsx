@@ -26,6 +26,10 @@ import type { SyncStatus } from "./store/sync";
 import { listDevices, onDevicesChange } from "./store/devices";
 import type { DeviceRecord } from "./store/devices";
 import { pendingJournalKey } from "./lib/pendingKey";
+import {
+  looksLikeJournalKey,
+  looksLikeSignInCode,
+} from "./lib/credentialShape";
 
 // For a moment we know exactly, like when a device was added.
 const relativeTime = (ms: number): string => {
@@ -98,6 +102,12 @@ export default function SyncView() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => onSyncStatus(setStatus), []);
+
+  // The two credentials of onboarding get mistaken for each other, in both
+  // directions (see lib/credentialShape). Derived rather than stored, so the
+  // correction appears and clears as the field is edited.
+  const keyInCodeBox = looksLikeJournalKey(otpCode);
+  const codeInKeyBox = looksLikeSignInCode(keyEntry);
 
   const [deviceList, setDeviceList] = useState<DeviceRecord[]>(() =>
     listDevices()
@@ -408,7 +418,7 @@ export default function SyncView() {
                 />
                 <button
                   className="addBtn"
-                  disabled={busy || otpCode.trim().length < 6}
+                  disabled={busy || otpCode.trim().length < 6 || keyInCodeBox}
                   onClick={async () => {
                     setError(null);
                     setBusy(true);
@@ -427,6 +437,18 @@ export default function SyncView() {
                   Sign in with code
                 </button>
               </div>
+              {/* Said here rather than after a failed attempt, because the
+                  attempt would reach the server and come back "invalid", which
+                  names neither what was typed nor where the right thing is. The
+                  button is disabled alongside it: the reason is on screen, so
+                  this is not the no-guessing rule broken again. */}
+              {keyInCodeBox && (
+                <p style={{ ...ST.p, marginTop: 6 }}>
+                  That is your journal key, which unlocks the journal itself once
+                  you are signed in. The sign-in code is the 6 digits in the
+                  email just sent to {email.trim()}.
+                </p>
+              )}
               {/* Without these this step was a dead end: no way back to the
                   address field, so a typo, an email that never arrives or an
                   expired code left the only route back a force-quit. Tolerable
@@ -496,6 +518,18 @@ export default function SyncView() {
           >
             Unlock with this journal key
           </button>
+          {/* The other half of the same mix-up. This button was already
+              disabled for a 6-digit entry by the length guard, and said nothing
+              about why, so the screen simply stopped responding. The guard is
+              unchanged; what was missing is the sentence. */}
+          {codeInKeyBox && (
+            <p style={{ ...ST.p, marginTop: 6 }}>
+              That is the sign-in code from your email, which you have already
+              used to get this far. Your journal key is longer, starts with J1-,
+              and lives on the device you are already journalling on, under Sync
+              → show journal key.
+            </p>
+          )}
         </>
       )}
 
