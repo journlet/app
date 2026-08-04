@@ -87,8 +87,6 @@ export const periodSub = (scope: Scope, anchorKey: string): string => {
   return anchorKey.slice(0, 4);
 };
 
-export const scopeSub = (scope: Scope): string => periodSub(scope, todayKey());
-
 // Step a per-scope anchor day backwards/forwards by one period
 export const shiftAnchor = (
   scope: Scope,

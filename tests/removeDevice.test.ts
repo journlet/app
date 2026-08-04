@@ -625,7 +625,7 @@ describe("the removed device's own view", () => {
     tables.device_link_requests = [];
     await sync.retryConnect();
 
-    await vi.waitFor(() => expect(sync.wasDeclined()).toBe(true));
+    await vi.waitFor(() => expect(sync.getLinkStage()).toBe("declined"));
     // And the code goes with it. There is nothing left to compare.
     expect(sync.getLinkCode()).toBeNull();
   });
@@ -644,7 +644,7 @@ describe("the removed device's own view", () => {
 
     expect(tables.device_link_requests?.[0]?.device_id).toBe("phone");
     expect(sync.getLinkCode()).toBe(code);
-    expect(sync.wasDeclined()).toBe(false);
+    expect(sync.getLinkStage()).not.toBe("declined");
   });
 
   test("an approval is never mistaken for a refusal", async () => {
@@ -676,7 +676,7 @@ describe("the removed device's own view", () => {
 
     await sync.retryConnect();
 
-    expect(sync.wasDeclined()).toBe(false);
+    expect(sync.getLinkStage()).not.toBe("declined");
     expect(sync.getSyncStatus()).toBe("synced");
   });
 

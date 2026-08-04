@@ -736,9 +736,6 @@ export const askToBeAddedBack = async (): Promise<void> => {
   await askToBeAdded();
 };
 
-/** True on a device whose request was answered with "do not add it", or lapsed. */
-export const wasDeclined = (): boolean => linkStage === "declined";
-
 /**
  * Has the request this device is waiting on been answered with a refusal?
  *
@@ -1512,14 +1509,6 @@ export const verifyEmailCode = async (
   if (error) throw new Error(error.message);
 };
 
-// Routine sign-out of THIS device only. The default scope is global, which
-// would silently sign out every other device too — see signOutOtherDevices()
-// for the deliberate "others" case.
-export const signOut = async (): Promise<void> => {
-  if (!supabase) return;
-  teardown();
-  await supabase.auth.signOut({ scope: "local" });
-};
 
 // Explicit sign-out (item 11): tear down sync, sign out of Supabase, and
 // erase this device's journal and keys. Unsynced local changes and the

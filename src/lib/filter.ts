@@ -87,18 +87,6 @@ export const applyFilter = (entries: Entry[], f: EntryFilter): Entry[] => {
   return entries.filter((e) => kept.has(e.id) || parents.has(e.id));
 };
 
-/** Every page of a journal snapshot, filtered. Pages are kept even when they
- *  empty out — a section still has to say it has entries you can't see. */
-export const filterDays = (
-  days: Record<string, Entry[]>,
-  f: EntryFilter
-): Record<string, Entry[]> => {
-  if (f === "all") return days;
-  const out: Record<string, Entry[]> = {};
-  Object.keys(days).forEach((k) => (out[k] = applyFilter(days[k] || [], f)));
-  return out;
-};
-
 const KEY = "journlet-filter-v1";
 const OPEN_KEY = "journlet-filter-open-v1";
 
