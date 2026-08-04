@@ -27,7 +27,7 @@ import {
   publishEpochKey,
   hasPendingRequest,
   publishLinkRequest,
-  isStillEntitled,
+  checkStanding,
   readCurrentEpoch,
   readKeeperWrappedEpochs,
   rejectLinkRequest,
@@ -144,6 +144,15 @@ const wrappedFromJson = (j: WrappedKeyJson): WrappedDataKey => ({
  */
 const MISSING_EPOCH_KEY =
   "This device does not have the newest key for your journal yet. Open Journlet on another of your devices while this one is open, and it will catch up.";
+
+/**
+ * The other half of that, and deliberately not a variation on it.
+ *
+ * MISSING_EPOCH_KEY says wait. This one says act, and names the action, because
+ * the two situations look identical from the journal and have opposite remedies.
+ */
+const NEEDS_REAPPROVAL =
+  "This device needs approving again before it can be given the newest key for your journal. Open Journlet on another of your devices, approve this one, and check the codes match. What you can already read here is unaffected.";
 
 /** A stored row written under an epoch this device holds no key for. */
 class MissingEpochKeyError extends Error {
@@ -539,10 +548,24 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     // inside a connect, which by definition has not set connectedUserId yet, so
     // there is nothing to drop. Adding it anyway looked prudent and was code no
     // test could reach.
-    if (!(await isStillEntitled(supabase, deviceBinding()).catch(() => true))) {
+    const standing = await checkStanding(
+      supabase,
+      deviceBinding(),
+      ring.dataKeys
+    ).catch(() => "behind" as const);
+
+    if (standing === "removed") {
       enterRemovedState();
       // It may also have asked and been refused since. Same round trip either way.
       await noticeIfDeclined();
+      return false;
+    }
+    if (standing === "unproven") {
+      // Holds rows, but nothing another device will accept as proof, so waiting
+      // would be waiting forever. Ask, and say which of the two things this is.
+      await askToBeAdded();
+      setError(NEEDS_REAPPROVAL);
+      setStatus(navigator.onLine ? "pending" : "offline");
       return false;
     }
     // Entitled, and behind. The journal reads to the last rotation and no
@@ -770,7 +793,12 @@ const noticeIfDeclined = async (): Promise<void> => {
 const explainMissingKey = async (): Promise<void> => {
   if (!supabase || !session) return;
   try {
-    if (await isStillEntitled(supabase, deviceBinding())) {
+    const standing = await checkStanding(
+      supabase,
+      deviceBinding(),
+      ring?.dataKeys ?? new Map()
+    );
+    if (standing === "behind") {
       setError(MISSING_EPOCH_KEY);
       // Behind, not removed. Reconnect rather than sitting there: a device whose
       // realtime rows have stopped decrypting still reads "synced", applies
@@ -779,6 +807,15 @@ const explainMissingKey = async (): Promise<void> => {
       // itself the moment another device passes the key along.
       dropConnection();
       void connect();
+      return;
+    }
+    if (standing === "unproven") {
+      // Same three-way split as the connect path, and the same reason for it.
+      // Reconnecting here would loop: no other device will accept this one's rows,
+      // so the backoff would run for ever against something only an approval
+      // fixes.
+      await askToBeAdded();
+      setError(NEEDS_REAPPROVAL);
       return;
     }
   } catch {
@@ -896,9 +933,19 @@ export const approveDevice = async (request: LinkRequest): Promise<void> => {
   // the newcomer entitled. Without this it could read only what was written since
   // the last rotation until some later connect happened to fill the gaps in,
   // which on a re-approved device means its own history missing for a while.
-  for (const [epoch, epochKey] of ring.dataKeys) {
+  //
+  // The row above is what proves the newcomer: it carries a grant at the current
+  // epoch, which this device can verify because it holds that epoch. So no
+  // exemption is needed here for a device that is too new to have registered
+  // itself. The approval is the evidence, and it is written down.
+  for (const epoch of ring.dataKeys.keys()) {
     if (epoch === ring.epoch) continue;
-    await shareDataKeyWithDevices(supabase, epochKey, deviceBinding(), epoch);
+    await shareDataKeyWithDevices(
+      supabase,
+      ring.dataKeys,
+      deviceBinding(),
+      epoch
+    );
   }
   pendingRequests = pendingRequests.filter(
     (r) => r.deviceId !== request.deviceId
@@ -950,11 +997,19 @@ export const removeDevice = async (deviceId: string): Promise<void> => {
   await publishEpochKey(supabase, binding, epoch, wrappedToJson(wrapped));
 
   // The removed device is not among these: revokeDevice took away both its rows,
-  // so it is no longer entitled and the share loop passes over it.
-  await shareDataKeyWithDevices(supabase, dataKey, binding, epoch);
-
+  // so it is no longer entitled and the share loop passes over it. Note it is
+  // still unmarked in the register at this point, since markDeviceRemoved is the
+  // last step, so the row deletion is what excludes it here and the register mark
+  // is what keeps its id from being reused later.
+  // Built before the share, not after, because verifying another device's grant
+  // needs the key for the epoch that grant names and the share needs the new one
+  // to hand out. Building the map is not adopting it: the ring below is still
+  // the last thing to change, so the ordering guarantee is unaffected.
   const dataKeys = new Map(ring.dataKeys);
   dataKeys.set(epoch, dataKey);
+
+  await shareDataKeyWithDevices(supabase, dataKeys, binding, epoch);
+
   ring = { ...ring, dataKeys, epoch };
   await replaceKeyRing(ring);
 
@@ -1363,7 +1418,12 @@ const shareThisDevicesKeys = async (): Promise<void> => {
     await publishDeviceKey(supabase, binding);
     const key = currentDataKey(ring);
     if (key)
-      await shareDataKeyWithDevices(supabase, key, binding, ring.epoch);
+      await shareDataKeyWithDevices(
+        supabase,
+        ring.dataKeys,
+        binding,
+        ring.epoch
+      );
   } catch (e) {
     console.warn("[devices] key sharing deferred to the next launch", e);
   }

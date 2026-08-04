@@ -20,6 +20,15 @@ const SALT_BYTES = 32;
 const WRAP_VERSION = 1;
 
 /**
+ * Format version of the grant, in its own AAD.
+ *
+ * Separate from WRAP_VERSION on purpose. The blob format has not changed, and
+ * bumping it would stop devices opening keys they already hold; the grant is an
+ * additive sibling field with its own compatibility story.
+ */
+const GRANT_VERSION = 1;
+
+/**
  * Where a wrapped data key is allowed to be opened.
  *
  * The recipient builds this from its *own* user id and device id and never from
@@ -33,6 +42,28 @@ export interface DeviceBinding {
   deviceId: string;
 }
 
+/**
+ * Proof that whoever wrote a row held the data key for the epoch it names.
+ *
+ * An AES-GCM tag over an empty plaintext, with the entitlement itself as the
+ * additional authenticated data and the epoch's data key as the key. GCM's tag
+ * authenticates the AAD, so an empty plaintext gives a MAC and nothing else, and
+ * it needs no key material the account does not already have: the data key
+ * carries `encrypt` and `decrypt` usages on both routes it can arrive by, so
+ * there is nothing to derive, nothing to export, and nothing extra to transport.
+ *
+ * Why this exists. A row in device_wrapped_keys used to be the whole test of
+ * whether a device was entitled to the data key, and RLS on that table can only
+ * see auth.uid(), so any session on the account could write one for any device at
+ * any epoch. Holding the mailbox was therefore enough to be handed the journal by
+ * the next device that connected. The tag is the part that cannot be produced
+ * from account access alone.
+ */
+export interface Grant {
+  iv: string;
+  tag: string;
+}
+
 /** The `wrapped` jsonb column of device_wrapped_keys. All base64. */
 export interface DeviceWrappedKeyJson {
   v: number;
@@ -41,12 +72,90 @@ export interface DeviceWrappedKeyJson {
   salt: string;
   iv: string;
   blob: string;
+  /**
+   * Optional in the type and required in practice.
+   *
+   * Optional because rows written before grants existed have none, and they must
+   * still parse so they can be recognised and refused rather than crash the
+   * reader. Absent means unproven, which means not entitled. Write paths take
+   * GrantedWrappedKey instead, so a new row cannot be missing one.
+   */
+  grant?: Grant;
 }
+
+/** A wrapped key that carries its proof. What every write path must produce. */
+export type GrantedWrappedKey = DeviceWrappedKeyJson & { grant: Grant };
 
 const bindingBytes = (b: DeviceBinding): Uint8Array =>
   new TextEncoder().encode(
     `journlet/devkey/${WRAP_VERSION}\nuser=${b.userId}\ndevice=${b.deviceId}`
   );
+
+/**
+ * What a grant says, and therefore what it cannot be moved to.
+ *
+ * The device id is in here so a grant cannot be lifted onto another device, and
+ * the epoch is in here so one issued for an old epoch cannot be presented as
+ * proof at the current one. Built by the verifier from what it expects, never
+ * from the row, which is the same rule as bindingBytes above and payload v2.
+ */
+const grantBytes = (b: DeviceBinding, epoch: number): Uint8Array =>
+  new TextEncoder().encode(
+    `journlet/grant/${GRANT_VERSION}\nuser=${b.userId}\ndevice=${b.deviceId}\nepoch=${epoch}`
+  );
+
+/** Issue a grant. Only a holder of this epoch's data key can. */
+export const signGrant = async (
+  dataKey: CryptoKey,
+  binding: DeviceBinding,
+  epoch: number
+): Promise<Grant> => {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const tag = new Uint8Array(
+    await crypto.subtle.encrypt(
+      {
+        name: AES,
+        iv: iv as BufferSource,
+        additionalData: grantBytes(binding, epoch) as BufferSource,
+      },
+      dataKey,
+      new Uint8Array(0)
+    )
+  );
+  return { iv: b64encode(iv), tag: b64encode(tag) };
+};
+
+/**
+ * Does this row prove its writer held the data key for this epoch?
+ *
+ * False rather than throwing, for every way it can fail: no grant at all, a
+ * grant that does not decode, a tag that does not verify. The caller's decision
+ * is the same in all three cases and it is not an error, it is an answer.
+ */
+export const verifyGrant = async (
+  dataKey: CryptoKey,
+  wrapped: DeviceWrappedKeyJson,
+  binding: DeviceBinding,
+  epoch: number
+): Promise<boolean> => {
+  const grant = wrapped.grant;
+  if (!grant || typeof grant.iv !== "string" || typeof grant.tag !== "string")
+    return false;
+  try {
+    await crypto.subtle.decrypt(
+      {
+        name: AES,
+        iv: b64decode(grant.iv) as BufferSource,
+        additionalData: grantBytes(binding, epoch) as BufferSource,
+      },
+      dataKey,
+      b64decode(grant.tag) as BufferSource
+    );
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 // ---------- the device's own keypair ----------
 
@@ -204,6 +313,28 @@ export const wrapDataKeyForDevice = async (
  * for a different device: the binding is rebuilt locally, so a mismatched AAD
  * fails the GCM tag rather than producing a wrong-but-plausible key.
  */
+/**
+ * Wrap the data key for a device and attest the entitlement in one step.
+ *
+ * The only thing any write path should call. wrapDataKeyForDevice on its own
+ * produces a row that will be refused, because a row without a grant is a row
+ * whose writer has proved nothing, and the return type here is what stops that
+ * being written by accident.
+ */
+export const wrapAndGrant = async (
+  dataKey: CryptoKey,
+  recipientPublicKeyB64: string,
+  recipient: DeviceBinding,
+  epoch: number
+): Promise<GrantedWrappedKey> => {
+  const wrapped = await wrapDataKeyForDevice(
+    dataKey,
+    recipientPublicKeyB64,
+    recipient
+  );
+  return { ...wrapped, grant: await signGrant(dataKey, recipient, epoch) };
+};
+
 export const unwrapDataKeyForDevice = async (
   wrapped: DeviceWrappedKeyJson,
   privateKey: CryptoKey,
