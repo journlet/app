@@ -1,0 +1,128 @@
+# Repository settings, applied by the Settings app (repository-settings/app)
+# whenever this file changes on the default branch.
+#
+# Two things about that mechanism are worth knowing before editing.
+#
+# The app holds admin rights on this repository and takes its instructions from
+# the repository, so anyone who can merge to main can change these settings,
+# including switching the rules below off. That is the trade the app makes, and it
+# is why the review ruleset matters more than it looks.
+#
+# And a change here only takes effect once merged, so these rules cannot gate a
+# change to themselves. Read edits to this file the way you would read edits to a
+# CI workflow.
+#
+# Rulesets rather than the older `branches:` protection, which is the direction
+# GitHub itself is moving. A rejected ruleset is the failure mode that looks like
+# success, so after merging this, check Settings -> Rules and confirm all three
+# appear and are Active.
+
+repository:
+  name: app
+  description: A bullet journal PWA that keeps Ryder Carroll's notation exactly as written. Offline-first, end-to-end encrypted.
+  homepage: https://app.journlet.com
+  topics: bullet-journal, pwa, offline-first, end-to-end-encryption, crdt, yjs, react, typescript
+
+  has_issues: true
+  has_projects: false
+  has_wiki: false
+  has_downloads: false
+
+  default_branch: main
+
+  # Squash only, matching how this history actually reads: one commit per merged
+  # branch, with the reasoning in the message.
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+  delete_branch_on_merge: true
+
+  # Worth more here than in most repos. The service worker is bundled through a
+  # personal prerelease fork of a Google plugin, and there are open build-time
+  # advisories. An alert that arrives by itself is the only thing watching that.
+  enable_automated_security_fixes: true
+  enable_vulnerability_alerts: true
+
+  # `private` deliberately omitted. This repository is public, and naming it here
+  # would mean a mistyped value could publish or unpublish it on merge. Omitted
+  # keys are left untouched, so visibility stays a deliberate act in the UI.
+
+teams:
+  - name: journlet
+    permission: admin
+
+rulesets:
+  - name: Prevent destruction of the default branch
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+
+  # The one that exists because of a specific failure. Until 5 August the workflow
+  # ran only on push to main, so a broken merge went red after the fact and Pages
+  # kept serving the previous build. `build` now runs on pull_request, and this is
+  # what turns "you would have seen it" into "you could not have merged it".
+  #
+  # Deliberately no bypass_actors, and that is the point of it. The review ruleset
+  # below lets an org admin merge without a reviewer, because there is nobody else
+  # to review. This one does not, because a red build is a fact rather than a
+  # formality. The escape hatch for a genuinely stuck build, a registry outage say,
+  # is to set this ruleset to `evaluate` in the UI for as long as it takes, which
+  # is a deliberate act that leaves a trace.
+  - name: The build must pass
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: required_status_checks
+        parameters:
+          # Branch must be current with main before merging. Catches the case where
+          # two branches each pass alone and fail together.
+          strict_required_status_checks_policy: true
+          required_status_checks:
+            # The job id from .github/workflows/deploy.yaml, which has no explicit
+            # `name:`, so the check reports as `build`. Rename that job and this
+            # string must change with it, or merges wait for a check that never
+            # arrives.
+            #
+            # `integration_id` omitted on purpose: context alone is sufficient, and
+            # a wrong id fails in exactly the silent way this file is trying to
+            # avoid.
+            - context: build
+
+  - name: Changes must be reviewed
+    target: branch
+    enforcement: active
+    # Aimed at a second contributor rather than at the current one. A code owner
+    # cannot approve their own pull request, so without this bypass the sole
+    # maintainer could never merge anything. With it, the rule is dormant now and
+    # binding the moment anyone else commits.
+    bypass_actors:
+      - actor_id: 1
+        actor_type: OrganizationAdmin
+        bypass_mode: always
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: pull_request
+        parameters:
+          allowed_merge_methods:
+            - squash
+          dismiss_stale_reviews_on_push: true
+          require_code_owner_review: true
+          require_last_push_approval: true
+          required_approving_review_count: 1
+          required_review_thread_resolution: true
