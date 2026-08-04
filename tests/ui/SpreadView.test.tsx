@@ -49,6 +49,7 @@ const setup = (over: Partial<Parameters<typeof SpreadView>[0]> = {}) => {
     laterThisMonth: [],
     futureLogCount: 0,
     filter: "all" as const,
+    filterRow: <div data-testid="filter-row">filter row</div>,
     onReview: vi.fn(),
     onOpenFutureLog: vi.fn(),
     ...over,
@@ -154,4 +155,21 @@ describe("filter", () => {
     setup({ filter: "open", dueItems: [{ pk: nowKeys.day, entry: done }] });
     expect(screen.queryByText("Due")).toBeNull();
   });
+});
+
+// Ordering, corrected after seeing it on device (4 Aug 2026): the filter row
+// went in above every banner, which split the alerts into two groups either
+// side of a control. Alerts first, then the way you are reading the page, then
+// the page.
+test("the filter row sits after the review banner and before the journal", () => {
+  setup({
+    pastOpen: [{ pk: "2026-07-01", entry }],
+    dueItems: [{ pk: nowKeys.day, entry }],
+  });
+  const banner = screen.getByText(/open task.*from\s+past pages/i).closest("button")!;
+  const row = screen.getByTestId("filter-row");
+  const due = screen.getByText("Due");
+  // Node.compareDocumentPosition: 4 = the argument follows the reference node
+  expect(banner.compareDocumentPosition(row) & 4).toBeTruthy();
+  expect(row.compareDocumentPosition(due) & 4).toBeTruthy();
 });

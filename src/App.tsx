@@ -1245,15 +1245,23 @@ export default function App() {
             }}
           />
         )}
-        {/* One filter row, above whichever page lists entries — the spread, a
-            list collection, the future log. A habit tracker holds no entries,
-            and the Index, Search, Menu and Sync pages are not the journal, so
-            the control stays off those rather than sitting there doing
-            nothing. Above the view, so it is impossible to be on a filtered
-            page without the filter in sight. */}
+        {/* One filter row on whichever page lists entries — the spread, a list
+            collection, the future log. A habit tracker holds no entries, and
+            the Index, Search, Menu and Sync pages are not the journal, so the
+            control stays off those rather than sitting there doing nothing.
+            It is never far from the entries it is filtering, so a filtered
+            page cannot be read without the filter in sight.
+
+            Ordering, corrected 4 August 2026 after seeing it on device: the
+            row went in above everything, which put it between the not-syncing
+            banner and the review banner and left the alerts reading as two
+            separate groups either side of a control. Alerts belong together
+            at the top, then how you are reading the page, then the page — so
+            the spread takes the row as a prop and places it after its own
+            review banner, while the other two pages, which carry no banner,
+            take it here. */}
         {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded &&
-          (view === "spread" ||
-            view === "future" ||
+          (view === "future" ||
             (activeCol !== null && activeCol.kind === "list")) && (
           <FilterRow filter={filter} onChange={changeFilter} />
         )}
@@ -1339,6 +1347,7 @@ export default function App() {
             laterThisMonth={laterThisMonth}
             futureLogCount={futureLogCount}
             filter={filter}
+            filterRow={<FilterRow filter={filter} onChange={changeFilter} />}
             onReview={() => setReviewing(true)}
             onOpenFutureLog={() => setView("future")}
           />

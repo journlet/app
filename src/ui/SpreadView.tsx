@@ -42,6 +42,11 @@ interface SpreadViewProps {
   /** entry visibility filter (remediation item 7) — applied to every section,
    *  the Due list and the within-period scheduled rows */
   filter: EntryFilter;
+  /** the filter control itself, built by App. Placed here rather than above
+   *  the whole view because the review banner is an alert about the journal
+   *  and alerts belong at the top: banners first, then the way you are
+   *  reading the page, then the page. */
+  filterRow: ReactNode;
   onReview: () => void;
   onOpenFutureLog: () => void;
 }
@@ -60,6 +65,7 @@ export default function SpreadView({
   laterThisMonth,
   futureLogCount,
   filter,
+  filterRow,
   onReview,
   onOpenFutureLog,
 }: SpreadViewProps) {
@@ -82,6 +88,7 @@ export default function SpreadView({
             </span>
           </button>
         )}
+        {filterRow}
         {due.length > 0 && (
           <section style={S.section}>
             <div style={S.sectionHead}>
