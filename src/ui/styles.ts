@@ -61,6 +61,51 @@ export const S: Record<string, CSSProperties> = {
     boxSizing: "border-box",
     padding: `${GRID}px 20px`,
   },
+  // Filter row (remediation item 7). Track is exactly one GRID row (3px pad
+  // + 27px button + 3px pad) and the note is a 13px line box, so the block is
+  // fixed at two dot rows: the sections below never shift when the filter
+  // changes, and a note that wraps to a second line on a narrow screen eats
+  // the slack instead of pushing the whole page off the grid. Caught on a
+  // 375px render, where "hiding completed, struck out, migrated and
+  // scheduled" wrapped and every entry below it lost its dot row.
+  filterWrap: { height: GRID * 2, boxSizing: "border-box" },
+  filterRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  filterLbl: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: INK_SOFT,
+    flexShrink: 0,
+  },
+  filterTrack: {
+    flex: 1,
+    display: "flex",
+    gap: 4,
+    background: "var(--track)",
+    borderRadius: 9,
+    padding: 3,
+    minWidth: 0,
+  },
+  filterNote: {
+    fontSize: 11.5,
+    lineHeight: "13px",
+    color: INK_SOFT,
+    fontStyle: "italic",
+    padding: "0 4px",
+  },
+  // A section or page emptied out by the filter — says how many are hidden,
+  // so nothing ever just vanishes
+  filterHidden: {
+    color: INK_SOFT,
+    fontSize: 12.5,
+    fontStyle: "italic",
+    lineHeight: `${GRID}px`,
+    padding: "0 4px",
+  },
   section: { marginBottom: GRID },
   // head = one GRID title line + 4px pad + 1px rule + margin = 2 rows.
   // Small companions get short line boxes (13px) so baseline alignment

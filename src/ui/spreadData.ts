@@ -6,8 +6,31 @@
 import { SCOPES, keyScope, keyToAnchor, periodKey } from "../lib/dates";
 import type { Scope } from "../lib/dates";
 import type { Entry, Recurrence } from "../lib/types";
+import { entryVisible } from "../lib/filter";
+import type { EntryFilter } from "../lib/filter";
 import { nextOccurrence } from "../store/recurrence";
 import type { ScheduledRow } from "./types";
+
+/**
+ * The filter (remediation item 7) applied to scheduled rows — future-dated
+ * entries and recurrence-rule previews. A rule has no state of its own: its
+ * occurrences haven't happened yet, so nothing about it is closed and it
+ * survives "open only", while "tasks only" judges it on the type it will
+ * materialise as.
+ */
+export const filterRows = (
+  rows: ScheduledRow[],
+  f: EntryFilter
+): ScheduledRow[] => {
+  if (f === "all") return rows;
+  return rows.filter((r) =>
+    r.kind === "entry"
+      ? entryVisible(r.entry, f)
+      : f === "tasks"
+        ? r.rule.type === "task"
+        : true
+  );
+};
 
 export interface SpreadData {
   nowKeys: Record<Scope, string>;

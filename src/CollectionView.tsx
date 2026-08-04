@@ -5,6 +5,8 @@
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { dkey } from "./lib/dates";
+import { applyFilter } from "./lib/filter";
+import type { EntryFilter } from "./lib/filter";
 import { GRID } from "./lib/grid";
 import type { Collection, Entry, Habit } from "./lib/types";
 import { addHabit, toggleHabitMark } from "./store/journal";
@@ -50,6 +52,9 @@ interface Props {
   entries: Entry[];
   habits: Habit[];
   renderEntry: (e: Entry) => ReactNode;
+  /** entry visibility filter (remediation item 7) — the same one the spread
+   *  uses, so a collection is read the way the rest of the journal is */
+  filter: EntryFilter;
   /** entries elsewhere referencing this collection (spec §4.4 Threading) */
   threadedHere: ReactNode;
   onDelete: () => void;
@@ -60,9 +65,12 @@ export default function CollectionView({
   entries,
   habits,
   renderEntry,
+  filter,
   threadedHere,
   onDelete,
 }: Props) {
+  const shown = applyFilter(entries, filter);
+  const hidden = entries.length - shown.length;
   const [habitName, setHabitName] = useState<string | null>(null);
 
   const submitHabit = () => {
@@ -91,10 +99,16 @@ export default function CollectionView({
 
       {collection.kind === "list" && (
         <>
-          {entries.length === 0 && (
-            <div style={ST.empty}>nothing logged</div>
+          {shown.length === 0 && (
+            <div style={ST.empty}>
+              {hidden === 0
+                ? "nothing logged"
+                : `nothing matching — ${hidden} entr${
+                    hidden === 1 ? "y" : "ies"
+                  } hidden by the filter`}
+            </div>
           )}
-          <ul style={ST.list}>{entries.map((e) => renderEntry(e))}</ul>
+          <ul style={ST.list}>{shown.map((e) => renderEntry(e))}</ul>
           {threadedHere}
         </>
       )}

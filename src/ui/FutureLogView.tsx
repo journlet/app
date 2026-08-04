@@ -5,6 +5,8 @@
 
 import type { ReactNode } from "react";
 import { pageLabel } from "../lib/dates";
+import type { EntryFilter } from "../lib/filter";
+import { filterRows } from "./spreadData";
 import { S } from "./styles";
 import type { ScheduledRow } from "./types";
 
@@ -13,6 +15,8 @@ interface FutureLogViewProps {
   groups: { gk: string; rows: ScheduledRow[] }[];
   folds: Record<string, boolean>;
   onToggleFold: (gk: string) => void;
+  /** entry visibility filter (remediation item 7) */
+  filter: EntryFilter;
   renderRow: (row: ScheduledRow, grouped: boolean) => ReactNode;
 }
 
@@ -21,8 +25,16 @@ export default function FutureLogView({
   groups,
   folds,
   onToggleFold,
+  filter,
   renderRow,
 }: FutureLogViewProps) {
+  // Groups that empty out are dropped rather than left as a heading with
+  // nothing under it; the count below says how many rows that came to.
+  const groupsShown = groups
+    .map(({ gk, rows }) => ({ gk, rows: filterRows(rows, filter) }))
+    .filter((g) => g.rows.length > 0);
+  const shown = groupsShown.reduce((n, g) => n + g.rows.length, 0);
+  const hidden = count - shown;
   return (
     <section style={S.section}>
       <div style={S.sectionHead}>
@@ -38,7 +50,13 @@ export default function FutureLogView({
           entry to a future page.
         </div>
       )}
-      {groups.map(({ gk, rows }) => (
+      {count > 0 && shown === 0 && (
+        <div style={S.empty}>
+          Nothing matching — {hidden} item{hidden === 1 ? "" : "s"} scheduled
+          ahead {hidden === 1 ? "is" : "are"} hidden by the filter.
+        </div>
+      )}
+      {groupsShown.map(({ gk, rows }) => (
         <div key={gk}>
           <div style={S.flGroupHead}>
             <span style={S.subGroupLabel}>{pageLabel(gk)}</span>

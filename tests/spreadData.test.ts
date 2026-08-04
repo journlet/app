@@ -2,7 +2,7 @@
 // Future log grouping. Pure logic, so tested directly in the node environment.
 
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
-import { buildSpreadData } from "../src/ui/spreadData";
+import { buildSpreadData, filterRows } from "../src/ui/spreadData";
 import { periodKey } from "../src/lib/dates";
 import type { Entry, Recurrence } from "../src/lib/types";
 
@@ -126,5 +126,62 @@ describe("dueItems", () => {
     ]);
     const { dueItems } = buildSpreadData(days, [], TODAY);
     expect(dueItems.map((d) => d.entry.id)).toEqual(["a", "b"]);
+  });
+});
+
+// The filter (remediation item 7) over scheduled rows: future-dated entries
+// and recurrence-rule previews.
+describe("filterRows", () => {
+  const taskRow = {
+    kind: "entry" as const,
+    sort: "2026-08-10",
+    pk: "2026-08-10",
+    entry: entry({ id: "t", pageKey: "2026-08-10" }),
+  };
+  const noteRow = {
+    kind: "entry" as const,
+    sort: "2026-08-11",
+    pk: "2026-08-11",
+    entry: entry({ id: "n", pageKey: "2026-08-11", type: "note" }),
+  };
+  const doneRow = {
+    kind: "entry" as const,
+    sort: "2026-08-12",
+    pk: "2026-08-12",
+    entry: entry({ id: "d", pageKey: "2026-08-12", state: "done" }),
+  };
+  const ruleRow = {
+    kind: "rule" as const,
+    sort: "2026-08-13",
+    dayKey: "2026-08-13",
+    rule: dailyRule(),
+  };
+  const noteRule = {
+    kind: "rule" as const,
+    sort: "2026-08-14",
+    dayKey: "2026-08-14",
+    rule: dailyRule({ id: "r2", type: "note" }),
+  };
+  const rows = [taskRow, noteRow, doneRow, ruleRow, noteRule];
+
+  test("'all' hands the rows straight back", () => {
+    expect(filterRows(rows, "all")).toBe(rows);
+  });
+
+  test("'tasks only' keeps task entries and task rules", () => {
+    expect(filterRows(rows, "tasks")).toEqual([
+      taskRow,
+      doneRow,
+      ruleRow,
+    ]);
+  });
+
+  test("'open only' keeps rule previews — an occurrence that hasn't happened isn't closed", () => {
+    expect(filterRows(rows, "open")).toEqual([
+      taskRow,
+      noteRow,
+      ruleRow,
+      noteRule,
+    ]);
   });
 });

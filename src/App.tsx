@@ -68,6 +68,8 @@ import { GLYPH, STATE_GLYPH } from "./lib/types";
 import type { Entry } from "./lib/types";
 import { GRID } from "./lib/grid";
 import DetailsForm from "./ui/DetailsForm";
+import { loadFilter, saveFilter } from "./lib/filter";
+import type { EntryFilter } from "./lib/filter";
 import { loadSticky, saveSticky } from "./lib/sticky";
 import type { CaptureScope } from "./lib/sticky";
 import {
@@ -80,6 +82,7 @@ import {
 import { useJournal } from "./store/useJournal";
 import { applyUpdate, getUpdateReady, onUpdateReady } from "./store/appUpdate";
 import { S } from "./ui/styles";
+import FilterRow from "./ui/FilterRow";
 import FutureLogView from "./ui/FutureLogView";
 import CaptureForm from "./ui/CaptureForm";
 import EntryActionsSheet from "./ui/EntryActionsSheet";
@@ -231,6 +234,14 @@ export default function App() {
   const [editRepeat, setEditRepeat] = useState<EditRepeat | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  // Entry visibility filter (remediation item 7). A device preference like
+  // theme and sticky capture, not journal content — never synced, so one
+  // device reading "open only" doesn't change what another shows.
+  const [filter, setFilterState] = useState<EntryFilter>(loadFilter);
+  const changeFilter = useCallback((f: EntryFilter) => {
+    setFilterState(f);
+    saveFilter(f);
+  }, []);
   const [themePref, setThemePref] = useState<ThemePref>(loadTheme);
   const changeTheme = useCallback((t: ThemePref) => {
     setThemePref(t);
@@ -1234,6 +1245,18 @@ export default function App() {
             }}
           />
         )}
+        {/* One filter row, above whichever page lists entries — the spread, a
+            list collection, the future log. A habit tracker holds no entries,
+            and the Index, Search, Menu and Sync pages are not the journal, so
+            the control stays off those rather than sitting there doing
+            nothing. Above the view, so it is impossible to be on a filtered
+            page without the filter in sight. */}
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded &&
+          (view === "spread" ||
+            view === "future" ||
+            (activeCol !== null && activeCol.kind === "list")) && (
+          <FilterRow filter={filter} onChange={changeFilter} />
+        )}
         {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "index" && (
           <IndexView
             days={days}
@@ -1292,6 +1315,7 @@ export default function App() {
             entries={days[colPageKey(activeCol.id)] || []}
             habits={habits.filter((h) => h.collectionId === activeCol.id)}
             renderEntry={(e) => renderEntry(e, colPageKey(activeCol.id), null)}
+            filter={filter}
             threadedHere={renderThreadedHere(colPageKey(activeCol.id))}
             onDelete={() => {
               const snap = removeCollection(activeCol.id);
@@ -1314,6 +1338,7 @@ export default function App() {
             scheduledRows={scheduledRows}
             laterThisMonth={laterThisMonth}
             futureLogCount={futureLogCount}
+            filter={filter}
             onReview={() => setReviewing(true)}
             onOpenFutureLog={() => setView("future")}
           />
@@ -1324,6 +1349,7 @@ export default function App() {
             groups={futureLogGroups}
             folds={folds}
             onToggleFold={toggleFold}
+            filter={filter}
             renderRow={renderScheduledRow}
           />
         )}

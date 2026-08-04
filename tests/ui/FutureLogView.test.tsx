@@ -40,6 +40,7 @@ test("shows the empty state when nothing is scheduled ahead", () => {
       groups={[]}
       folds={{}}
       onToggleFold={vi.fn()}
+      filter="all"
       renderRow={vi.fn()}
     />
   );
@@ -55,6 +56,7 @@ describe("with groups", () => {
         groups={groups}
         folds={{}}
         onToggleFold={vi.fn()}
+        filter="all"
         renderRow={renderRow}
       />
     );
@@ -79,6 +81,7 @@ describe("with groups", () => {
         groups={groups}
         folds={{ "2026-08": true }}
         onToggleFold={vi.fn()}
+        filter="all"
         renderRow={renderRow}
       />
     );
@@ -95,10 +98,64 @@ describe("with groups", () => {
         groups={groups}
         folds={{}}
         onToggleFold={onToggleFold}
+        filter="all"
         renderRow={spyRenderRow()}
       />
     );
     fireEvent.click(screen.getByText(/2 items · hide/));
     expect(onToggleFold).toHaveBeenCalledWith("2026-08");
+  });
+});
+
+// The filter (remediation item 7) reaches the future log too: a page that
+// lists entries has to answer to the row sitting above it.
+describe("with the filter on", () => {
+  const mixed = [
+    {
+      gk: "2026-08",
+      rows: [
+        entryRow("a", "2026-08-03"),
+        {
+          ...entryRow("n", "2026-08-04"),
+          entry: { ...entryRow("n", "2026-08-04").entry, type: "note" as const },
+        },
+      ],
+    },
+  ];
+
+  test("'tasks only' drops the note row and keeps the task", () => {
+    const renderRow = spyRenderRow();
+    render(
+      <FutureLogView
+        count={2}
+        groups={mixed}
+        folds={{}}
+        onToggleFold={vi.fn()}
+        filter="tasks"
+        renderRow={renderRow}
+      />
+    );
+    expect(renderRow).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/1 item · hide/)).toBeTruthy();
+  });
+
+  test("a group emptied by the filter is dropped, and the page says how many are hidden", () => {
+    const renderRow = spyRenderRow();
+    render(
+      <FutureLogView
+        count={2}
+        groups={[{ gk: "2026-08", rows: mixed[0].rows.slice(1) }]}
+        folds={{}}
+        onToggleFold={vi.fn()}
+        filter="tasks"
+        renderRow={renderRow}
+      />
+    );
+    expect(renderRow).not.toHaveBeenCalled();
+    // no empty heading left behind
+    expect(screen.queryByText("Aug 2026")).toBeNull();
+    // and the count is honest rather than "nothing scheduled ahead"
+    expect(screen.getByText(/Nothing matching/i)).toBeTruthy();
+    expect(screen.queryByText(/Nothing scheduled ahead/i)).toBeNull();
   });
 });

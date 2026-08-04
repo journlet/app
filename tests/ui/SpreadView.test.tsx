@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import SpreadView from "../../src/ui/SpreadView";
 import { periodKey } from "../../src/lib/dates";
 import type { Scope } from "../../src/lib/dates";
 import type { Entry } from "../../src/lib/types";
+import type { EntryFilter } from "../../src/lib/filter";
 
 afterEach(cleanup);
 
@@ -47,6 +48,7 @@ const setup = (over: Partial<Parameters<typeof SpreadView>[0]> = {}) => {
     scheduledRows: [],
     laterThisMonth: [],
     futureLogCount: 0,
+    filter: "all" as const,
     onReview: vi.fn(),
     onOpenFutureLog: vi.fn(),
     ...over,
@@ -94,4 +96,62 @@ test("Future log link appears and opens the future log", () => {
   const props = setup({ futureLogCount: 3 });
   fireEvent.click(screen.getByText("Future log"));
   expect(props.onOpenFutureLog).toHaveBeenCalledTimes(1);
+});
+
+// The filter (remediation item 7). The point of it is the one thing Gary
+// asked for: see what is still outstanding, without the done work in the way.
+describe("filter", () => {
+  const done: Entry = {
+    ...entry,
+    id: "e2",
+    text: "already done",
+    state: "done",
+  };
+  const note: Entry = { ...entry, id: "e3", text: "a note", type: "note" };
+
+  const setupWith = (filter: EntryFilter) =>
+    setup({
+      filter,
+      days: { [nowKeys.day]: [entry, done, note] },
+    });
+
+  test("'all' shows everything on the page", () => {
+    const props = setupWith("all");
+    expect(props.renderEntry).toHaveBeenCalledTimes(3);
+  });
+
+  test("'open only' hides the completed task and keeps the note", () => {
+    const props = setupWith("open");
+    const shown = props.renderEntry.mock.calls.map(([e]) => e.id);
+    expect(shown).toEqual(["e1", "e3"]);
+  });
+
+  test("'tasks only' hides the note and keeps both tasks", () => {
+    const props = setupWith("tasks");
+    const shown = props.renderEntry.mock.calls.map(([e]) => e.id);
+    expect(shown).toEqual(["e1", "e2"]);
+  });
+
+  test("a hidden parent is kept as context for a sub-bullet that survives", () => {
+    const parent: Entry = { ...entry, id: "p", text: "parent", state: "done" };
+    const child: Entry = { ...entry, id: "c", text: "child", parentId: "p" };
+    const props = setup({
+      filter: "open",
+      days: { [nowKeys.day]: [parent, child] },
+    });
+    // the completed parent stays so the indented child is not orphaned
+    expect(props.renderEntry.mock.calls.map(([e]) => e.id)).toEqual(["p", "c"]);
+  });
+
+  test("a section emptied by the filter says how many are hidden, not 'nothing logged'", () => {
+    setup({ filter: "open", days: { [nowKeys.day]: [done] } });
+    expect(screen.getByText(/1 entry hidden by the filter/)).toBeTruthy();
+    // the three genuinely empty sections still read as empty
+    expect(screen.getAllByText("nothing logged")).toHaveLength(3);
+  });
+
+  test("a completed entry with a stale reminder drops out of Due", () => {
+    setup({ filter: "open", dueItems: [{ pk: nowKeys.day, entry: done }] });
+    expect(screen.queryByText("Due")).toBeNull();
+  });
 });
