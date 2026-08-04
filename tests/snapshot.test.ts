@@ -45,10 +45,24 @@ beforeEach(() => {
 });
 
 describe("taking a snapshot", () => {
-  test("names the file after the day it was taken", () => {
-    expect(snapshotFilename("2026-08-04")).toBe(
-      "journlet-backup-2026-08-04.journlet"
+  test("names the file after the moment it was taken", () => {
+    expect(snapshotFilename(new Date(2026, 7, 4, 14, 32))).toBe(
+      "journlet-backup-2026-08-04-1432.journlet"
     );
+  });
+
+  test("pads, so names sort the way they read", () => {
+    expect(snapshotFilename(new Date(2026, 0, 9, 8, 5))).toBe(
+      "journlet-backup-2026-01-09-0805.journlet"
+    );
+  });
+
+  test("two devices on the same day do not collide", () => {
+    // The reason the time is in there. Same date, a minute apart, two files you
+    // can tell apart without opening them.
+    const a = snapshotFilename(new Date(2026, 7, 4, 9, 15));
+    const b = snapshotFilename(new Date(2026, 7, 4, 9, 16));
+    expect(a).not.toBe(b);
   });
 
   test("an empty journal still produces something restorable", () => {

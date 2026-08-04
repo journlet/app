@@ -57,8 +57,28 @@ export class NotASnapshotError extends Error {
 /** The whole journal as one update. */
 export const snapshotBytes = (): Uint8Array => Y.encodeStateAsUpdate(doc);
 
-export const snapshotFilename = (today: string): string =>
-  `journlet-backup-${today}.${SNAPSHOT_EXT}`;
+/**
+ * Date and time, not just the date.
+ *
+ * Two devices backed up on the same day produced the same name, and the browser
+ * disambiguated silently with "(1)". A folder of backups you cannot tell apart is
+ * most of the way to not having backups, and the moment you need them is the worst
+ * moment to be guessing which is which.
+ *
+ * Local time rather than UTC, because the person reading the filename is the one
+ * who clicked the button.
+ */
+export const snapshotFilename = (now: Date): string => {
+  const p = (n: number) => String(n).padStart(2, "0");
+  const stamp = [
+    now.getFullYear(),
+    p(now.getMonth() + 1),
+    p(now.getDate()),
+  ].join("-");
+  return `journlet-backup-${stamp}-${p(now.getHours())}${p(
+    now.getMinutes()
+  )}.${SNAPSHOT_EXT}`;
+};
 
 /**
  * Apply a snapshot to the live journal.

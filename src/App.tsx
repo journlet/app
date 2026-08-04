@@ -1365,7 +1365,7 @@ export default function App() {
                 new Blob([new Uint8Array(snapshotBytes())], {
                   type: "application/octet-stream",
                 }),
-                snapshotFilename(todayKey())
+                snapshotFilename(new Date())
               );
             }}
             onRestore={async (file) => {
