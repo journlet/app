@@ -68,7 +68,12 @@ import { GLYPH, STATE_GLYPH } from "./lib/types";
 import type { Entry } from "./lib/types";
 import { GRID } from "./lib/grid";
 import DetailsForm from "./ui/DetailsForm";
-import { loadFilter, saveFilter } from "./lib/filter";
+import {
+  loadFilter,
+  loadFilterOpen,
+  saveFilter,
+  saveFilterOpen,
+} from "./lib/filter";
 import type { EntryFilter } from "./lib/filter";
 import { loadSticky, saveSticky } from "./lib/sticky";
 import type { CaptureScope } from "./lib/sticky";
@@ -242,6 +247,17 @@ export default function App() {
     setFilterState(f);
     saveFilter(f);
   }, []);
+  // The row is chrome, so it starts closed behind the header badge and only a
+  // row you opened yourself stays open across launches. Closing it never
+  // changes what is filtered — the badge keeps saying which filter is on, so
+  // a filtered page is still explained with the control out of sight.
+  const [filterOpen, setFilterOpen] = useState<boolean>(loadFilterOpen);
+  const toggleFilterRow = useCallback(() => {
+    setFilterOpen((o) => {
+      saveFilterOpen(!o);
+      return !o;
+    });
+  }, []);
   const [themePref, setThemePref] = useState<ThemePref>(loadTheme);
   const changeTheme = useCallback((t: ThemePref) => {
     setThemePref(t);
@@ -406,6 +422,15 @@ export default function App() {
     typeof view === "object"
       ? collections.find((c) => c.id === view.col) ?? null
       : null;
+
+  // Pages the filter applies to: the spread, the future log, and a list
+  // collection. A habit tracker holds no entries, and Index, Find, Menu and
+  // Sync are not the journal — the header badge stays off all of those rather
+  // than offering a control that would do nothing.
+  const filterApplies =
+    view === "spread" ||
+    view === "future" ||
+    (activeCol !== null && activeCol.kind === "list");
 
   // Whether this device holds any journal content. Gates the "not syncing"
   // banner (remediation item 11) so a brand-new empty install stays quiet,
@@ -1170,6 +1195,19 @@ export default function App() {
         }
         onBack={goBack}
         onMenu={() => setView("menu")}
+        filter={
+          !onboarding &&
+          !unlocking &&
+          !showRecovery &&
+          !stuck &&
+          !settling &&
+          loaded &&
+          filterApplies
+            ? filter
+            : null
+        }
+        filterOpen={filterOpen}
+        onToggleFilter={toggleFilterRow}
         saving={saveState === "saving"}
         syncStatus={syncStatus}
         onSyncClick={() => {
@@ -1261,6 +1299,7 @@ export default function App() {
             review banner, while the other two pages, which carry no banner,
             take it here. */}
         {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded &&
+          filterOpen &&
           (view === "future" ||
             (activeCol !== null && activeCol.kind === "list")) && (
           <FilterRow filter={filter} onChange={changeFilter} />
@@ -1347,7 +1386,11 @@ export default function App() {
             laterThisMonth={laterThisMonth}
             futureLogCount={futureLogCount}
             filter={filter}
-            filterRow={<FilterRow filter={filter} onChange={changeFilter} />}
+            filterRow={
+              filterOpen ? (
+                <FilterRow filter={filter} onChange={changeFilter} />
+              ) : null
+            }
             onReview={() => setReviewing(true)}
             onOpenFutureLog={() => setView("future")}
           />

@@ -27,6 +27,24 @@ export const FILTER_NOTE: Record<EntryFilter, string> = {
   open: "hiding completed, struck out, migrated and scheduled",
 };
 
+/** The badge value on a narrow screen. "menu", a named filter and a signed-out
+ *  sync badge together overrun a 375px header — measured, not guessed — so the
+ *  value drops its second word there, exactly as the section nav drops
+ *  "previous" for "prev". The full wording stays in the accessible name and in
+ *  the row itself, so nothing is lost, only shortened. */
+export const FILTER_SHORT: Record<EntryFilter, string> = {
+  all: "",
+  tasks: "tasks",
+  open: "open",
+};
+
+/** The header badge, which has to carry the state while the row is closed:
+ *  a page can be filtered with the control out of sight, so the button says
+ *  which filter is on rather than only that one is. Same shape as the sync
+ *  badge ("sync · offline"), for the same reason. */
+export const filterBadge = (f: EntryFilter): string =>
+  f === "all" ? "filter" : `filter · ${FILTER_LABEL[f]}`;
+
 /** Accessible name for each button — the note as a sentence. */
 export const FILTER_ARIA: Record<EntryFilter, string> = {
   all: "Show all entries",
@@ -82,6 +100,7 @@ export const filterDays = (
 };
 
 const KEY = "journlet-filter-v1";
+const OPEN_KEY = "journlet-filter-open-v1";
 
 /** Persisted like the sticky capture prefs: a filter you chose is a way of
  *  reading your journal, not a one-off, and it survives a relaunch. */
@@ -102,5 +121,25 @@ export const saveFilter = (f: EntryFilter): void => {
   } catch {
     // storage unavailable (private mode etc.) — the choice simply won't
     // survive a relaunch
+  }
+};
+
+/** Is the filter row showing? The row itself is chrome, so it starts closed
+ *  and the header badge is the way in — but a row you deliberately opened
+ *  stays open across launches, like the future log's folds. Never affects
+ *  what is filtered: closing the row hides the control, not its effect. */
+export const loadFilterOpen = (): boolean => {
+  try {
+    return localStorage.getItem(OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+export const saveFilterOpen = (open: boolean): void => {
+  try {
+    localStorage.setItem(OPEN_KEY, open ? "1" : "0");
+  } catch {
+    // storage unavailable — the row simply starts closed next launch
   }
 };

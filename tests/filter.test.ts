@@ -10,9 +10,12 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   applyFilter,
   entryVisible,
+  filterBadge,
   filterDays,
   loadFilter,
+  loadFilterOpen,
   saveFilter,
+  saveFilterOpen,
 } from "../src/lib/filter";
 import type { Entry, EntryState, EntryType } from "../src/lib/types";
 
@@ -169,5 +172,40 @@ describe("persistence", () => {
   test("a corrupted or unknown stored value falls back to 'all'", () => {
     localStorage.setItem("journlet-filter-v1", "everything");
     expect(loadFilter()).toBe("all");
+  });
+});
+
+// The header badge has to answer "why is this page showing me less?" with the
+// row shut, so it names the filter rather than only flagging that one is on.
+describe("filterBadge", () => {
+  test("says only 'filter' when nothing is filtered", () => {
+    expect(filterBadge("all")).toBe("filter");
+  });
+
+  test("names the filter that is on", () => {
+    expect(filterBadge("open")).toBe("filter · open only");
+    expect(filterBadge("tasks")).toBe("filter · tasks only");
+  });
+});
+
+describe("row open state", () => {
+  afterEach(() => localStorage.clear());
+
+  test("starts closed — the row is chrome, the badge is the way in", () => {
+    expect(loadFilterOpen()).toBe(false);
+  });
+
+  test("a row you opened stays open across launches", () => {
+    saveFilterOpen(true);
+    expect(loadFilterOpen()).toBe(true);
+    saveFilterOpen(false);
+    expect(loadFilterOpen()).toBe(false);
+  });
+
+  test("it is a separate preference from the filter itself, so closing the row cannot change what is hidden", () => {
+    saveFilter("open");
+    saveFilterOpen(false);
+    expect(loadFilter()).toBe("open");
+    expect(loadFilterOpen()).toBe(false);
   });
 });

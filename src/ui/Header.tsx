@@ -3,6 +3,8 @@
 // which buttons apply and what each does; the sync label/attention tables live
 // here since this is their only use.
 
+import { FILTER_LABEL, FILTER_SHORT, filterBadge } from "../lib/filter";
+import type { EntryFilter } from "../lib/filter";
 import type { SyncStatus } from "../store/sync";
 import { S } from "./styles";
 
@@ -36,6 +38,12 @@ interface HeaderProps {
   showMenu: boolean;
   onBack: () => void;
   onMenu: () => void;
+  /** null on pages the filter does not apply to (Index, Find, Menu, Sync,
+   *  habit trackers), where the button would do nothing */
+  filter: EntryFilter | null;
+  /** is the filter row showing beneath the banners? */
+  filterOpen: boolean;
+  onToggleFilter: () => void;
   saving: boolean;
   syncStatus: SyncStatus;
   onSyncClick: () => void;
@@ -46,6 +54,9 @@ export default function Header({
   showMenu,
   onBack,
   onMenu,
+  filter,
+  filterOpen,
+  onToggleFilter,
   saving,
   syncStatus,
   onSyncClick,
@@ -64,6 +75,40 @@ export default function Header({
           {showMenu && (
             <button className="miniBtn" onClick={onMenu}>
               menu
+            </button>
+          )}
+          {/* The way in to the filter row, which is chrome and stays closed
+              until asked for (remediation item 7, revised 4 August 2026 after
+              the always-on row read as clutter on device).
+
+              The label carries the state, exactly as the sync badge does: a
+              page can be filtered with the row shut, so "filter · open only"
+              has to be readable without opening anything. Full ink rather
+              than the muted default when a filter is on — attention, not
+              alarm, so not the danger colour the sync badge uses. */}
+          {filter !== null && (
+            <button
+              className="miniBtn"
+              style={
+                filter !== "all"
+                  ? { color: "var(--ink)", borderColor: "var(--ink)" }
+                  : undefined
+              }
+              aria-expanded={filterOpen}
+              // Visible text shortens on narrow screens; the accessible name
+              // carries the full wording either way
+              aria-label={filterBadge(filter)}
+              onClick={onToggleFilter}
+            >
+              {filter === "all" ? (
+                "filter"
+              ) : (
+                <>
+                  filter ·{" "}
+                  <span className="navLong">{FILTER_LABEL[filter]}</span>
+                  <span className="navShort">{FILTER_SHORT[filter]}</span>
+                </>
+              )}
             </button>
           )}
           {/* Transient cue while the local IndexedDB write is in
