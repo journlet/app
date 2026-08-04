@@ -1422,7 +1422,7 @@ export const startSync = (): void => {
     session = s;
     if (!s) {
       teardown();
-      // handleRevoked() signs out locally, so this fires straight after it.
+      // signOutAndWipe() signs out locally, so this fires straight after it.
       // "Not signed in" would be true and useless — it would read as a
       // spontaneous logout with no cause given, which is precisely the
       // confusion this whole change exists to remove.

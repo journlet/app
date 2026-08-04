@@ -29,7 +29,7 @@ create policy "update own journal" on public.journals
 -- recurrences belong to a volume, so opening a new volume never re-encrypts an
 -- old one. All current data is volume 'v1' (the default keeps existing rows and
 -- the local IndexedDB doc name unchanged). Collections/habits will later use a
--- permanent 'shared' volume; see docs/volume-schema-design.md.
+-- permanent 'shared' volume; see spec/volume-schema-design.md.
 create table if not exists public.journal_updates (
   id bigint generated always as identity primary key,
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,

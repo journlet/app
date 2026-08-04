@@ -3,7 +3,7 @@ STATUS: DRAFT - UNREVIEWED
 
 # Journlet
 
-A bullet journal PWA that faithfully implements the Ryder Carroll method. Offline-first, CRDT-backed, and (eventually) end-to-end encrypted. Built against `bullet-journal-app-spec.md` v0.9; UI ported from the validated prototype v17.
+A bullet journal PWA that faithfully implements the Ryder Carroll method. Offline-first, CRDT-backed and end-to-end encrypted. Built against `bullet-journal-app-spec.md` v0.9; UI ported from the validated prototype v17.
 
 ## Current state
 
@@ -21,13 +21,13 @@ The app is well past the initial shell. What works today:
 
 **Sync and encryption.** End-to-end encryption — a data key wrapped by a keeper key, encrypted Yjs updates, and an exportable/importable journal key code. Supabase auth is email magic links (no passwords), with multi-device key sharing via the journal key or QR code. The app tracks sync status, shows a "not syncing" banner when signed out, supports lost-device recovery, and wipes the local journal and keys on sign-out. Everything works fully offline before any account exists.
 
-**PWA and platform.** Installable PWA with an add-to-home-screen prompt, an auto-updating service worker with a "new version available" banner and a manual update check, Markdown export of the journal, and storage/volume metrics in the menu (entries, doc KB, sync updates).
+**PWA and platform.** Installable PWA with an add-to-home-screen prompt, a service worker that prompts rather than reloading under you, with a "new version available" banner and a manual update check, Markdown export of the journal, and storage/volume metrics in the menu (entries, doc KB, sync updates).
 
 Persistence is a Yjs CRDT document stored in IndexedDB via y-indexeddb — the same document that is encrypted client-side and synced through Supabase, so the server only ever holds ciphertext.
 
 ## Stack
 
-React 19 + TypeScript + Vite, vite-plugin-pwa (Workbox, auto-update service worker), Yjs + y-indexeddb for the offline-first CRDT store, and @supabase/supabase-js for auth and the encrypted sync relay.
+React 19 + TypeScript + Vite, vite-plugin-pwa (Workbox, prompt-to-update service worker), Yjs + y-indexeddb for the offline-first CRDT store, and @supabase/supabase-js for auth and the encrypted sync relay.
 
 ## Develop
 
@@ -45,7 +45,7 @@ One-time setup, all in the Supabase dashboard:
 1. SQL Editor → paste and run `supabase/schema.sql` (tables + RLS + realtime).
 2. Authentication → Sign In / Up: enable Email with magic links (no passwords).
 3. Authentication → URL Configuration: set Site URL to `https://app.journlet.com`.
-4. Project Settings → API: copy the project URL and anon key into `src/lib/supabaseConfig.ts`, commit and push. Both values are safe to publish — RLS and E2EE do the guarding.
+4. Project Settings → API: copy the project URL and anon key into `src/lib/supabaseConfig.ts`, **and the same host into the `connect-src` directive of the CSP meta tag in `index.html`**, then commit and push. Both files, or sync fails silently: the CSP blocks the request before Supabase sees it, so there is no server error to report and the not-syncing banner cannot say why. Both values are safe to publish, RLS and E2EE do the guarding.
 
 In the app: Sync → enter your email → tap the emailed link. First device publishes its wrapped journal key; on any new device, sign in and paste the journal key (Sync → show journal key on the old device). Save that key somewhere safe — losing every device and the key means the journal is unrecoverable, by design.
 
@@ -60,13 +60,13 @@ The dev service mounts the source and keeps its own `node_modules` volume, so ho
 
 Note: the service worker registers on localhost, but installability and full PWA behaviour need HTTPS — use the journlet.com deployment for phone installs.
 
-## Deploy (GitHub Pages at journlet.com)
+## Deploy (GitHub Pages at app.journlet.com)
 
-The repo deploys via `.github/workflows/deploy.yml`: every push to `main` builds and publishes `dist/` to GitHub Pages. One-time setup:
+The repo deploys via `.github/workflows/deploy.yaml`: every push to `main` builds and publishes `dist/` to GitHub Pages. One-time setup:
 
 1. Create the repo and push: `git remote add origin git@github.com:journlet/app.git && git push -u origin main`
 2. In the repo, Settings → Pages → Source: **GitHub Actions**.
-3. DNS at your registrar: a CNAME record for `app` pointing to `journlet.github.io`. (The apex journlet.com is reserved for a future landing page — four A records to 185.199.108.153 / .109 / .110 / .111.153 when needed.)
+3. DNS at your registrar: a CNAME record for `app` pointing to `journlet.github.io`. (The apex journlet.com serves the landing page from journlet/site — four A records to 185.199.108.153 / .109 / .110 / .111.153 when needed.)
 4. Settings → Pages → Custom domain: enter `app.journlet.com` (the `public/CNAME` file keeps it set across deploys) and tick **Enforce HTTPS** once the certificate is issued.
 
 Then install on your phone: open https://app.journlet.com in Safari (iOS) → Share → Add to Home Screen, or Chrome (Android) → Install app.

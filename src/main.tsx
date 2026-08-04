@@ -50,7 +50,7 @@ document.addEventListener(
 // restarted. onRegisteredSW below makes the running app check the server
 // itself: on a timer while open, and — the moment that matters most for an
 // installed PWA the OS suspends in the background — whenever it regains focus.
-const UPDATE_CHECK_MS = 30 * 60 * 1000; // hourly-ish poll while the app stays open
+const UPDATE_CHECK_MS = 30 * 60 * 1000; // half-hourly poll while the app stays open
 
 const updateSW = registerSW({
   immediate: true,
