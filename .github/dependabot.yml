@@ -1,0 +1,37 @@
+# Pinning the actions to commit SHAs (Finding 10) removes the silent-update
+# problem and creates a silent-staleness one in its place. This is the other
+# half: Dependabot rewrites the pins, and the version comment beside them, in a
+# pull request that has to pass the build and be reviewed like any other.
+#
+# Note the interaction with the rulesets on this repository: Dependabot cannot
+# approve its own pull request and CODEOWNERS review is required, so each of
+# these needs a human look. That is the intended cost of pinning.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    # 47 production packages against 521 dev ones, so ungrouped updates would be
+    # mostly noise about things that never reach a user. Production dependencies
+    # come as individual pull requests because those are the ones worth reading
+    # one at a time; everything else arrives as one.
+    groups:
+      production:
+        applies-to: version-updates
+        dependency-type: production
+      development:
+        applies-to: version-updates
+        dependency-type: development
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
