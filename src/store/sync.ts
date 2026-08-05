@@ -56,10 +56,10 @@ import { b64decode, b64encode } from "../lib/base64";
 import type { KeyRing } from "../lib/keyring";
 import {
   clearPendingKey,
+  enforcePendingKeyExpiry,
   pendingJournalKey,
   stashKey,
   stashKeyFromUrl,
-  sweepPendingKey,
 } from "../lib/pendingKey";
 import { markRecoveryPending } from "../lib/recoveryAck";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
@@ -1522,7 +1522,7 @@ export const retryConnect = async (): Promise<void> => {
 export const startSync = (): void => {
   if (started || !supabase) return;
   started = true;
-  sweepPendingKey();
+  enforcePendingKeyExpiry();
   stashKeyFromUrl();
 
   supabase.auth.onAuthStateChange((_event, s) => {

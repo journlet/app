@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 //
 // The pending journal key is the master keeper key in plaintext, sitting in
-// localStorage. These tests pin the two properties that keep that acceptable:
-// it expires, and anything unreadable is discarded rather than kept.
+// localStorage. These tests pin the three properties that keep that acceptable:
+// it expires without being asked, it expires on read as well, and anything
+// unreadable is discarded rather than kept.
 
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -11,7 +12,7 @@ import {
   pendingJournalKey,
   stashKey,
   stashKeyFromUrl,
-  sweepPendingKey,
+  enforcePendingKeyExpiry,
 } from "../src/lib/pendingKey";
 
 const STORAGE_KEY = "journlet-pending-journal-key";
@@ -22,9 +23,24 @@ const setHash = (hash: string): void => {
 };
 
 beforeEach(() => {
+  // clearPendingKey, not just localStorage.clear, so a timer armed by the
+  // previous test cannot fire partway through this one.
+  clearPendingKey();
   localStorage.clear();
   setHash("");
 });
+
+// A record written straight to storage and aged by hand.
+//
+// The read-path tests below must not go through stashKey: that arms the timer,
+// the timer would erase the key before anything read it, and the check on read
+// would quietly stop being tested.
+const storeAged = (ageMs: number): void => {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ k: CODE, t: Date.now() - ageMs })
+  );
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -57,46 +73,78 @@ describe("stashKeyFromUrl", () => {
   });
 });
 
-describe("expiry", () => {
+describe("expiry on read", () => {
   it("returns the key while it is inside the TTL", () => {
-    vi.useFakeTimers();
-    setHash(`#jk=${CODE}`);
-    stashKeyFromUrl();
-    vi.advanceTimersByTime(PENDING_TTL_MS - 1000);
+    storeAged(PENDING_TTL_MS - 1000);
     expect(pendingJournalKey()).toBe(CODE);
   });
 
   it("drops the key once the TTL has passed", () => {
-    vi.useFakeTimers();
-    setHash(`#jk=${CODE}`);
-    stashKeyFromUrl();
-    vi.advanceTimersByTime(PENDING_TTL_MS + 1000);
+    storeAged(PENDING_TTL_MS + 1000);
     expect(pendingJournalKey()).toBeNull();
   });
 
   it("erases the expired key from storage, not just from the read", () => {
-    vi.useFakeTimers();
-    setHash(`#jk=${CODE}`);
-    stashKeyFromUrl();
-    vi.advanceTimersByTime(PENDING_TTL_MS + 1000);
+    storeAged(PENDING_TTL_MS + 1000);
     pendingJournalKey();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it("sweeps an expired key on launch without anything reading it", () => {
-    vi.useFakeTimers();
-    setHash(`#jk=${CODE}`);
-    stashKeyFromUrl();
-    vi.advanceTimersByTime(PENDING_TTL_MS + 1000);
-    sweepPendingKey();
+    storeAged(PENDING_TTL_MS + 1000);
+    enforcePendingKeyExpiry();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it("leaves a fresh key alone when sweeping", () => {
     setHash(`#jk=${CODE}`);
     stashKeyFromUrl();
-    sweepPendingKey();
+    enforcePendingKeyExpiry();
     expect(pendingJournalKey()).toBe(CODE);
+  });
+});
+
+describe("expiry without being asked", () => {
+  // Finding 4(a). Before this, nothing erased the key on a clock: expiry was
+  // checked on read and swept at launch, so a scan that never reached sign-in
+  // left the plaintext keeper key on disk until the app next opened, which for
+  // someone who gave up on linking might be never. Every assertion here reads
+  // storage directly, because the point is that nothing had to ask.
+  it("erases a key on its own while the tab is left open", () => {
+    vi.useFakeTimers();
+    stashKey(CODE);
+    vi.advanceTimersByTime(PENDING_TTL_MS + 1000);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("does not erase it early", () => {
+    vi.useFakeTimers();
+    stashKey(CODE);
+    vi.advanceTimersByTime(PENDING_TTL_MS - 1000);
+    expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+  });
+
+  it("counts from the scan, so reopening the app cannot extend the key's life", () => {
+    vi.useFakeTimers();
+    stashKey(CODE);
+    // Twenty minutes with the app closed: the clock moves, no timer of ours runs.
+    vi.setSystemTime(Date.now() + 20 * 60 * 1000);
+    enforcePendingKeyExpiry();
+    vi.advanceTimersByTime(9 * 60 * 1000);
+    expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("erases on return to the foreground, where the timer may never have fired", () => {
+    vi.useFakeTimers();
+    stashKey(CODE);
+    enforcePendingKeyExpiry();
+    // A hidden tab with its timers frozen: the clock moved, nothing ran. No
+    // timers are advanced here, so only the visibility sweep can do this.
+    vi.setSystemTime(Date.now() + PENDING_TTL_MS + 1000);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 });
 
