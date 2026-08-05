@@ -6,20 +6,41 @@
       Content Security Policy. The entire E2E model rests on the integrity of
       the JS running here, so lock script-src to self: no inline scripts, no
       remote script origins, so an injected string can never execute and read
-      the keyring out of IndexedDB. style-src keeps 'unsafe-inline' only
-      because React writes element styles inline; script-src stays strict.
+      the keyring out of IndexedDB.
+
+      style-src is 'self' with no 'unsafe-inline'. The old comment here said it
+      was needed "because React writes element styles inline", which is not how
+      the check works: React sets element styles through the CSSOM, and CSP
+      governs <style> elements and style attributes as they are parsed, not
+      CSSOM mutation. Verified rather than reasoned, on a real build with the
+      directive removed: the app renders identically, twenty style attributes
+      are still applied, the --grid custom property still resolves, and the
+      browser reports no style-src violation. It matters because with
+      'unsafe-inline' present an HTML-injection foothold can exfiltrate through
+      CSS attribute selectors, and "the keyring never leaves" is the whole
+      claim. If a <style> element or a literal style="..." is ever added to
+      markup, this is the directive that will refuse it, which is the point.
+
       connect-src is limited to the Supabase project (REST + realtime wss).
       Fonts are self-hosted, so style-src and font-src are 'self' with no
       third-party origin anywhere in the policy: the Supabase project is now
       the only external host the app may reach, and it only ever receives
       ciphertext.
+      form-action is 'none', not 'self': the app submits no forms at all, and
+      the marketing site already uses 'none'. frame-src is 'none' because the
+      app embeds nothing, and both directives work through meta.
+
       Delivered via meta because GitHub Pages cannot set response headers;
       frame-ancestors is header-only, so clickjacking cover needs a header
-      (nginx path) or is accepted for the Pages deploy.
+      or is accepted for the Pages deploy. Note the local nginx rig is not that
+      header, deliberately: its job is to reproduce Pages, and Pages sends none.
+      A meta CSP also does not reach the service worker, whose policy comes from
+      its own response headers, so sw.js runs unrestricted on Pages regardless
+      of anything in this tag.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://hpbdtcoskwmcggiyqtde.supabase.co wss://hpbdtcoskwmcggiyqtde.supabase.co; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://hpbdtcoskwmcggiyqtde.supabase.co wss://hpbdtcoskwmcggiyqtde.supabase.co; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-src 'none'"
     />
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
