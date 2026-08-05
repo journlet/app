@@ -44,6 +44,11 @@ jobs:
       # looked at, not run quietly.
       - run: npm ci --ignore-scripts
       - run: npm run lint
+      # Separate from `npm run build`, which typechecks src only. tsc -b covers
+      # the two referenced projects; tsconfig.test.json covers tests/, which
+      # nothing typechecked at all until 4 August. Its own step so the log names
+      # what broke rather than reporting it as a build failure.
+      - run: npm run typecheck
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v5

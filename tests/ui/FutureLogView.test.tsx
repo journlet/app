@@ -6,7 +6,12 @@ import type { ScheduledRow } from "../../src/ui/types";
 
 afterEach(cleanup);
 
-const entryRow = (id: string, pk: string): ScheduledRow => ({
+// The entry arm alone. Annotated as the whole union, this helper's own result
+// had no readable `entry`, so the fixtures below reached through a property the
+// type says may not be there, and the discriminant stopped earning its keep.
+type EntryRow = Extract<ScheduledRow, { kind: "entry" }>;
+
+const entryRow = (id: string, pk: string): EntryRow => ({
   kind: "entry",
   sort: pk,
   pk,

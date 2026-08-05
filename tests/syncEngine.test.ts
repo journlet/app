@@ -40,6 +40,23 @@ let doc = new Y.Doc();
 let rows: Row[] = [];
 let inserted: { payload: string; volume: string }[] = [];
 let authCallback: ((event: string, session: unknown) => void) | null = null;
+
+/**
+ * Sign in through the listener the Supabase mock installed.
+ *
+ * A function rather than an inline `authCallback?.(...)` for two reasons. The
+ * optional call silently does nothing when the listener was never installed, so
+ * a test would boot signed out and look identical to one that signed in and
+ * found nothing to do. And reading a module-level `let` inside the same
+ * function that assigned it `null` leaves TypeScript narrowing it to `null`
+ * across the `await import(...)`, which is the narrowing trap Finding 28 came
+ * from: here it made the call unreachable as far as the compiler could tell.
+ */
+const signIn = (): void => {
+  if (!authCallback)
+    throw new Error("startSync installed no auth listener, so nothing signed in");
+  authCallback("SIGNED_IN", { user: { id: USER_ID, email: "g@example.com" } });
+};
 // The realtime INSERT handler, captured so a test can deliver a row the way
 // another device's edit would arrive.
 let realtimeHandler: ((msg: { new: Row }) => void) | null = null;
@@ -167,7 +184,15 @@ const legacyRow = async (id: number, text: string): Promise<Row> => {
   const update = Y.encodeStateAsUpdate(scratch);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(
-    await crypto.subtle.encrypt({ name: "AES-GCM", iv }, dataKey, update)
+    // `as BufferSource` for the same reason crypto.ts does it at the real call
+    // site: since the typed arrays became generic in their buffer, a plain
+    // Uint8Array is not assignable to the DOM lib's ArrayBufferView<ArrayBuffer>.
+    // Nothing about the bytes changes.
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      dataKey,
+      update as BufferSource
+    )
   );
   const out = new Uint8Array(1 + 12 + ct.length);
   out[0] = 1;
@@ -242,8 +267,7 @@ const boot = async (opts: {
 
   const sync = await import("../src/store/sync");
   sync.startSync();
-  if (!authCallback) throw new Error("startSync registered no listener");
-  authCallback("SIGNED_IN", { user: { id: USER_ID, email: "g@example.com" } });
+  signIn();
   return sync;
 };
 

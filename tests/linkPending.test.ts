@@ -39,6 +39,23 @@ const b64encode = (b: Uint8Array): string => btoa(String.fromCharCode(...b));
 
 let doc = new Y.Doc();
 let authCallback: ((e: string, s: unknown) => void) | null = null;
+
+/**
+ * Sign in through the listener the Supabase mock installed.
+ *
+ * A function rather than an inline `authCallback?.(...)` for two reasons. The
+ * optional call silently does nothing when the listener was never installed, so
+ * a test would boot signed out and look identical to one that signed in and
+ * found nothing to do. And reading a module-level `let` inside the same
+ * function that assigned it `null` leaves TypeScript narrowing it to `null`
+ * across the `await import(...)`, which is the narrowing trap Finding 28 came
+ * from: here it made the call unreachable as far as the compiler could tell.
+ */
+const signIn = (): void => {
+  if (!authCallback)
+    throw new Error("startSync installed no auth listener, so nothing signed in");
+  authCallback("SIGNED_IN", { user: { id: USER_ID, email: "g@example.com" } });
+};
 let storedRing: KeyRing;
 let inserted: unknown[] = [];
 
@@ -156,7 +173,7 @@ const boot = async () => {
   };
   const sync = await import("../src/store/sync");
   sync.startSync();
-  authCallback?.("SIGNED_IN", { user: { id: USER_ID, email: "g@example.com" } });
+  signIn();
   return sync;
 };
 
