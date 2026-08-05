@@ -15,7 +15,11 @@
       CSSOM mutation. Verified rather than reasoned, on a real build with the
       directive removed: the app renders identically, twenty style attributes
       are still applied, the --grid custom property still resolves, and the
-      browser reports no style-src violation. It matters because with
+      browser reports no style-src violation. The one place it does bite is
+      `vite dev`, which injects CSS as a runtime <style> element and so loses
+      every rule to this directive; devCspAllowInlineStyles in vite.config.ts
+      adds 'unsafe-inline' back for the dev server alone, and cannot touch
+      what is built. It matters because with
       'unsafe-inline' present an HTML-injection foothold can exfiltrate through
       CSS attribute selectors, and "the keyring never leaves" is the whole
       claim. If a <style> element or a literal style="..." is ever added to
