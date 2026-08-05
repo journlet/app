@@ -66,19 +66,26 @@ vi.mock("@supabase/supabase-js", () => ({
       if (table === "journals") {
         return {
           select: () => ({
-            maybeSingle: async () => ({
-              ...(journalsDelayMs
-                ? await new Promise((r) => setTimeout(r, journalsDelayMs))
-                : {}),
-              data: {
-                wrapped_key: {
-                  v: accountWrapped.v,
-                  iv: b64encode(accountWrapped.iv),
-                  blob: b64encode(accountWrapped.blob),
+            // The delay is awaited as a statement rather than spread into the
+            // result. Spreading the promise's value put an `unknown` into the
+            // object literal, which typechecks as an error and, had the promise
+            // ever resolved to something, would have merged it into the row.
+            maybeSingle: async () => {
+              if (journalsDelayMs)
+                await new Promise<void>((r) => {
+                  setTimeout(r, journalsDelayMs);
+                });
+              return {
+                data: {
+                  wrapped_key: {
+                    v: accountWrapped.v,
+                    iv: b64encode(accountWrapped.iv),
+                    blob: b64encode(accountWrapped.blob),
+                  },
                 },
-              },
-              error: null,
-            }),
+                error: null,
+              };
+            },
           }),
           insert: async () => ({ error: null }),
         };

@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build && cp dist/index.html dist/404.html",
     "icons": "node scripts/make-icons.mjs",
     "lint": "oxlint",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview"

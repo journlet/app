@@ -1,0 +1,32 @@
+{
+  // tests/ was outside every project: tsconfig.json references only
+  // tsconfig.app.json ("src") and tsconfig.node.json, so `tsc -b` never looked
+  // at a test file. A mock could drift from the module it stands in for, or a
+  // fixture describe a state the app cannot be in, and nothing would say so.
+  //
+  // src is included as well as tests because the tests import it and the
+  // checker needs the real types, not declaration stubs. Options match
+  // tsconfig.app.json, minus the build-info file: this project only ever
+  // reports, it never emits.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    // node, not vite/client: the test files are what is being checked here.
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+
+    /* Linting */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["tests", "src"]
+}

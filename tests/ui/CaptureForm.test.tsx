@@ -7,36 +7,53 @@ import type { Collection, Entry } from "../../src/lib/types";
 
 afterEach(cleanup);
 
+type Props = Parameters<typeof CaptureForm>[0];
+
+/**
+ * The callbacks every test wants as spies, kept out of the overridable set.
+ *
+ * Spreading `overrides` over these widened each one to "spy, or the real prop
+ * signature", because the compiler cannot know a caller has not replaced the
+ * spy with a plain function. That is why `props.setCaptureType.mock` did not
+ * typecheck. A test that wants different behaviour should assert on the spy
+ * rather than swap it out.
+ */
+const spies = () => ({
+  setInput: vi.fn(),
+  setCaptureDetails: vi.fn(),
+  clearCaptureParent: vi.fn(),
+  submitEntry: vi.fn(),
+  closeCapture: vi.fn(),
+  setCaptureScope: vi.fn(),
+  setCaptureType: vi.fn(),
+  setCapturePriority: vi.fn(),
+  setCaptureInspiration: vi.fn(),
+  setCustomDate: vi.fn(),
+  setCustomGran: vi.fn(),
+});
+
 // Build props with sensible defaults; each test overrides what it exercises.
-const setup = (overrides: Partial<Parameters<typeof CaptureForm>[0]> = {}) => {
+const setup = (
+  overrides: Partial<Omit<Props, keyof ReturnType<typeof spies>>> = {}
+) => {
   const props = {
     inputRef: createRef<HTMLInputElement>(),
     input: "",
-    setInput: vi.fn(),
     captureDetails: "",
-    setCaptureDetails: vi.fn(),
     captureParent: null as Entry | null,
     captureLost: null as string | null,
     captureParentPageLabel: null as string | null,
-    clearCaptureParent: vi.fn(),
-    submitEntry: vi.fn(),
-    closeCapture: vi.fn(),
-    justLogged: null,
+    justLogged: null as string | null,
     activeCol: null as Collection | null,
     today: "2026-07-24",
     captureScope: "day" as const,
-    setCaptureScope: vi.fn(),
     captureType: "task" as const,
-    setCaptureType: vi.fn(),
     capturePriority: false,
-    setCapturePriority: vi.fn(),
     captureInspiration: false,
-    setCaptureInspiration: vi.fn(),
     customDate: "2026-07-24",
-    setCustomDate: vi.fn(),
     customGran: "day" as const,
-    setCustomGran: vi.fn(),
     ...overrides,
+    ...spies(),
   };
   render(<CaptureForm {...props} />);
   return props;

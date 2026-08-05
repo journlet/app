@@ -34,25 +34,44 @@ const entry: Entry = {
   createdAt: 0,
 };
 
-const setup = (over: Partial<Parameters<typeof SpreadView>[0]> = {}) => {
+type Props = Parameters<typeof SpreadView>[0];
+
+/**
+ * The render callbacks and handlers as spies, kept out of the overridable set.
+ *
+ * `renderEntry` now declares all three parameters the component passes it. It
+ * used to declare only the entry, so `mock.calls.map(([e]) => e.id)` fell back
+ * to `any` and the property being read was never checked. Spreading `over` on
+ * top of the spies also widened them to "spy, or the real prop signature",
+ * which is why `.mock` did not typecheck.
+ */
+const spies = () => ({
+  renderEntry: vi.fn((e: Entry, _pk: string, _sc: Scope | null) => (
+    <li key={e.id}>{e.text}</li>
+  )),
+  renderScheduledRow: vi.fn(() => null),
+  renderThreadedHere: vi.fn(() => null),
+  setAnchors: vi.fn(),
+  onReview: vi.fn(),
+  onOpenFutureLog: vi.fn(),
+});
+
+const setup = (
+  over: Partial<Omit<Props, keyof ReturnType<typeof spies>>> = {}
+) => {
   const props = {
-    renderEntry: vi.fn((e: Entry) => <li key={e.id}>{e.text}</li>),
-    renderScheduledRow: vi.fn(() => null),
-    renderThreadedHere: vi.fn(() => null),
     pastOpen: [] as { pk: string; entry: Entry }[],
     dueItems: [] as { pk: string; entry: Entry }[],
     days: { [nowKeys.day]: [entry] } as Record<string, Entry[]>,
     anchors,
-    setAnchors: vi.fn(),
     nowKeys,
     scheduledRows: [],
     laterThisMonth: [],
     futureLogCount: 0,
     filter: "all" as const,
     filterRow: <div data-testid="filter-row">filter row</div>,
-    onReview: vi.fn(),
-    onOpenFutureLog: vi.fn(),
     ...over,
+    ...spies(),
   };
   render(<SpreadView {...props} />);
   return props;
@@ -85,6 +104,15 @@ test("past-tasks banner appears and triggers review", () => {
 test("Due section renders when there are due items", () => {
   setup({ dueItems: [{ pk: nowKeys.day, entry }] });
   expect(screen.getByText("Due")).toBeTruthy();
+});
+
+// The Due section is the second renderEntry call site and its scope is derived
+// from the row's own page key, not from the section being drawn. Nothing
+// asserted that until the spy declared the parameters it is actually passed.
+test("a Due row carries its own page key and the scope that key implies", () => {
+  const props = setup({ dueItems: [{ pk: "2026-06", entry }], days: {} });
+  expect(props.renderEntry).toHaveBeenCalledTimes(1);
+  expect(props.renderEntry).toHaveBeenCalledWith(entry, "2026-06", "month");
 });
 
 test("stepping a section forward updates the anchors", () => {

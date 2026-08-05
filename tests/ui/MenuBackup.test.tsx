@@ -19,7 +19,11 @@ const renderMenu = (over: Partial<Parameters<typeof MenuView>[0]> = {}) => {
     syncStatus: "synced" as const,
     theme: "system" as const,
     onSetTheme: vi.fn(),
-    installMode: "installed" as const,
+    // "hidden" is the already-installed state. This read "installed", which is
+    // not a member of InstallMode at all, so MenuView fell through to its
+    // desktop branch and every test in this file rendered the menu with the
+    // install row on show: a state production never puts it in.
+    installMode: "hidden" as const,
     canPromptInstall: false,
     onInstall: vi.fn(),
     onOpenIndex: vi.fn(),
