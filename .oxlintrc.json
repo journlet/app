@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "rules": {
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "status",
+        "message": "Window.status, almost certainly not what you meant. This exact mistake shipped once: a module-level `let status` was moved into store/syncStatus.ts and two references to it silently rebound to the DOM global, which is a string, so `status !== \"needs-key\"` typechecked and was always true. Use getSyncStatus()."
+      },
+      { "name": "name", "message": "Window.name. Use a local or an import." },
+      { "name": "length", "message": "Window.length. Use a local or an import." },
+      { "name": "event", "message": "Window.event, deprecated. Take the event as a parameter." },
+      { "name": "origin", "message": "Window.origin. Use location.origin explicitly if that is what you want." },
+      { "name": "closed", "message": "Window.closed. Use a local or an import." },
+      { "name": "top", "message": "Window.top. Use a local or an import." },
+      { "name": "parent", "message": "Window.parent. Use a local or an import." },
+      { "name": "frames", "message": "Window.frames. Use a local or an import." },
+      { "name": "screen", "message": "Window.screen. Use a local or an import." }
+    ]
+  }
+}

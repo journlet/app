@@ -63,21 +63,31 @@ import {
 } from "../lib/pendingKey";
 import { markRecoveryPending } from "../lib/recoveryAck";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
+import {
+  clearError,
+  getSyncStatus,
+  isConfigured,
+  notifyLinkChanged,
+  setError,
+  setStatus,
+  subscribeSync,
+} from "./syncStatus";
+import type { SyncStatus } from "./syncStatus";
 import { DEFAULT_VOLUME, getActiveVolume, setActiveVolume } from "../lib/volume";
-
-export type SyncStatus =
-  | "disabled" // no Supabase config in the build
-  | "signed-out"
-  | "connecting"
-  | "needs-key" // remote journal uses a different journal key
-  | "synced"
-  | "pending" // local changes not yet on the server
-  | "offline";
 
 const PAGE = 1000;
 
-export const isConfigured = (): boolean =>
-  Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+// Status and error live in store/syncStatus.ts now, and are re-exported here so
+// the UI keeps one import surface for the store. See that file for why the
+// listener payload had to stop being the status value.
+export type { SyncStatus, SyncSnapshot } from "./syncStatus";
+export {
+  getSyncError,
+  getSyncSnapshot,
+  getSyncStatus,
+  isConfigured,
+  subscribeSync,
+} from "./syncStatus";
 
 export const supabase: SupabaseClient | null = isConfigured()
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -85,33 +95,17 @@ export const supabase: SupabaseClient | null = isConfigured()
 
 // ---------- status + listeners ----------
 
-let status: SyncStatus = isConfigured() ? "signed-out" : "disabled";
-const listeners = new Set<(s: SyncStatus) => void>();
-
-const setStatus = (s: SyncStatus) => {
-  status = s;
-  listeners.forEach((fn) => fn(s));
-};
-
-export const getSyncStatus = (): SyncStatus => status;
-
-// Last server error, surfaced on the Sync screen so a schema/RLS problem
-// doesn't masquerade as "offline"
-let lastError: string | null = null;
-export const getSyncError = (): string | null => lastError;
-const setError = (e: unknown) => {
-  lastError =
-    e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
-  listeners.forEach((fn) => fn(status));
-};
-const clearError = () => {
-  lastError = null;
-};
-
+/**
+ * Subscribe to the status alone, called once immediately.
+ *
+ * Kept for callers that only want the value. Anything that needs the error as
+ * well should use subscribeSync with getSyncSnapshot, because an error is a
+ * change this callback cannot represent: it fires with a status the consumer
+ * already holds, which is exactly the bail-out that hid it.
+ */
 export const onSyncStatus = (fn: (s: SyncStatus) => void): (() => void) => {
-  listeners.add(fn);
-  fn(status);
-  return () => listeners.delete(fn);
+  fn(getSyncStatus());
+  return subscribeSync(() => fn(getSyncStatus()));
 };
 
 // ---------- helpers ----------
@@ -615,7 +609,7 @@ const deviceBinding = () => ({
   deviceId: thisDeviceId(),
 });
 
-const notify = () => listeners.forEach((fn) => fn(status));
+const notify = notifyLinkChanged;
 
 /**
  * Has this device been removed from the account by another device?
@@ -678,7 +672,7 @@ const stopWatchingForGrant = () => {
 };
 
 const pollForGrant = async (): Promise<void> => {
-  if (!supabase || !session || status !== "needs-key") {
+  if (!supabase || !session || getSyncStatus() !== "needs-key") {
     stopWatchingForGrant();
     return;
   }
@@ -1492,7 +1486,8 @@ const scheduleRetry = () => {
   // Only for states a retry can actually mend. "needs-key" waits on the user,
   // and retrying it would re-read the journal row every minute for nothing.
   if (retryTimer || !session) return;
-  if (status !== "pending" && status !== "offline") return;
+  const now = getSyncStatus();
+  if (now !== "pending" && now !== "offline") return;
   const delay = retryDelay;
   retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
   retryTimer = setTimeout(() => {

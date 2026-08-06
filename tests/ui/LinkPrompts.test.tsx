@@ -22,10 +22,7 @@ vi.mock("../../src/store/sync", () => ({
   getLinkRequests: () => requests,
   getLinkCode: () => linkCode,
   getLinkStage: () => linkStage,
-  onSyncStatus: (fn: () => void) => {
-    fn();
-    return () => {};
-  },
+  subscribeSync: () => () => {},
 }));
 
 const LinkPrompts = (await import("../../src/ui/LinkPrompts")).default;
