@@ -73,21 +73,25 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # No `with: timeout:` here, and that is the finding rather than an
+      # omission. deploy-pages caps the input at its 600000 ms default and says
+      # so in a warning it is easy to miss: "timeout value is greater than the
+      # allowed maximum - timeout set to the maximum of 600000 milliseconds".
+      # Ten minutes is therefore a ceiling, not a default, and a Pages
+      # deployment that has not started within it cannot be waited out from
+      # here at all.
+      #
+      # That matters because of what the timeout costs. The action cancels the
+      # deployment it created on the way out, Pages keys a deployment on the
+      # commit SHA, and so re-running the job asks for something already
+      # cancelled and fails in seconds. Recovery costs a new commit every time.
+      #
+      # Seen on 6 August: deploys went from 1m 39s the day before to 5m 53s,
+      # 8m 22s, and then three ten-minute timeouts, every one of them
+      # deployment_queued from start to abort with a healthy one-minute build
+      # and a 401 KB single-file artifact. Nothing in this repository can
+      # influence that. If it recurs the escalation is GitHub support, or
+      # switching Pages to a branch source to bypass this API.
       - id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
-        with:
-          # Twenty minutes rather than the ten-minute default. This is a symptom
-          # fix and worth naming as one: on 6 August the deployment of #18 sat in
-          # deployment_queued for the full ten minutes and the action gave up.
-          # Pages had accepted the request and not started it, with no GitHub
-          # incident open and nothing pending in the environment.
-          #
-          # The reason for buying more time rather than failing faster is what
-          # happens on the way out. When this action times out it cancels the
-          # Pages deployment it created, and the deployment is keyed on the
-          # commit SHA, so re-running the job tries to recreate a deployment that
-          # is already cancelled and dies in eight seconds. A timeout therefore
-          # costs a whole new commit to recover from, not a re-run, which makes
-          # timing out early the expensive option.
-          timeout: 1200000
 
