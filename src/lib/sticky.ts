@@ -3,15 +3,15 @@
 // entries needs no re-selection.
 
 import type { EntryType } from "./types";
+import { SCOPES } from "./dates";
 import type { Scope } from "./dates";
-
-export type CaptureScope = Scope | "date";
 
 export interface CaptureSticky {
   type: EntryType;
   priority: boolean;
   inspiration: boolean;
-  scope: CaptureScope;
+  /** which kind of page capture last logged into (see ui/PagePicker) */
+  scope: Scope;
 }
 
 const KEY = "journlet-capture-v1";
@@ -28,7 +28,12 @@ export const loadSticky = (): CaptureSticky => {
     const raw = localStorage.getItem(KEY);
     if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw) as Partial<CaptureSticky>;
-    return { ...DEFAULTS, ...parsed };
+    const merged = { ...DEFAULTS, ...parsed };
+    // "date" was a fifth scope before the page picker was unified (5 August
+    // 2026); a stored one would now select nothing, so it reads as "day" — the
+    // date itself was never sticky, so nothing is lost
+    if (!SCOPES.includes(merged.scope)) merged.scope = DEFAULTS.scope;
+    return merged;
   } catch {
     return DEFAULTS;
   }

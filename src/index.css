@@ -739,3 +739,83 @@ table.habits {
     transition: none;
   }
 }
+
+/* PagePicker: the chosen page, which is also the button that opens the
+   chooser panel. Quiet until touched — it is a label first, a control
+   second — but never so quiet that it reads as plain text. */
+.pagePickName {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.pagePickName:hover,
+.pagePickName:focus-visible {
+  border-color: var(--line);
+}
+.pagePickName.isOpen {
+  border-color: var(--ink);
+}
+/* PeriodChooser cells: days, weeks, months or years — whichever kind of page
+   is being chosen. The current one is outlined, the chosen one filled, and
+   both are named in full by the button's aria-label. */
+.pickCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 7px 2px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 34px;
+  justify-content: center;
+}
+/* A week row is a line, not a tile: its number and its dates belong together */
+.pickCell.isWide {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+}
+.pickCell:hover:not(:disabled) {
+  border-color: var(--line);
+}
+.pickCell:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.pickCell.isMuted {
+  color: var(--ink-soft);
+  opacity: 0.55;
+}
+.pickCell.isNow {
+  border-color: var(--line);
+  font-weight: 600;
+}
+.pickCell.isOn {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.pickCell.isOn span {
+  color: var(--paper);
+}
+.pickCell:disabled {
+  opacity: 0.3;
+  cursor: default;
+}

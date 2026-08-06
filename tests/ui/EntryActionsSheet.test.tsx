@@ -91,6 +91,10 @@ const setup = (
     onEditDetails: vi.fn(),
     schedDate: "",
     setSchedDate: vi.fn(),
+    moveAnchor: "2026-07-24",
+    setMoveAnchor: vi.fn(),
+    moveGran: "day" as Scope,
+    setMoveGran: vi.fn(),
     closeSheet: vi.fn(),
     saveRepeat: vi.fn(),
     saveReminder: vi.fn().mockResolvedValue(undefined),
@@ -133,10 +137,60 @@ describe("actions mode", () => {
     expect(props.setEditText).toHaveBeenCalledWith("write report");
   });
 
-  test("Move to other scopes calls moveTo with the target period key", () => {
-    setup();
-    fireEvent.click(screen.getByRole("button", { name: "This week" }));
-    expect(moveTo).toHaveBeenCalledWith("e1", "2026-W30");
+  test("Move to offers the four kinds of page, as one picker shared with capture", () => {
+    const props = setup();
+    expect(screen.getByRole("tablist", { name: "Move to" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "week" }));
+    expect(props.setMoveGran).toHaveBeenCalledWith("week");
+    // the old row of four current-period buttons is gone, so "this week" is
+    // reached by choosing a page rather than by a button that means only "now"
+    expect(screen.queryByRole("button", { name: "This week" })).toBeNull();
+  });
+
+  test("the picker starts on the entry's own page, and moving there is refused", () => {
+    const props = setup({ moveAnchor: "2026-07-24", moveGran: "day" as Scope });
+    expect(screen.getByText(/page this entry is already on/)).toBeTruthy();
+    const btn = screen.getByRole("button", { name: "Move" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    fireEvent.click(btn);
+    expect(moveTo).not.toHaveBeenCalled();
+    expect(props.closeSheet).not.toHaveBeenCalled();
+  });
+
+  test("a chosen past page is reachable — a move is a correction, not a migration", () => {
+    const props = setup({ moveAnchor: "2026-07-20", moveGran: "day" as Scope });
+    expect(
+      (screen.getByRole("button", { name: "Previous day" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
+    // the chooser reaches back too: a mislogged entry often belongs on a page
+    // already past
+    fireEvent.click(screen.getByRole("button", { name: /choose a different day/ }));
+    expect(
+      (screen.getByRole("button", { name: "Wed, 1 Jul 2026" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "close without changing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Mon 20 Jul" }));
+    expect(moveTo).toHaveBeenCalledWith("e1", "2026-07-20");
+    expect(migrateEntry).not.toHaveBeenCalled();
+    expect(props.closeSheet).toHaveBeenCalledTimes(1);
+  });
+
+  test("the chosen kind of page decides which page a date means", () => {
+    setup({ moveAnchor: "2026-09-15", moveGran: "month" as Scope });
+    expect(screen.getByText("September 2026")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Move to Sept 2026" }));
+    expect(moveTo).toHaveBeenCalledWith("e1", "2026-09");
+  });
+
+  test("a sub-bullet is told it will be promoted, since its parent stays put", () => {
+    setup({
+      sheetEntry: { ...openTask, parentId: "p1" },
+      moveAnchor: "2026-08-01",
+      moveGran: "day" as Scope,
+    });
+    expect(screen.getByText(/stops being a sub-bullet/)).toBeTruthy();
   });
 
   test("threading is one line in the actions list, whatever the collection count", () => {
@@ -270,6 +324,27 @@ test("migration mode migrates instead of moving, keeping the original", () => {
   expect(screen.getByText(/Migrate to \(original stays here/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "› Today" }));
   expect(migrateEntry).toHaveBeenCalledWith("e1", "2026-07-24");
+});
+
+test("migration mode still offers a plain move, for an entry logged on the wrong page", () => {
+  const props = setup({
+    sheet: { scope: "day", pk: "2020-01-01", id: "e1" },
+    sheetMigrates: true,
+    moveAnchor: "2020-01-08",
+    moveGran: "day" as Scope,
+  });
+  // the two are told apart by their labels, not left to be inferred
+  expect(screen.getByText(/Migrate to \(original stays here/)).toBeTruthy();
+  expect(screen.getByText(/nothing stays behind/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Move to Wed 8 Jan" }));
+  expect(moveTo).toHaveBeenCalledWith("e1", "2020-01-08");
+  expect(migrateEntry).not.toHaveBeenCalled();
+  expect(props.closeSheet).toHaveBeenCalledTimes(1);
+});
+
+test("a collection page offers no move — pages are related by threading, not moving", () => {
+  setup({ sheet: { scope: null, pk: "col:c1", id: "e1" } });
+  expect(screen.queryByRole("tablist", { name: "Move to" })).toBeNull();
 });
 
 test("edit-text mode saves the trimmed text", () => {

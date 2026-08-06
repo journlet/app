@@ -361,6 +361,62 @@ export const S = {
     color: INK_SOFT,
     letterSpacing: "0.03em",
   },
+  // PagePicker: the chosen page, between its two step buttons
+  pagePickRow: {
+    maxWidth: 560,
+    margin: "0 auto 8px",
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+  },
+  // "today" / "this week" — said in words rather than left to a highlight
+  pagePickNow: { fontSize: 11, color: INK_SOFT },
+  // the row holding "back to today", which only exists off the current period
+  pagePickBack: {
+    maxWidth: 560,
+    margin: "0 auto 8px",
+    display: "flex",
+    justifyContent: "center",
+  },
+  // PeriodChooser: the panel behind the page name
+  chooser: {
+    maxWidth: 560,
+    margin: "0 auto 8px",
+    border: `1px solid ${LINE}`,
+    borderRadius: 10,
+    background: "var(--surface)",
+    padding: 8,
+  },
+  chooserHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  },
+  chooserTitle: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 13,
+    fontWeight: 600,
+    color: INK,
+  },
+  chooserWeekdays: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
+    gap: 2,
+    fontSize: 10,
+    color: INK_SOFT,
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  chooserGrid: { display: "grid", gap: 2 },
+  chooserCellSub: { fontSize: 10.5, color: INK_SOFT },
+  chooserFoot: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+  },
   dateControls: {
     maxWidth: 560,
     margin: "0 auto 8px",

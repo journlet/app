@@ -10,9 +10,12 @@ import {
   keyScope,
   keyToAnchor,
   mondayOf,
+  monthGrid,
   periodKey,
+  periodName,
   shiftAnchor,
   toDate,
+  weeksOfMonth,
   todayKey,
 } from "../src/lib/dates";
 
@@ -160,5 +163,47 @@ describe("defaultRemindAt", () => {
   test("an unrecognisable key falls back rather than throwing", () => {
     const now = at(2026, 7, 27, 14, 20);
     expect(defaultRemindAt("not-a-key", now)).toBe(now + 3600_000);
+  });
+});
+
+describe("periodName", () => {
+  test("names the page a day falls in, at each scope", () => {
+    expect(periodName("day", "2026-08-12")).toBe("Wed, 12 Aug 2026");
+    // a week number alone doesn't say which days it covers, so both are given
+    expect(periodName("week", "2026-08-12")).toBe("Week 33 · 10 Aug – 16 Aug");
+    expect(periodName("month", "2026-08-12")).toBe("August 2026");
+    expect(periodName("year", "2026-08-12")).toBe("2026");
+  });
+
+  test("every day in a period names the same page", () => {
+    expect(periodName("week", "2026-08-10")).toBe(periodName("week", "2026-08-16"));
+    expect(periodName("month", "2026-08-01")).toBe(periodName("month", "2026-08-31"));
+  });
+});
+
+describe("month grid and weeks of a month (ui/PeriodChooser)", () => {
+  test("a month grid is always six Monday-first rows", () => {
+    const g = monthGrid("2026-08-12");
+    expect(g).toHaveLength(42);
+    // August 2026 starts on a Saturday, so the grid opens on 27 July
+    expect(g[0]).toBe("2026-07-27");
+    expect(g[6]).toBe("2026-08-02");
+    expect(g).toContain("2026-08-31");
+  });
+
+  test("every day of the month is in its grid, whatever the month", () => {
+    for (const m of ["2026-02-01", "2026-05-01", "2027-01-01"]) {
+      const g = monthGrid(m);
+      const inMonth = g.filter((d) => d.slice(0, 7) === m.slice(0, 7));
+      expect(inMonth[0]).toBe(`${m.slice(0, 7)}-01`);
+      expect(new Set(g).size).toBe(42);
+    }
+  });
+
+  test("weeks of a month are Mondays, including the ones that straddle it", () => {
+    const w = weeksOfMonth("2026-08-12");
+    expect(w[0]).toBe("2026-07-27"); // week 31 covers 27 Jul – 2 Aug
+    expect(w[w.length - 1]).toBe("2026-08-31"); // week 36 runs into September
+    expect(w.every((d) => toDate(d).getDay() === 1)).toBe(true);
   });
 });
