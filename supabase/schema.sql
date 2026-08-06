@@ -72,12 +72,26 @@ create policy "insert own updates" on public.journal_updates
 -- account's writes start failing. Rate limits do not help: they slow how fast an
 -- account can be created, not how much a patient one can store.
 --
--- 20 MB, chosen from measurement rather than taste. Six weeks of real daily use
--- on this project is 402 updates and 123 kB, about 313 bytes an update and
--- roughly 1.1 MB a year. So 20 MB is eighteen years at that rate and about six
--- for someone writing three times as much, and it takes twenty-five accounts to
--- threaten the database. quota_bytes is per row so one account can be raised
--- with an UPDATE rather than a migration.
+-- 10 MB, chosen from measurement rather than taste, and chosen low on purpose.
+-- Six weeks of real daily use on this project is 407 updates and 127 kB, about
+-- 311 bytes an update and roughly 1.1 MB a year. A finished notebook becomes
+-- another volume rather than disappearing, so that accrues indefinitely. 10 MB is
+-- therefore about nine years at that rate, three for someone writing three times
+-- as much, and it takes fifty accounts to threaten the database rather than
+-- twenty-five at 20 MB.
+--
+-- Low on purpose because the two mistakes cost differently. quota_bytes is a
+-- column, so raising one account is an UPDATE. Lowering is not: an account that
+-- has already stored 15 MB would sit permanently over a smaller cap, unable to
+-- write and unable to prune, since the log has no delete policy. Too low costs a
+-- message and one row; too high costs an account you cannot repair.
+--
+-- One wrinkle to expect near the cap, because it does not look like a limit.
+-- Payloads are not uniform: the average is 311 bytes and the largest so far is
+-- 25 kB, a full-journal push from a re-link or a format migration, and that grows
+-- with the document. So an account at 9.98 MB can keep typing and still fail to
+-- re-link a device. verify.sql's 80% check and the Menu's readout exist so that
+-- is seen coming rather than met.
 --
 -- Honest about what this is not: the log cannot be pruned, by design, since
 -- journal_updates has no delete policy. So a quota on it is a countdown and not
@@ -87,7 +101,7 @@ create policy "insert own updates" on public.journal_updates
 create table if not exists public.user_usage (
   user_id     uuid primary key references auth.users (id) on delete cascade,
   bytes       bigint not null default 0,
-  quota_bytes bigint not null default 20971520,
+  quota_bytes bigint not null default 10485760,
   updated_at  timestamptz not null default now()
 );
 
