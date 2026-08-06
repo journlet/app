@@ -72,19 +72,31 @@ create policy "insert own updates" on public.journal_updates
 -- account's writes start failing. Rate limits do not help: they slow how fast an
 -- account can be created, not how much a patient one can store.
 --
--- 10 MB, chosen from measurement rather than taste, and chosen low on purpose.
+-- 5 MB, chosen from measurement and then from what the number is for.
+--
 -- Six weeks of real daily use on this project is 407 updates and 127 kB, about
 -- 311 bytes an update and roughly 1.1 MB a year. A finished notebook becomes
--- another volume rather than disappearing, so that accrues indefinitely. 10 MB is
--- therefore about nine years at that rate, three for someone writing three times
--- as much, and it takes fifty accounts to threaten the database rather than
--- twenty-five at 20 MB.
+-- another volume rather than disappearing, so that accrues indefinitely. 5 MB is
+-- therefore about four and a half years at that rate, eighteen months for someone
+-- writing three times as much, and it takes a hundred accounts to threaten the
+-- database rather than twenty-five at 20 MB.
 --
--- Low on purpose because the two mistakes cost differently. quota_bytes is a
--- column, so raising one account is an UPDATE. Lowering is not: an account that
--- has already stored 15 MB would sit permanently over a smaller cap, unable to
--- write and unable to prune, since the log has no delete policy. Too low costs a
--- message and one row; too high costs an account you cannot repair.
+-- The reason not to be more generous is that a cap nobody reaches protects
+-- nothing and reports nothing. An account that reaches this one after eighteen
+-- months of heavy use is the moment to talk about paying for the app, and the
+-- aggregate forces that conversation anyway: fifty accounts at 5 MB is 250 MB of
+-- a 500 MB project regardless of who is heavy.
+--
+-- Low is also the safer of the two mistakes. quota_bytes is a column, so raising
+-- one account is an UPDATE. Lowering is not: an account already holding 15 MB
+-- would sit permanently over a smaller cap, unable to write and unable to prune,
+-- since the log has no delete policy. Too low costs a message and one row; too
+-- high costs an account that cannot be repaired.
+--
+-- What makes 5 MB humane rather than mean is the runway. 80% of it is 4 MB and
+-- the last megabyte is nearly a year of writing, so a warning at 80% gives months
+-- of notice. That warning belongs in the app; verify.sql's check only tells the
+-- operator.
 --
 -- One wrinkle to expect near the cap, because it does not look like a limit.
 -- Payloads are not uniform: the average is 311 bytes and the largest so far is
@@ -101,7 +113,7 @@ create policy "insert own updates" on public.journal_updates
 create table if not exists public.user_usage (
   user_id     uuid primary key references auth.users (id) on delete cascade,
   bytes       bigint not null default 0,
-  quota_bytes bigint not null default 10485760,
+  quota_bytes bigint not null default 5242880,
   updated_at  timestamptz not null default now()
 );
 

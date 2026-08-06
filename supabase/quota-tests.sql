@@ -76,7 +76,7 @@ begin
   select bytes, quota_bytes into b, q from public.user_usage
    where user_id = '11111111-1111-4111-8111-111111111111';
   if b <> 1000 then raise exception 'expected 1000 bytes, got %', b; end if;
-  if q <> 10485760 then raise exception 'expected 10 MB default, got %', q; end if;
+  if q <> 5242880 then raise exception 'expected 5 MB default, got %', q; end if;
 end $$;
 
 \echo '--- 2: the counter accumulates'
