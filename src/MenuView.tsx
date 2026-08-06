@@ -103,6 +103,11 @@ export default function MenuView({
   useEffect(() => {
     void serverUsage().then(setUsage);
   }, []);
+  // 80%, which sounds urgent and is not: the last fifth of the cap is close to a
+  // year of writing at the rate this journal actually grows. That is the point of
+  // saying it early rather than at the wall, where there is nothing to do about it
+  // and no notice was given.
+  const nearlyFull = usage !== null && usage.bytes > usage.quota * 0.8;
   const docKB = Math.round(vol.docBytes / 102.4) / 10;
 
   // Manual update check. The app already checks in the background, but this
@@ -360,6 +365,13 @@ export default function MenuView({
               {usage && `, ${size(usage.bytes)} of ${size(usage.quota)} on the server`}
               . A rough gauge of how full this notebook is.
             </div>
+            {nearlyFull && (
+              <div style={{ ...ST.rowDesc, color: "var(--danger)" }}>
+                Nearly full. Email hello@journlet.com to have your limit raised.
+                Writing here keeps working either way; what stops is the copy
+                reaching the server.
+              </div>
+            )}
           </div>
         </div>
       </section>

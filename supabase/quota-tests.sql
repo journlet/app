@@ -111,6 +111,10 @@ begin
   select count(*) into n_after from public.journal_updates;
   if n_after <> n_before then raise exception 'row landed anyway'; end if;
   if got not like '%storage limit reached%' then raise exception 'message was: %', got; end if;
+  -- The address is the whole point of the message: without it a person at the cap
+  -- is told what happened and given nothing to do about it.
+  if got not like '%hello@journlet.com%' then raise exception 'no contact address in: %', got; end if;
+  if got not like '%Nothing has been lost%' then raise exception 'no reassurance in: %', got; end if;
   raise notice 'refused with: %', got;
 end $$;
 

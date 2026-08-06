@@ -150,7 +150,7 @@ begin
     -- is empty here. A hand-rolled MB conversion reads "0.0 of 0.0 MB" for any
     -- cap under a megabyte, which is what a test with a small cap surfaced.
     raise exception
-      'Journal storage limit reached: % of % used on the server. Nothing has been lost, and this device still holds your journal.',
+      'Journal storage limit reached: % of % used on the server. Nothing has been lost and this device still holds your journal, but new writing is not reaching the server. Email hello@journlet.com to have your limit raised.',
       pg_catalog.pg_size_pretty(used), pg_catalog.pg_size_pretty(cap)
       using errcode = '53100';
   end if;
