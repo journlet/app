@@ -1,7 +1,13 @@
 // Sync screen: emailed-code sign in, sync status, journal key save/entry,
 // sign out. Every action plainly labelled (spec §4.1 no-guessing rule).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { CSSProperties } from "react";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
@@ -12,10 +18,9 @@ import {
   DeviceNotClearedError,
   getJournalKeyCode,
   getSessionEmail,
-  getSyncError,
-  getSyncStatus,
+  getSyncSnapshot,
   isConfigured,
-  onSyncStatus,
+  subscribeSync,
   provideJournalKey,
   removeDevice,
   signIn,
@@ -84,7 +89,8 @@ const STATUS_LABEL: Record<SyncStatus, string> = {
 };
 
 export default function SyncView() {
-  const [status, setStatus] = useState<SyncStatus>(getSyncStatus());
+  const sync = useSyncExternalStore(subscribeSync, getSyncSnapshot);
+  const status = sync.status;
   const [email, setEmail] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
@@ -100,8 +106,6 @@ export default function SyncView() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => onSyncStatus(setStatus), []);
 
   // The two credentials of onboarding get mistaken for each other, in both
   // directions (see lib/credentialShape). Derived rather than stored, so the
@@ -367,8 +371,8 @@ export default function SyncView() {
       {/* At the top, not the bottom. It used to sit below Delete account, which
           meant the one thing worth reading on a device that could not load was
           the last thing anyone would find (reported 29 Jul). */}
-      {getSyncError() && (
-        <p style={ST.error}>Last sync problem: {getSyncError()}</p>
+      {sync.error && (
+        <p style={ST.error}>Last sync problem: {sync.error}</p>
       )}
 
       {status === "disabled" && (

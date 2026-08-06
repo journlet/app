@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   SCOPES,
   dkey,
@@ -32,8 +39,7 @@ import type { ThemePref } from "./lib/theme";
 import {
   countUpdates,
   getJournalKeyCode,
-  getSyncError,
-  getSyncStatus,
+  getSyncSnapshot,
   hasSyncedOnce,
   isConfigured,
   askToBeAddedBack,
@@ -41,10 +47,9 @@ import {
   getLinkCode,
   getLinkStage,
   wasRemoved,
-  onSyncStatus,
+  subscribeSync,
   retryConnect,
 } from "./store/sync";
-import type { SyncStatus } from "./store/sync";
 import { logVolumeMetrics } from "./store/metrics";
 import { colPageKey } from "./lib/types";
 import type { CollectionKind } from "./lib/types";
@@ -670,8 +675,11 @@ export default function App() {
     closeSheet();
   };
 
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatus());
-  useEffect(() => onSyncStatus(setSyncStatus), []);
+  // One subscription for status and error together. useState with a scalar was
+  // what hid Finding 2: an error carries no status change, so React bailed out
+  // on the same value and CannotLoadView kept its previous message.
+  const sync = useSyncExternalStore(subscribeSync, getSyncSnapshot);
+  const syncStatus = sync.status;
 
   // Fresh install with sync configured: sign in before there is a journal at
   // all (decision 3, spec device-identity-design.md). Deliberately not applied
@@ -729,7 +737,7 @@ export default function App() {
   const [linkStage, setLinkStage] = useState(getLinkStage());
   useEffect(
     () =>
-      onSyncStatus(() => {
+      subscribeSync(() => {
         setLinkCode(getLinkCode());
         setLinkStage(getLinkStage());
         setRemoved(wasRemoved());
@@ -1286,7 +1294,7 @@ export default function App() {
         )}
         {!onboarding && !unlocking && !settling && stuck && (
           <CannotLoadView
-            error={getSyncError()}
+            error={sync.error}
             offline={syncStatus === "offline"}
             busy={retrying}
             onRetry={() => {

@@ -18,6 +18,11 @@ const EMAIL = "gary@example.com";
 const deleteAccount = vi.fn();
 const signOutAndWipe = vi.fn();
 
+// useSyncExternalStore compares snapshots by identity and warns about an
+// infinite loop if getSnapshot returns a fresh object every call, so this
+// caches like the real store does and only rebuilds when the status changes.
+const SNAPSHOT = { status: "synced", error: null, revision: 0 };
+
 vi.mock("../../src/store/sync", () => {
   // A real class, so the component's `instanceof` branch is exercised rather
   // than stubbed past.
@@ -35,6 +40,8 @@ vi.mock("../../src/store/sync", () => {
     getSessionEmail: () => EMAIL,
     getSyncError: () => null,
     getSyncStatus: () => "synced",
+    getSyncSnapshot: () => SNAPSHOT,
+    subscribeSync: () => () => {},
     isConfigured: () => true,
     lostDevice: vi.fn(),
     onSyncStatus: (fn: (s: string) => void) => {

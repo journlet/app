@@ -19,7 +19,7 @@ import {
   getLinkCode,
   getLinkRequests,
   getLinkStage,
-  onSyncStatus,
+  subscribeSync,
   rejectDevice,
 } from "../store/sync";
 import ApprovalCard from "./ApprovalCard";
@@ -68,7 +68,10 @@ export default function LinkPrompts() {
 
   useEffect(
     () =>
-      onSyncStatus(() => {
+      // subscribeSync rather than onSyncStatus: this reads three values the
+      // notification does not carry, so the status it would be handed is of no
+      // use, and the initial read is already done by the useState above.
+      subscribeSync(() => {
         setRequests(getLinkRequests());
         setOwnCode(getLinkCode());
         setOwnStage(getLinkStage());
