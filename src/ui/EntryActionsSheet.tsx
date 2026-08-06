@@ -12,6 +12,7 @@ import {
   keyScope,
   pageLabel,
   periodKey,
+  periodName,
   shiftAnchor,
 } from "../lib/dates";
 import type { Scope } from "../lib/dates";
@@ -37,6 +38,7 @@ import {
 } from "../store/journal";
 import { nextOccurrence } from "../store/recurrence";
 import { notificationPermission } from "../store/reminders";
+import PagePicker from "./PagePicker";
 import { S } from "./styles";
 import type { EditRepeat, SheetTarget } from "./types";
 
@@ -78,6 +80,12 @@ interface EntryActionsSheetProps {
   onEditDetails: () => void;
   schedDate: string;
   setSchedDate: Dispatch<SetStateAction<string>>;
+  /** "Move to": a day inside the page being moved to (see ui/PagePicker) */
+  moveAnchor: string;
+  setMoveAnchor: Dispatch<SetStateAction<string>>;
+  /** which kind of page that day means */
+  moveGran: Scope;
+  setMoveGran: Dispatch<SetStateAction<Scope>>;
   closeSheet: () => void;
   saveRepeat: () => void;
   saveReminder: () => Promise<void>;
@@ -116,6 +124,10 @@ export default function EntryActionsSheet({
   onEditDetails,
   schedDate,
   setSchedDate,
+  moveAnchor,
+  setMoveAnchor,
+  moveGran,
+  setMoveGran,
   closeSheet,
   saveRepeat,
   saveReminder,
@@ -125,6 +137,57 @@ export default function EntryActionsSheet({
   toLocalInput,
   trunc,
 }: EntryActionsSheetProps) {
+  // "Move to" (spec §4.2), through the same page picker the capture form uses:
+  // kind of page, then which one. It replaced a row of four current-period
+  // buttons (5 August 2026), which could only ever push an entry to a page in
+  // progress — so an entry logged onto the wrong page could not be put right.
+  // A move leaves nothing behind and writes no notation, so unlike a migration
+  // it is free to go backwards: the picker has no floor here.
+  const moveTargetKey = periodKey(moveGran, moveAnchor);
+  // Moving an entry to the page it is already on does nothing, so the button
+  // says so and stays inert rather than closing the sheet as if it had worked.
+  const moveIsNoop = moveTargetKey === sheetEntry.pageKey;
+  const moveGroup =
+    keyScope(sheet.pk) === null ? null : (
+      <>
+        <PagePicker
+          label={
+            sheetMigrates
+              ? "Or move the entry itself — nothing stays behind"
+              : "Move to"
+          }
+          gran={moveGran}
+          setGran={setMoveGran}
+          anchor={moveAnchor}
+          setAnchor={setMoveAnchor}
+          today={today}
+        />
+        <div style={S.sheetNote}>
+          {moveIsNoop
+            ? "That is the page this entry is already on — choose another."
+            : `The entry moves to ${periodName(
+                moveGran,
+                moveAnchor
+              )}, leaving nothing behind on ${pageRefLabel(
+                sheetEntry.pageKey,
+                collections
+              )}.` +
+              (sheetEntry.parentId
+                ? " It stops being a sub-bullet, because its parent stays on this page."
+                : "")}
+        </div>
+        <button
+          className="sheetBtn"
+          disabled={moveIsNoop}
+          onClick={() => {
+            moveTo(sheet.id, moveTargetKey);
+            closeSheet();
+          }}
+        >
+          {moveIsNoop ? "Move" : `Move to ${pageLabel(moveTargetKey)}`}
+        </button>
+      </>
+    );
   return (
         <div style={S.sheetBackdrop} onClick={closeSheet}>
           <div
@@ -602,7 +665,7 @@ export default function EntryActionsSheet({
                       </>
                     ) : null;
                   })()}
-                {sheetMigrates ? (
+                {sheetMigrates && (
                   <>
                     <div style={S.sheetGroupLabel}>
                       Migrate to (original stays here, marked ›)
@@ -622,25 +685,8 @@ export default function EntryActionsSheet({
                       ))}
                     </div>
                   </>
-                ) : keyScope(sheet.pk) !== null ? (
-                  <>
-                    <div style={S.sheetGroupLabel}>Move to</div>
-                    <div style={S.sheetRow}>
-                      {SCOPES.filter((t) => t !== sheet.scope).map((t) => (
-                        <button
-                          key={t}
-                          className="sheetBtn isCompact"
-                          onClick={() => {
-                            moveTo(sheet.id, nowKeys[t]);
-                            closeSheet();
-                          }}
-                        >
-                          {SCOPE_LABEL[t]}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
+                )}
+                {moveGroup}
                 {sheetEntry.type === "task" &&
                   sheetEntry.state === "open" &&
                   keyScope(sheet.pk) !== null && (
