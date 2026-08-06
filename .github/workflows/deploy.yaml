@@ -75,3 +75,19 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+        with:
+          # Twenty minutes rather than the ten-minute default. This is a symptom
+          # fix and worth naming as one: on 6 August the deployment of #18 sat in
+          # deployment_queued for the full ten minutes and the action gave up.
+          # Pages had accepted the request and not started it, with no GitHub
+          # incident open and nothing pending in the environment.
+          #
+          # The reason for buying more time rather than failing faster is what
+          # happens on the way out. When this action times out it cancels the
+          # Pages deployment it created, and the deployment is keyed on the
+          # commit SHA, so re-running the job tries to recreate a deployment that
+          # is already cancelled and dies in eight seconds. A timeout therefore
+          # costs a whole new commit to recover from, not a re-run, which makes
+          # timing out early the expensive option.
+          timeout: 1200000
+
