@@ -503,6 +503,12 @@ export const S = {
     padding: "8px 16px calc(22px + env(safe-area-inset-bottom))",
     boxSizing: "border-box",
     boxShadow: "0 -6px 24px rgba(38,50,62,.25)",
+    // A sheet taller than the screen used to run off the bottom with nothing to
+    // scroll — the entry actions did exactly that on a phone before they moved
+    // to their own full-screen view (6 August 2026). Capped here rather than at
+    // each call site so no sheet added later can reintroduce it.
+    maxHeight: "85vh",
+    overflowY: "auto",
   },
   sheetHandle: {
     width: 36,
@@ -527,9 +533,6 @@ export const S = {
     margin: "10px 4px 6px",
   },
   sheetRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 },
-  // Scrollable body of a picker sub-view, so a long list can't push the
-  // sheet's Back button off screen
-  pickerList: { maxHeight: "42vh", overflowY: "auto" },
   // Quiet explanation inside the sheet — why an action isn't on offer
   sheetNote: {
     fontSize: 12,
@@ -559,6 +562,64 @@ export const S = {
     justifyContent: "flex-start",
     gap: 8,
     textAlign: "left",
+  },
+  // ── Full-screen entry view (the ⋯ actions, 6 August 2026) ──────────────
+  // It was a bottom sheet with every action at one weight, three mini-forms
+  // unfolding in place, and no height cap — so on a phone it ran off the
+  // bottom of the screen with nothing to scroll. It is now the same surface as
+  // the capture form (S.captureForm / captureFormHead / captureFormBody), with
+  // the actions in named groups and every multi-step action behind its own
+  // step. Rows that open a step end in "…"; rows that act immediately do not.
+  // No chevrons: › and ‹ are notation here (migrated, scheduled) and must not
+  // also mean "goes somewhere".
+
+  // The entry restated at the head of the view, and again inside a sub-view, so
+  // a multi-step action never loses track of what it is acting on
+  entryCtx: {
+    display: "flex",
+    gap: 8,
+    alignItems: "baseline",
+    fontSize: 15,
+    color: INK,
+    padding: "0 4px 10px",
+    borderBottom: `1px solid ${LINE}`,
+    wordBreak: "break-word",
+  },
+  entryCtxState: {
+    fontSize: 11.5,
+    color: INK_SOFT,
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+    marginLeft: "auto",
+  },
+  entryCtxHistory: {
+    fontSize: 11.5,
+    color: INK_SOFT,
+    padding: "8px 4px 0",
+    lineHeight: 1.4,
+  },
+  // A row's second line: what the action will do, or the state it changes.
+  // Replaces the floating group labels that used to sit above single buttons.
+  rowCaption: {
+    display: "block",
+    fontSize: 11.5,
+    lineHeight: 1.4,
+    color: INK_SOFT,
+    marginTop: 3,
+  },
+  // The destructive group, set apart at the foot of the view so it is never
+  // reached by scanning past the actions above it
+  removeGroup: {
+    marginTop: 22,
+    paddingTop: 14,
+    borderTop: `1px solid ${LINE}`,
+  },
+  // Prose inside a sub-view — what this step does before anything is tapped
+  subLede: {
+    fontSize: 13,
+    lineHeight: 1.55,
+    color: INK_SOFT,
+    margin: "12px 4px 12px",
   },
   sheetInput: {
     width: "100%",
