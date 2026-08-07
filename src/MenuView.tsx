@@ -29,7 +29,7 @@ const size = (bytes: number): string =>
   bytes < 1024
     ? `${bytes} bytes`
     : bytes < 1048576
-      ? `${Math.round(bytes / 102.4) / 10} kB`
+      ? `${Math.round(bytes / 102.4) / 10} KB`
       : `${Math.round(bytes / 104857.6) / 10} MB`;
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [

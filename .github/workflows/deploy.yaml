@@ -75,23 +75,26 @@ jobs:
     steps:
       # No `with: timeout:` here, and that is the finding rather than an
       # omission. deploy-pages caps the input at its 600000 ms default and says
-      # so in a warning it is easy to miss: "timeout value is greater than the
-      # allowed maximum - timeout set to the maximum of 600000 milliseconds".
-      # Ten minutes is therefore a ceiling, not a default, and a Pages
-      # deployment that has not started within it cannot be waited out from
-      # here at all.
+      # so in a warning that is easy to miss among two hundred lines of polling:
+      # "timeout value is greater than the allowed maximum - timeout set to the
+      # maximum of 600000 milliseconds". Ten minutes is a ceiling, not a default.
       #
-      # That matters because of what the timeout costs. The action cancels the
-      # deployment it created on the way out, Pages keys a deployment on the
-      # commit SHA, and so re-running the job asks for something already
-      # cancelled and fails in seconds. Recovery costs a new commit every time.
+      # 6 August 2026, and read this before believing a red deploy. Pages publish
+      # latency for this repository regressed from seconds to over ten minutes,
+      # which others reported the same day in the community Pages category. The
+      # consequence is not a failed deploy, it is a deploy that succeeds and
+      # reports failure: the deployment reaches deployment_in_progress and
+      # completes, but past the ceiling, so the action gives up and cancels
+      # something already published. Confirmed on commit 1f57433, where the job
+      # failed at 10m 4s and the app then reported "This build: 2026-08-06T14:12Z
+      # commit 1f57433".
       #
-      # Seen on 6 August: deploys went from 1m 39s the day before to 5m 53s,
-      # 8m 22s, and then three ten-minute timeouts, every one of them
-      # deployment_queued from start to abort with a healthy one-minute build
-      # and a 401 KB single-file artifact. Nothing in this repository can
-      # influence that. If it recurs the escalation is GitHub support, or
-      # switching Pages to a branch source to bypass this API.
+      # So in that window the workflow's verdict is not the answer. The app's own
+      # build stamp on the Sync screen is, and it does not depend on this job at
+      # all. Timing out also costs a commit when it happens before publishing:
+      # the deployment is keyed on the commit SHA, so re-running asks for
+      # something already cancelled and fails in seconds, though a
+      # workflow_dispatch does mint a fresh one for the same SHA.
       - id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
 

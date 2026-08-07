@@ -95,8 +95,19 @@ create policy "insert own updates" on public.journal_updates
 --
 -- What makes 5 MB humane rather than mean is the runway. 80% of it is 4 MB and
 -- the last megabyte is nearly a year of writing, so a warning at 80% gives months
--- of notice. That warning belongs in the app; verify.sql's check only tells the
--- operator.
+-- of notice, which the Menu now shows. verify.sql's check only tells the operator.
+--
+-- What was proven before this shipped, recorded here because the harness that
+-- proved it has been removed rather than kept as a file nobody could easily run.
+-- Against PostgreSQL 16.13 with an auth schema scaffolded to match Supabase: this
+-- file applies twice cleanly; the counter accumulates across inserts; an insert
+-- over the cap raises 53100 and the row does not land; an insert that still fits
+-- is allowed; another account is unaffected; a user updating their own
+-- quota_bytes changes no rows; the seed repairs a counter set to the wrong value;
+-- delete_account() removes the usage row; and the refusal message carries both
+-- the contact address and the reassurance. Each was confirmed to fail when the
+-- thing it checked was disabled, including replacing the comparison below with
+-- `if false`. Reproduce by pointing a scratch Postgres at this file.
 --
 -- One wrinkle to expect near the cap, because it does not look like a limit.
 -- Payloads are not uniform: the average is 311 bytes and the largest so far is
