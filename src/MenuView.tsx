@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { SyncStatus } from "./store/sync";
 import { countUpdates } from "./store/sync";
+import { serverUsage } from "./store/usage";
+import type { ServerUsage } from "./store/usage";
 import { measureVolume } from "./store/metrics";
 import {
   notificationsSupported,
@@ -18,6 +20,17 @@ import type { ThemePref } from "./lib/theme";
 import { checkForUpdate } from "./store/appUpdate";
 import type { UpdateCheckResult } from "./store/appUpdate";
 import type { InstallMode } from "./lib/install";
+
+/**
+ * Bytes as something a person can compare, in the same shape Postgres uses in
+ * the quota's own refusal message so the two agree when read side by side.
+ */
+const size = (bytes: number): string =>
+  bytes < 1024
+    ? `${bytes} bytes`
+    : bytes < 1048576
+      ? `${Math.round(bytes / 102.4) / 10} kB`
+      : `${Math.round(bytes / 104857.6) / 10} MB`;
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
   { value: "system", label: "System" },
@@ -83,6 +96,18 @@ export default function MenuView({
   useEffect(() => {
     void countUpdates().then(setLogRows);
   }, []);
+  // Server usage against the account's cap. Null whenever it cannot be known,
+  // including on a project where schema.sql has not been applied yet, in which
+  // case this row simply says what it always said.
+  const [usage, setUsage] = useState<ServerUsage | null>(null);
+  useEffect(() => {
+    void serverUsage().then(setUsage);
+  }, []);
+  // 80%, which sounds urgent and is not: the last fifth of the cap is close to a
+  // year of writing at the rate this journal actually grows. That is the point of
+  // saying it early rather than at the wall, where there is nothing to do about it
+  // and no notice was given.
+  const nearlyFull = usage !== null && usage.bytes > usage.quota * 0.8;
   const docKB = Math.round(vol.docBytes / 102.4) / 10;
 
   // Manual update check. The app already checks in the background, but this
@@ -337,8 +362,16 @@ export default function MenuView({
               on this device
               {logRows !== null &&
                 `, ${logRows} sync ${logRows === 1 ? "update" : "updates"}`}
+              {usage && `, ${size(usage.bytes)} of ${size(usage.quota)} on the server`}
               . A rough gauge of how full this notebook is.
             </div>
+            {nearlyFull && (
+              <div style={{ ...ST.rowDesc, color: "var(--danger)" }}>
+                Nearly full. Email hello@journlet.com to have your limit raised.
+                Writing here keeps working either way; what stops is the copy
+                reaching the server.
+              </div>
+            )}
           </div>
         </div>
       </section>

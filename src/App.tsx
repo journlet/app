@@ -115,7 +115,7 @@ import RecoveryCodeView from "./ui/RecoveryCodeView";
 import UnlockView from "./ui/UnlockView";
 import LinkPrompts from "./ui/LinkPrompts";
 import CannotLoadView from "./ui/CannotLoadView";
-import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
+import NotSyncingBanner, { notSyncingReason } from "./ui/NotSyncingBanner";
 import {
   cannotLoadYet,
   isSettling,
@@ -680,6 +680,9 @@ export default function App() {
   // on the same value and CannotLoadView kept its previous message.
   const sync = useSyncExternalStore(subscribeSync, getSyncSnapshot);
   const syncStatus = sync.status;
+  // Why the banner shows, rather than only whether. A refusal and a sign-out
+  // both mean entries are reaching nothing, and they need different words.
+  const stalled = notSyncingReason(syncStatus, sync.error);
 
   // Fresh install with sync configured: sign in before there is a journal at
   // all (decision 3, spec device-identity-design.md). Deliberately not applied
@@ -1272,8 +1275,8 @@ export default function App() {
             chooses. This is also the deliberate answer to journalling for
             weeks into a device that is not syncing: capture keeps working
             (§6.1b), so the state has to be impossible to miss instead. */}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
-          <NotSyncingBanner onSignIn={() => setView("sync")} />
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && stalled && hasLocalContent && view !== "sync" && (
+          <NotSyncingBanner reason={stalled} onOpenSync={() => setView("sync")} />
         )}
         {/* A device asking to be added, shown wherever the journal is. Above the
             not-syncing banner would be wrong — that banner explains why the
