@@ -104,3 +104,22 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>
 );
+
+// Hand the screen over from the boot splash (index.html) now that React has
+// the root. render() on a concurrent root schedules rather than paints, so
+// clearing the splash on the next line would uncover an empty #root for a
+// frame and reintroduce the flash in miniature. Two nested frames instead:
+// the first is queued before React's commit paints, the second after it.
+//
+// Removal is on a timer rather than transitionend, because under
+// prefers-reduced-motion there is no transition to end and a splash that
+// never leaves would cover the whole app. 260ms clears the 220ms fade.
+const splash = document.getElementById("boot");
+if (splash) {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      splash.classList.add("boot-done");
+      setTimeout(() => splash.remove(), 260);
+    })
+  );
+}
