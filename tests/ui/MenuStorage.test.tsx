@@ -43,7 +43,7 @@ describe("when the server can be asked", () => {
     usage = { bytes: 125780, quota: 20971520 };
     renderMenu();
     await waitFor(() =>
-      expect(screen.getByText(/122\.8 kB of 20 MB on the server/)).toBeTruthy()
+      expect(screen.getByText(/122\.8 KB of 20 MB on the server/)).toBeTruthy()
     );
   });
 
