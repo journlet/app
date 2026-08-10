@@ -13,7 +13,7 @@
 
 import { GLYPH } from "../lib/types";
 import type { Collection, EntryType } from "../lib/types";
-import type { CaptureScope } from "../lib/sticky";
+import type { Scope } from "../lib/dates";
 import { S } from "./styles";
 
 // Drawn rather than typed: the ⌕ character is missing from many system fonts
@@ -47,7 +47,7 @@ interface CaptureLauncherProps {
   canLog: boolean;
   activeCol: Collection | null;
   captureType: EntryType;
-  captureScope: CaptureScope;
+  captureScope: Scope;
   capturePriority: boolean;
   captureInspiration: boolean;
 }
@@ -98,11 +98,8 @@ export default function CaptureLauncher({
           </span>
           <span style={S.launcherPrefs}>
             {(activeCol
-              ? [captureType]
-              : [
-                  captureScope === "date" ? "date…" : captureScope,
-                  captureType,
-                ]
+              ? [captureType as string]
+              : [captureScope as string, captureType as string]
             )
               .concat(capturePriority ? ["*"] : [])
               .concat(captureInspiration ? ["!"] : [])

@@ -16,6 +16,15 @@ let status = "synced";
 let signedIn = true;
 const signIn = vi.fn(async () => {});
 
+// useSyncExternalStore compares snapshots by identity and warns about an
+// infinite loop if getSnapshot returns a fresh object every call, so this
+// caches like the real store does and only rebuilds when the status changes.
+let snap = { status: "", error: null as string | null, revision: 0 };
+const snapshot = () => {
+  if (snap.status !== status) snap = { ...snap, status, revision: snap.revision + 1 };
+  return snap;
+};
+
 vi.mock("../../src/store/sync", () => ({
   DeviceNotClearedError: class extends Error {},
   deleteAccount: vi.fn(),
@@ -24,6 +33,8 @@ vi.mock("../../src/store/sync", () => ({
   getSessionEmail: () => (signedIn ? EMAIL : null),
   getSyncError: () => null,
   getSyncStatus: () => status,
+  getSyncSnapshot: () => snapshot(),
+  subscribeSync: () => () => {},
   isConfigured: () => true,
   onSyncStatus: (fn: (s: string) => void) => {
     fn(status);

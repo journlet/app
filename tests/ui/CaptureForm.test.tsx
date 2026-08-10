@@ -28,8 +28,7 @@ const spies = () => ({
   setCaptureType: vi.fn(),
   setCapturePriority: vi.fn(),
   setCaptureInspiration: vi.fn(),
-  setCustomDate: vi.fn(),
-  setCustomGran: vi.fn(),
+  setCaptureAnchor: vi.fn(),
 });
 
 // Build props with sensible defaults; each test overrides what it exercises.
@@ -50,8 +49,7 @@ const setup = (
     captureType: "task" as const,
     capturePriority: false,
     captureInspiration: false,
-    customDate: "2026-07-24",
-    customGran: "day" as const,
+    captureAnchor: "2026-07-24",
     ...overrides,
     ...spies(),
   };
@@ -109,18 +107,66 @@ test("close button reads Cancel with no draft logged, Done after logging", () =>
   expect(screen.getByText(/Logged/)).toBeTruthy();
 });
 
-describe("scope selection", () => {
-  test("choosing a scope calls setCaptureScope", () => {
+describe("page selection", () => {
+  test("choosing a kind of page calls setCaptureScope", () => {
     const props = setup();
     fireEvent.click(screen.getByRole("tab", { name: "week" }));
     expect(props.setCaptureScope).toHaveBeenCalledWith("week");
   });
 
-  test("date scope reveals the date + granularity controls", () => {
-    setup({ captureScope: "date" });
-    expect(screen.getByLabelText("Schedule date")).toBeTruthy();
-    // granularity buttons present
-    expect(screen.getByRole("button", { name: "month" })).toBeTruthy();
+  test("the chosen page is named, and the current one said in words", () => {
+    setup();
+    expect(screen.getByText("Fri, 24 Jul 2026")).toBeTruthy();
+    expect(screen.getByText("today")).toBeTruthy();
+  });
+
+  test("the steppers are always there, and the chooser is not until asked for", () => {
+    setup();
+    expect(screen.getByRole("button", { name: "Next day" })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: /Choose a/ })).toBeNull();
+    // no native date field: the browser only picks days, and Safari picks
+    // neither weeks nor months at all
+    expect(document.querySelector('input[type="date"]')).toBeNull();
+    // "date…" was a fifth tab; the tabs are now only the four kinds of page
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(screen.queryByRole("tab", { name: "date…" })).toBeNull();
+  });
+
+  test("capture cannot reach into the past, in the steppers or in the chooser", () => {
+    setup();
+    expect(
+      (screen.getByRole("button", { name: "Previous day" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /choose a different day/ }));
+    expect(
+      (screen.getByRole("button", { name: "Thu, 23 Jul 2026" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Mon, 27 Jul 2026" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
+  });
+
+  test("stepping forward moves the anchor by the chosen unit", () => {
+    const props = setup({ captureScope: "month" as const });
+    fireEvent.click(screen.getByRole("button", { name: "Next month" }));
+    expect(props.setCaptureAnchor).toHaveBeenCalledWith("2026-08-01");
+  });
+
+  test("a page away from now offers a plainly labelled way back", () => {
+    const props = setup({ captureAnchor: "2026-08-12" });
+    expect(screen.getByText("Wed, 12 Aug 2026")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to today" }));
+    expect(props.setCaptureAnchor).toHaveBeenCalledWith("2026-07-24");
+  });
+
+  test("the entry field says which page it is logging for", () => {
+    setup({ captureScope: "week" as const, captureAnchor: "2026-08-12" });
+    expect(
+      screen.getByPlaceholderText("Log for Week 33 · 10 Aug – 16 Aug…")
+    ).toBeTruthy();
   });
 });
 

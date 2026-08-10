@@ -567,6 +567,15 @@ describe("rows that should worry us", () => {
 
     await vi.waitFor(() => expect(sync.getSyncError()).toBeTruthy());
     expect(sync.getSyncError()).toMatch(/could not be decrypted/i);
+
+    // Recorded is not surfaced, which was the whole of Finding 2. This path
+    // never changes the status, so the old notification carried a value the UI
+    // already held and React bailed out of re-rendering. What the UI reads now
+    // is the snapshot, so the message has to be on it, and the status alongside
+    // it has to be untouched. That the change also notifies is pinned in
+    // tests/syncStatus.test.ts, where it can be asserted directly.
+    expect(sync.getSyncSnapshot().error).toMatch(/could not be decrypted/i);
+    expect(sync.getSyncSnapshot().status).toBe(sync.getSyncStatus());
   });
 
   // The binding doing its job: a blob written for another volume must not be

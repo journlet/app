@@ -3,11 +3,11 @@
 // passes it in, so behaviour is identical to the inline version this replaced.
 
 import type { RefObject } from "react";
-import { SCOPES, SCOPE_LABEL } from "../lib/dates";
+import { SCOPE_NOW_WORD, periodKey, periodName } from "../lib/dates";
 import type { Scope } from "../lib/dates";
 import { GLYPH, STATE_GLYPH, STATE_WORD } from "../lib/types";
 import type { Collection, Entry, EntryType } from "../lib/types";
-import type { CaptureScope } from "../lib/sticky";
+import PagePicker from "./PagePicker";
 import { S } from "./styles";
 
 interface CaptureFormProps {
@@ -34,18 +34,18 @@ interface CaptureFormProps {
   justLogged: string | null;
   activeCol: Collection | null;
   today: string;
-  captureScope: CaptureScope;
-  setCaptureScope: (scope: CaptureScope) => void;
+  /** which kind of page capture logs into — sticky (spec §4.1) */
+  captureScope: Scope;
+  setCaptureScope: (scope: Scope) => void;
+  /** a day inside the page being logged into; not sticky, resets to today */
+  captureAnchor: string;
+  setCaptureAnchor: (anchor: string) => void;
   captureType: EntryType;
   setCaptureType: (fn: (t: EntryType) => EntryType) => void;
   capturePriority: boolean;
   setCapturePriority: (fn: (v: boolean) => boolean) => void;
   captureInspiration: boolean;
   setCaptureInspiration: (fn: (v: boolean) => boolean) => void;
-  customDate: string;
-  setCustomDate: (value: string) => void;
-  customGran: Scope;
-  setCustomGran: (scope: Scope) => void;
 }
 
 export default function CaptureForm({
@@ -65,16 +65,14 @@ export default function CaptureForm({
   today,
   captureScope,
   setCaptureScope,
+  captureAnchor,
+  setCaptureAnchor,
   captureType,
   setCaptureType,
   capturePriority,
   setCapturePriority,
   captureInspiration,
   setCaptureInspiration,
-  customDate,
-  setCustomDate,
-  customGran,
-  setCustomGran,
 }: CaptureFormProps) {
   // The capture is pinned to one page for as long as App holds a parent for it.
   // Gate the page choice on the pin, not on the parent entry: if the parent has
@@ -182,10 +180,13 @@ export default function CaptureForm({
                     : pinnedToPage
                       ? `Log for ${captureParentPageLabel}…`
                       : activeCol
-                        ? `Log into ${activeCol.name}…`
-                        : captureScope === "date"
-                          ? "Log for the chosen date…"
-                          : `Log for ${SCOPE_LABEL[captureScope].toLowerCase()}…`
+                      ? `Log into ${activeCol.name}…`
+                      : `Log for ${
+                          periodKey(captureScope, captureAnchor) ===
+                          periodKey(captureScope, today)
+                            ? SCOPE_NOW_WORD[captureScope]
+                            : periodName(captureScope, captureAnchor)
+                        }…`
                 }
                 aria-label={captureParent ? "New sub-bullet" : "New entry"}
                 enterKeyHint="done"
@@ -218,58 +219,22 @@ export default function CaptureForm({
                 Logging into the “{activeCol.name}” collection
               </div>
             ) : (
-              <>
-                <div style={S.formLbl}>Log into</div>
-                <div style={S.scopeRow} role="tablist" aria-label="Log into">
-                  {([...SCOPES, "date"] as CaptureScope[]).map((sc) => (
-                    <button
-                      key={sc}
-                      role="tab"
-                      aria-selected={captureScope === sc}
-                      className={
-                        "scopeBtn" + (captureScope === sc ? " isActive" : "")
-                      }
-                      onClick={() => {
-                        setCaptureScope(sc);
-                        inputRef.current?.focus();
-                      }}
-                    >
-                      {sc === "date" ? "date…" : sc}
-                    </button>
-                  ))}
-                </div>
-                {captureScope === "date" && (
-                  <div style={{ ...S.dateControls, marginTop: 8 }}>
-                    <input
-                      type="date"
-                      value={customDate}
-                      min={today}
-                      onChange={(ev) =>
-                        ev.target.value && setCustomDate(ev.target.value)
-                      }
-                      style={S.dateInput}
-                      aria-label="Schedule date"
-                    />
-                    <div style={{ display: "flex", gap: 4, flex: 1 }}>
-                      {SCOPES.map((g) => (
-                        <button
-                          key={g}
-                          className={
-                            "scopeBtn" + (customGran === g ? " isActive" : "")
-                          }
-                          onClick={() => setCustomGran(g)}
-                          style={{
-                            background:
-                              customGran === g ? "var(--surface)" : "none",
-                          }}
-                        >
-                          {g}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
+              // One page chooser, shared with the entry sheet's "Move to" —
+              // kind of page, then which one. The current period is where it
+              // starts, so logging for today needs no choice at all.
+              <PagePicker
+                label="Log into"
+                gran={captureScope}
+                setGran={setCaptureScope}
+                anchor={captureAnchor}
+                setAnchor={setCaptureAnchor}
+                today={today}
+                // Capture writes forward, never back: an entry that belongs on
+                // a page already past is a correction, and corrections are the
+                // sheet's "Move to" — where the same picker has no floor.
+                minAnchor={today}
+                onChanged={() => inputRef.current?.focus()}
+              />
             )}
             <div style={S.formLbl}>Type</div>
             <div style={{ display: "flex", gap: 6 }}>

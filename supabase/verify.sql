@@ -58,12 +58,13 @@
 
 with tables(t) as (
   values ('journals'), ('journal_updates'), ('device_keys'),
-         ('device_wrapped_keys'), ('journal_keys'), ('device_link_requests')
+         ('device_wrapped_keys'), ('journal_keys'), ('device_link_requests'),
+         ('user_usage')
 ),
 expected_policies(t, n) as (
   values ('journals', 2), ('journal_updates', 2), ('device_keys', 4),
          ('device_wrapped_keys', 4), ('journal_keys', 2),
-         ('device_link_requests', 4)
+         ('device_link_requests', 4), ('user_usage', 1)
 ),
 published(t) as (
   values ('journal_updates'), ('device_link_requests'), ('device_wrapped_keys')
@@ -231,6 +232,67 @@ checks as (
                    where pubname = 'supabase_realtime'
                      and schemaname = 'public' and tablename = 'journals'),
                   'not published')
+
+  -- (c) user_usage is readable by its owner and writable by nobody. A user who
+  -- could update this row could raise their own quota, so the absence of the
+  -- other three policies is the control rather than an oversight. Named, like
+  -- the journals check above, so that adding one fails by name.
+  union all
+  select 18, '(c) user_usage has select only, no insert/update/delete policy',
+         '0',
+         (select count(*)::text from pg_policies
+          where schemaname = 'public' and tablename = 'user_usage'
+            and cmd in ('INSERT', 'UPDATE', 'DELETE'))
+
+  -- (c) the quota trigger fires before the insert. After would count rows it had
+  -- already allowed through, which is no quota at all.
+  union all
+  select 19, '(c) journal_updates_quota is a BEFORE INSERT row trigger',
+         'before insert row',
+         coalesce((select case
+                     when t.tgtype & 2 = 2 and t.tgtype & 4 = 4 and t.tgtype & 1 = 1
+                     then 'before insert row'
+                     else 'wrong timing: ' || t.tgtype::text end
+                   from pg_trigger t
+                   join pg_class c on c.oid = t.tgrelid
+                   join pg_namespace n on n.oid = c.relnamespace
+                   where n.nspname = 'public' and c.relname = 'journal_updates'
+                     and t.tgname = 'journal_updates_quota'), 'MISSING')
+
+  -- (c) the trigger function is definer with an empty search_path, like
+  -- delete_account. Invoker rights would fail, since user_usage has no write
+  -- policy, so this is load-bearing rather than hygiene.
+  union all
+  select 20, '(c) account_for_journal_update() is definer, search_path empty',
+         'definer, search_path=""',
+         coalesce((select case when p.prosecdef
+                       and coalesce(array_to_string(p.proconfig, ','), '') = 'search_path=""'
+                     then 'definer, search_path=""' else 'not hardened' end
+                   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname = 'public'
+                     and p.proname = 'account_for_journal_update'), 'MISSING')
+
+  -- (c) the running total agrees with the log it counts. Drift is the failure
+  -- mode a counter has and a scan does not, so it is asserted rather than
+  -- trusted. Re-running schema.sql repairs whatever this reports.
+  union all
+  select 21, '(c) user_usage.bytes matches sum(octet_length(payload))',
+         '0 disagree',
+         (select count(*)::text || ' disagree' from (
+            select u.user_id from public.user_usage u
+            left join (select user_id, sum(octet_length(payload)) as b
+                       from public.journal_updates group by user_id) l
+                   on l.user_id = u.user_id
+            where u.bytes <> coalesce(l.b, 0)
+          ) d)
+
+  -- (c) nobody is near their cap. Informational, and the row that would have
+  -- told you an account was quietly filling the project.
+  union all
+  select 22, '(c) no account is over 80% of its quota',
+         '0 accounts',
+         (select count(*)::text || ' accounts' from public.user_usage
+          where bytes > quota_bytes * 0.8)
 )
 select check_name, expected, actual, (actual = expected) as ok
 from checks

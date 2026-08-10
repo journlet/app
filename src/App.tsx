@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   SCOPES,
   dkey,
@@ -32,8 +39,7 @@ import type { ThemePref } from "./lib/theme";
 import {
   countUpdates,
   getJournalKeyCode,
-  getSyncError,
-  getSyncStatus,
+  getSyncSnapshot,
   hasSyncedOnce,
   isConfigured,
   askToBeAddedBack,
@@ -41,10 +47,9 @@ import {
   getLinkCode,
   getLinkStage,
   wasRemoved,
-  onSyncStatus,
+  subscribeSync,
   retryConnect,
 } from "./store/sync";
-import type { SyncStatus } from "./store/sync";
 import { logVolumeMetrics } from "./store/metrics";
 import { colPageKey } from "./lib/types";
 import type { CollectionKind } from "./lib/types";
@@ -82,7 +87,6 @@ import {
 } from "./lib/filter";
 import type { EntryFilter } from "./lib/filter";
 import { loadSticky, saveSticky } from "./lib/sticky";
-import type { CaptureScope } from "./lib/sticky";
 import {
   addEntry,
   cycleType,
@@ -111,7 +115,7 @@ import RecoveryCodeView from "./ui/RecoveryCodeView";
 import UnlockView from "./ui/UnlockView";
 import LinkPrompts from "./ui/LinkPrompts";
 import CannotLoadView from "./ui/CannotLoadView";
-import NotSyncingBanner, { isNotSyncing } from "./ui/NotSyncingBanner";
+import NotSyncingBanner, { notSyncingReason } from "./ui/NotSyncingBanner";
 import {
   cannotLoadYet,
   isSettling,
@@ -154,7 +158,7 @@ export default function App() {
     useJournal();
 
   const sticky = useRef(loadSticky());
-  const [captureScope, _setCaptureScope] = useState<CaptureScope>(
+  const [captureScope, _setCaptureScope] = useState<Scope>(
     sticky.current.scope
   );
   const [captureType, _setCaptureType] = useState(sticky.current.type);
@@ -186,6 +190,7 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (!params.has("capture")) return;
+    setCaptureAnchor(todayKey());
     setCaptureOpen(true);
     params.delete("capture");
     const qs = params.toString();
@@ -210,6 +215,12 @@ export default function App() {
   const [detailsEntry, setDetailsEntry] = useState<Entry | null>(null);
   // Date chosen in the sheet's "Schedule to a future date" control
   const [schedDate, setSchedDate] = useState("");
+  // Where the sheet's "Move to" picker is pointing. Set when the sheet opens
+  // to the entry's own page, so the picker starts by showing where the entry
+  // actually is; a move is a correction rather than a migration, so it has no
+  // floor and may reach back into the past.
+  const [moveAnchor, setMoveAnchor] = useState(todayKey());
+  const [moveGran, setMoveGran] = useState<Scope>("day");
   // Folded Future log month groups (device preference, see FOLDS_KEY)
   const [folds, setFolds] = useState<Record<string, boolean>>(() => {
     try {
@@ -330,8 +341,11 @@ export default function App() {
     month: todayKey(),
     year: todayKey(),
   }));
-  const [customDate, setCustomDate] = useState(todayKey());
-  const [customGran, setCustomGran] = useState<Scope>("day");
+  // The day inside the page capture is logging into (see ui/PagePicker). The
+  // kind of page is sticky; which one is not — it resets to today whenever the
+  // form opens, so a session left open overnight can't quietly log into a page
+  // that has since gone past.
+  const [captureAnchor, setCaptureAnchor] = useState(todayKey());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -381,7 +395,7 @@ export default function App() {
 
   const persistSticky = () => saveSticky(sticky.current);
 
-  const setCaptureScope = (v: CaptureScope) => {
+  const setCaptureScope = (v: Scope) => {
     sticky.current.scope = v;
     persistSticky();
     _setCaptureScope(v);
@@ -493,9 +507,7 @@ export default function App() {
       capturePinnedPk ??
       (activeCol
         ? colPageKey(activeCol.id)
-        : captureScope === "date"
-          ? periodKey(customGran, customDate)
-          : nowKeys[captureScope]);
+        : periodKey(captureScope, captureAnchor));
     addEntry(
       pk,
       captureType,
@@ -517,7 +529,7 @@ export default function App() {
       text.length > 40 ? text.slice(0, 39) + "…" : text
     );
     inputRef.current?.focus();
-  }, [input, captureDetails, capturePinnedPk, captureParentUsable, activeCol, captureScope, captureType, capturePriority, captureInspiration, customDate, customGran, nowKeys]);
+  }, [input, captureDetails, capturePinnedPk, captureParentUsable, activeCol, captureScope, captureType, capturePriority, captureInspiration, captureAnchor]);
 
   const showToast = (t: DeletedToast) => {
     setToast(t);
@@ -537,6 +549,18 @@ export default function App() {
     if (toast.colSnap) restoreCollection(toast.colSnap);
     setToast(null);
     if (toastTimer.current) clearTimeout(toastTimer.current);
+  };
+
+  /**
+   * Open the capture form. The page it logs into starts at the current period
+   * every time: the kind of page is sticky (spec §4.1), but which one is not —
+   * a form opened days after the last one should not still be pointing at that
+   * day's page, and nothing about a stale date would be visible until after the
+   * entry had landed.
+   */
+  const openCapture = () => {
+    setCaptureAnchor(todayKey());
+    setCaptureOpen(true);
   };
 
   const closeCapture = () => {
@@ -571,7 +595,18 @@ export default function App() {
     setCaptureDetails("");
     setJustLogged(null);
     closeSheet();
-    setCaptureOpen(true);
+    openCapture();
+  };
+
+  // Open the entry-actions sheet, aiming its "Move to" picker at the page the
+  // entry is on. Starting there rather than on today means the picker opens
+  // stating where the entry actually is, and the move button stays inert until
+  // that changes — a sheet can be opened from a row on another page, so
+  // "today" would be a claim about the wrong page.
+  const openSheet = (target: SheetTarget) => {
+    setMoveGran(keyScope(target.pk) ?? "day");
+    setMoveAnchor(keyToAnchor(target.pk));
+    setSheet(target);
   };
 
   const closeSheet = () => {
@@ -640,8 +675,14 @@ export default function App() {
     closeSheet();
   };
 
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(getSyncStatus());
-  useEffect(() => onSyncStatus(setSyncStatus), []);
+  // One subscription for status and error together. useState with a scalar was
+  // what hid Finding 2: an error carries no status change, so React bailed out
+  // on the same value and CannotLoadView kept its previous message.
+  const sync = useSyncExternalStore(subscribeSync, getSyncSnapshot);
+  const syncStatus = sync.status;
+  // Why the banner shows, rather than only whether. A refusal and a sign-out
+  // both mean entries are reaching nothing, and they need different words.
+  const stalled = notSyncingReason(syncStatus, sync.error);
 
   // Fresh install with sync configured: sign in before there is a journal at
   // all (decision 3, spec device-identity-design.md). Deliberately not applied
@@ -699,7 +740,7 @@ export default function App() {
   const [linkStage, setLinkStage] = useState(getLinkStage());
   useEffect(
     () =>
-      onSyncStatus(() => {
+      subscribeSync(() => {
         setLinkCode(getLinkCode());
         setLinkStage(getLinkStage());
         setRemoved(wasRemoved());
@@ -1025,7 +1066,7 @@ export default function App() {
       <span className="actions">
         <button
           className="miniBtn moreBtn"
-          onClick={() => setSheet({ scope: sc, pk, id: e.id })}
+          onClick={() => openSheet({ scope: sc, pk, id: e.id })}
           aria-label="Entry actions"
           aria-haspopup="dialog"
         >
@@ -1126,7 +1167,7 @@ export default function App() {
           <button
             className="miniBtn moreBtn"
             onClick={() =>
-              setSheet({
+              openSheet({
                 scope: keyScope(row.pk),
                 pk: row.pk,
                 id: row.entry.id,
@@ -1234,8 +1275,8 @@ export default function App() {
             chooses. This is also the deliberate answer to journalling for
             weeks into a device that is not syncing: capture keeps working
             (§6.1b), so the state has to be impossible to miss instead. */}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && isNotSyncing(syncStatus) && hasLocalContent && view !== "sync" && (
-          <NotSyncingBanner onSignIn={() => setView("sync")} />
+        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && stalled && hasLocalContent && view !== "sync" && (
+          <NotSyncingBanner reason={stalled} onOpenSync={() => setView("sync")} />
         )}
         {/* A device asking to be added, shown wherever the journal is. Above the
             not-syncing banner would be wrong — that banner explains why the
@@ -1256,7 +1297,7 @@ export default function App() {
         )}
         {!onboarding && !unlocking && !settling && stuck && (
           <CannotLoadView
-            error={getSyncError()}
+            error={sync.error}
             offline={syncStatus === "offline"}
             busy={retrying}
             onRetry={() => {
@@ -1456,7 +1497,7 @@ export default function App() {
         // one page where a Find button would point at itself.
         view !== "search" && (
         <CaptureLauncher
-          onOpen={() => setCaptureOpen(true)}
+          onOpen={openCapture}
           onFind={openSearch}
           // A habit tracker holds no entries, so it shows Find alone rather
           // than an entry field that would have nowhere to write to
@@ -1512,10 +1553,8 @@ export default function App() {
           setCapturePriority={setCapturePriority}
           captureInspiration={captureInspiration}
           setCaptureInspiration={setCaptureInspiration}
-          customDate={customDate}
-          setCustomDate={setCustomDate}
-          customGran={customGran}
-          setCustomGran={setCustomGran}
+          captureAnchor={captureAnchor}
+          setCaptureAnchor={setCaptureAnchor}
         />
       )}
 
@@ -1639,6 +1678,10 @@ export default function App() {
           onEditDetails={() => openDetails(sheetEntry)}
           schedDate={schedDate}
           setSchedDate={setSchedDate}
+          moveAnchor={moveAnchor}
+          setMoveAnchor={setMoveAnchor}
+          moveGran={moveGran}
+          setMoveGran={setMoveGran}
           closeSheet={closeSheet}
           saveRepeat={saveRepeat}
           saveReminder={saveReminder}

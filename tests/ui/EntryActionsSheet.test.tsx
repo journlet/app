@@ -91,6 +91,10 @@ const setup = (
     onEditDetails: vi.fn(),
     schedDate: "",
     setSchedDate: vi.fn(),
+    moveAnchor: "2026-07-24",
+    setMoveAnchor: vi.fn(),
+    moveGran: "day" as Scope,
+    setMoveGran: vi.fn(),
     closeSheet: vi.fn(),
     saveRepeat: vi.fn(),
     saveReminder: vi.fn().mockResolvedValue(undefined),
@@ -104,6 +108,14 @@ const setup = (
   render(<EntryActionsSheet {...props} />);
   return props;
 };
+
+/** Migrate, move and schedule each have their own step now (6 August 2026), so
+ *  a test that exercises one opens it first — as the user has to. */
+const openStep = (name: string) =>
+  fireEvent.click(screen.getByRole("button", { name }));
+const openMove = () => openStep("Move to another page…");
+const openMigrate = () => openStep("Migrate…");
+const openSchedule = () => openStep("Schedule for later…");
 
 describe("actions mode", () => {
   test("completing a task calls toggleDone and closes", () => {
@@ -133,10 +145,65 @@ describe("actions mode", () => {
     expect(props.setEditText).toHaveBeenCalledWith("write report");
   });
 
-  test("Move to other scopes calls moveTo with the target period key", () => {
-    setup();
-    fireEvent.click(screen.getByRole("button", { name: "This week" }));
-    expect(moveTo).toHaveBeenCalledWith("e1", "2026-W30");
+  test("Move to offers the four kinds of page, as one picker shared with capture", () => {
+    const props = setup();
+    openMove();
+    expect(screen.getByRole("tablist", { name: "Move to" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "week" }));
+    expect(props.setMoveGran).toHaveBeenCalledWith("week");
+    // the old row of four current-period buttons is gone, so "this week" is
+    // reached by choosing a page rather than by a button that means only "now"
+    expect(screen.queryByRole("button", { name: "This week" })).toBeNull();
+  });
+
+  test("the picker starts on the entry's own page, and moving there is refused", () => {
+    const props = setup({ moveAnchor: "2026-07-24", moveGran: "day" as Scope });
+    openMove();
+    expect(screen.getByText(/page this entry is already on/)).toBeTruthy();
+    const btn = screen.getByRole("button", { name: "Move" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    fireEvent.click(btn);
+    expect(moveTo).not.toHaveBeenCalled();
+    expect(props.closeSheet).not.toHaveBeenCalled();
+  });
+
+  test("a chosen past page is reachable — a move is a correction, not a migration", () => {
+    const props = setup({ moveAnchor: "2026-07-20", moveGran: "day" as Scope });
+    openMove();
+    expect(
+      (screen.getByRole("button", { name: "Previous day" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
+    // the chooser reaches back too: a mislogged entry often belongs on a page
+    // already past
+    fireEvent.click(screen.getByRole("button", { name: /choose a different day/ }));
+    expect(
+      (screen.getByRole("button", { name: "Wed, 1 Jul 2026" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "close without changing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Mon 20 Jul" }));
+    expect(moveTo).toHaveBeenCalledWith("e1", "2026-07-20");
+    expect(migrateEntry).not.toHaveBeenCalled();
+    expect(props.closeSheet).toHaveBeenCalledTimes(1);
+  });
+
+  test("the chosen kind of page decides which page a date means", () => {
+    setup({ moveAnchor: "2026-09-15", moveGran: "month" as Scope });
+    openMove();
+    expect(screen.getByText("September 2026")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Move to Sept 2026" }));
+    expect(moveTo).toHaveBeenCalledWith("e1", "2026-09");
+  });
+
+  test("a sub-bullet is told it will be promoted, since its parent stays put", () => {
+    setup({
+      sheetEntry: { ...openTask, parentId: "p1" },
+      moveAnchor: "2026-08-01",
+      moveGran: "day" as Scope,
+    });
+    openMove();
+    expect(screen.getByText(/stops being a sub-bullet/)).toBeTruthy();
   });
 
   test("threading is one line in the actions list, whatever the collection count", () => {
@@ -267,9 +334,130 @@ test("migration mode migrates instead of moving, keeping the original", () => {
     sheet: { scope: "day", pk: "2020-01-01", id: "e1" },
     sheetMigrates: true,
   });
-  expect(screen.getByText(/Migrate to \(original stays here/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "› Today" }));
+  openMigrate();
+  // The step says what a migration does before anything is tapped, and each
+  // destination is a row of its own rather than one control with four settings
+  expect(screen.getByText(/a copy stays here marked/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Migrate to Today" }));
   expect(migrateEntry).toHaveBeenCalledWith("e1", "2026-07-24");
+});
+
+test("migration mode still offers a plain move, for an entry logged on the wrong page", () => {
+  const props = setup({
+    sheet: { scope: "day", pk: "2020-01-01", id: "e1" },
+    sheetMigrates: true,
+    moveAnchor: "2020-01-08",
+    moveGran: "day" as Scope,
+  });
+  // the two are told apart at the top level by their captions, not left to be
+  // inferred from two mini-forms sitting one above the other
+  expect(screen.getByText(/carries it forward to a current page/)).toBeTruthy();
+  expect(
+    screen.getByText(/corrects the page it was logged on/)
+  ).toBeTruthy();
+  openMove();
+  fireEvent.click(screen.getByRole("button", { name: "Move to Wed 8 Jan" }));
+  expect(moveTo).toHaveBeenCalledWith("e1", "2020-01-08");
+  expect(migrateEntry).not.toHaveBeenCalled();
+  expect(props.closeSheet).toHaveBeenCalledTimes(1);
+});
+
+test("a collection page offers no move — pages are related by threading, not moving", () => {
+  setup({ sheet: { scope: null, pk: "col:c1", id: "e1" } });
+  expect(
+    screen.queryByRole("button", { name: "Move to another page…" })
+  ).toBeNull();
+  expect(screen.queryByRole("tablist", { name: "Move to" })).toBeNull();
+});
+
+describe("the shape of the view (6 August 2026)", () => {
+  // It was a bottom sheet with every action at one weight and no height cap, so
+  // on a phone the list ran off the bottom with nothing to scroll. These hold
+  // the two things that fixed it: named groups, and one step per action.
+  test("the actions are in named groups, not one flat list", () => {
+    setup();
+    expect(screen.getByText("This entry")).toBeTruthy();
+    expect(screen.getByText("Where it goes")).toBeTruthy();
+    expect(screen.getByText("Remove")).toBeTruthy();
+  });
+
+  test("no step unfolds in place — the top level is rows only", () => {
+    setup({ sheet: { scope: "day", pk: "2020-01-01", id: "e1" }, sheetMigrates: true });
+    // every multi-step action is behind a row, so none of their controls are on
+    // screen until one is opened
+    expect(screen.queryByRole("tablist", { name: "Move to" })).toBeNull();
+    expect(screen.queryByLabelText("Schedule to date")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Migrate to Today" })
+    ).toBeNull();
+  });
+
+  test("a caption describes a row without becoming part of its name", () => {
+    setup();
+    const btn = screen.getByRole("button", { name: "Mark complete" });
+    // the consequence is available to a screen reader as a description, so the
+    // action is still announced first and on its own
+    expect(btn.getAttribute("aria-describedby")).toBeTruthy();
+    expect(screen.getByText("drawn as × on this page")).toBeTruthy();
+  });
+
+  test("one Back leaves any step, and Close leaves the view", () => {
+    const props = setup();
+    openMove();
+    expect(screen.getByRole("tablist", { name: "Move to" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.queryByRole("tablist", { name: "Move to" })).toBeNull();
+    expect(props.closeSheet).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(props.closeSheet).toHaveBeenCalledTimes(1);
+  });
+
+  test("scheduling an open task is its own step, and names the date it will use", () => {
+    const props = setup({ schedDate: "2026-08-01" });
+    openSchedule();
+    expect(screen.getByText(/a copy appears on the date you pick/)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Schedule for Sat 1 Aug" })
+    );
+    expect(migrateEntry).toHaveBeenCalledWith("e1", "2026-08-01");
+    expect(props.closeSheet).toHaveBeenCalledTimes(1);
+  });
+
+  test("the top level is a bounded list however busy the journal is", () => {
+    // The old sheet grew with the entry: three mini-forms unfolded in place and
+    // the migrate row added four more buttons, which is how it came to overflow
+    // a phone screen. With every step behind a row, the worst case is small and
+    // fixed — this is the guard on that, not on the exact number.
+    setup({
+      sheet: { scope: "day", pk: "2020-01-01", id: "e1" },
+      sheetMigrates: true,
+      sheetEntry: {
+        ...openTask,
+        details: "a note",
+        remindAt: 1,
+        threads: ["col:c1", "col:c2"],
+      },
+      sheetNestTargets: [{ ...openTask, id: "e2", text: "another entry" }],
+      collections: Array.from({ length: 12 }, (_, i) => ({
+        id: `c${i}`,
+        kind: "list" as const,
+        name: `Collection ${i}`,
+        createdAt: 0,
+      })),
+    });
+    // Close, plus the rows. Twelve collections add nothing: threading is one row
+    // and the pages are chosen inside its step. The same entry in the old sheet
+    // put well over twenty controls on screen, because the migrate row, the page
+    // picker and the schedule field were all expanded at once.
+    expect(screen.getAllByRole("button").length).toBeLessThanOrEqual(16);
+  });
+
+  test("a completed task is offered no schedule step", () => {
+    setup({ sheetEntry: { ...openTask, state: "done" } });
+    expect(
+      screen.queryByRole("button", { name: "Schedule for later…" })
+    ).toBeNull();
+  });
 });
 
 test("edit-text mode saves the trimmed text", () => {

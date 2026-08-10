@@ -34,21 +34,52 @@ const WARNS: Record<SyncStatus, boolean> = {
 
 export const isNotSyncing = (s: SyncStatus): boolean => WARNS[s];
 
+export type NotSyncingReason = "signed-out" | "refused";
+
+/**
+ * Why the journal in front of you is not reaching the server, or null.
+ *
+ * "pending" is absent from WARNS because being behind is normally temporary and
+ * self-healing. Being behind *with a server error* is not: the server said no,
+ * and saying no again in a minute is what it will keep doing. The storage quota
+ * is the case that made this necessary, and before it the only account of a
+ * refusal was on the Sync screen, which a user has no reason to visit because the
+ * journal screen says something reassuring.
+ *
+ * "offline" is deliberately excluded even with an error attached, since that is
+ * the temporary case this distinction exists to separate out.
+ */
+export const notSyncingReason = (
+  s: SyncStatus,
+  error: string | null
+): NotSyncingReason | null => {
+  if (WARNS[s]) return "signed-out";
+  if (s === "pending" && error) return "refused";
+  return null;
+};
+
 interface NotSyncingBannerProps {
-  onSignIn: () => void;
+  reason: NotSyncingReason;
+  onOpenSync: () => void;
 }
 
-export default function NotSyncingBanner({ onSignIn }: NotSyncingBannerProps) {
+export default function NotSyncingBanner({
+  reason,
+  onOpenSync,
+}: NotSyncingBannerProps) {
   return (
-    <button className="syncBanner" onClick={onSignIn}>
+    <button className="syncBanner" onClick={onOpenSync}>
       <span>
         <span style={{ fontWeight: 600, color: "var(--danger)" }}>
           Not syncing.
         </span>{" "}
+        {reason === "refused"
+          ? "The server refused the last change, and it will not clear by itself."
+          : null}{" "}
         New entries are saved on this device only.
       </span>
       <span style={{ fontSize: 12.5, lineHeight: "13px", whiteSpace: "nowrap" }}>
-        Sign in ›
+        {reason === "refused" ? "What happened ›" : "Sign in ›"}
       </span>
     </button>
   );
