@@ -9,6 +9,7 @@ import {
   exportJournalKeyCode,
   generateDataKey,
   generateKeeperKey,
+  deriveDeleteCode,
   importJournalKeyCode,
   LegacyPayloadError,
   PAYLOAD_VERSION,
@@ -267,5 +268,45 @@ describe("epochs", () => {
 
     expect(readPayloadEpoch(p)).toBe(300);
     expect(await decryptUpdate(key, p, CTX)).toEqual(update);
+  });
+});
+
+// The value delete_account() compares (assessment Finding 24). Pinned against a
+// fixed key and a literal digest, not against the function itself, because the
+// server stores this at journal creation and never lets it change: if the
+// derivation moves, every existing account becomes undeletable from the app and
+// nothing else would notice. Changing it deliberately means bumping the label
+// and giving accounts a path to a second code, not editing this number.
+describe("the account delete code", () => {
+  const fixedKeeperKey = async () => {
+    const raw = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) raw[i] = i;
+    return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, true, [
+      "wrapKey",
+      "unwrapKey",
+    ]);
+  };
+
+  test("is a fixed function of the keeper key", async () => {
+    expect(await deriveDeleteCode(await fixedKeeperKey())).toBe(
+      "8fc12eadd9c68531f4736a1163191b83e55b2c49ccdc46f667f9cc88cf35dfb0"
+    );
+  });
+
+  test("is 64 lowercase hex characters, which is what the function accepts", async () => {
+    expect(await deriveDeleteCode(await fixedKeeperKey())).toMatch(
+      /^[0-9a-f]{64}$/
+    );
+  });
+
+  test("differs for a different keeper key", async () => {
+    const other = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["wrapKey", "unwrapKey"]
+    );
+    expect(await deriveDeleteCode(other)).not.toBe(
+      await deriveDeleteCode(await fixedKeeperKey())
+    );
   });
 });

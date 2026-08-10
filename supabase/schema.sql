@@ -12,6 +12,25 @@ create table if not exists public.journals (
   created_at timestamptz not null default now()
 );
 
+-- delete_code: what a caller must present to delete this account (assessment
+-- Finding 24). SHA-256 of a label and the keeper key, so it is derived from the
+-- journal key code the account holder already has and nothing here can be
+-- turned back into that key.
+--
+-- The point is that holding the mailbox is not enough. delete_account() takes no
+-- arguments and is granted to authenticated, so account takeover meant the
+-- server copy could be destroyed outright, and the free tier keeps no backup
+-- behind it. The typing confirmation in the app is client-side only, so at the
+-- API level that friction does not exist.
+--
+-- Nullable, and delete_account() still allows a delete while it is null. That is
+-- the migration window for accounts created before this column: the client sets
+-- it on the next connect from a device holding the keeper key, and it cannot be
+-- set from a device that does not. Refusing while null would strand an existing
+-- account with no way to delete itself at all.
+alter table public.journals
+  add column if not exists delete_code bytea;
+
 alter table public.journals enable row level security;
 
 drop policy if exists "select own journal" on public.journals;
@@ -354,7 +373,23 @@ create policy "delete own link requests" on public.device_link_requests
 -- standard hardening for security definer: without it a caller could put a
 -- malicious `auth` or `public` schema ahead on the path and have it run with
 -- the owner's rights.
-create or replace function public.delete_account()
+-- Write the delete code, once. Nothing can change it afterwards.
+--
+-- A function rather than an UPDATE policy, deliberately. journals has no update
+-- policy at all (see above), and adding one so the client could write this
+-- column would let a caller who should not be there set their own code and
+-- delete the account anyway, which is Finding 7's mistake with a new name. The
+-- `is null` clause is the write-once guard, and it is inside the definer so no
+-- policy has to be relaxed for it.
+--
+-- Silent when a code is already stored: the client calls this on every connect
+-- as a self-backfill, and a no-op is the expected outcome nearly every time.
+-- Takes lowercase hex rather than bytea. PostgREST does accept a \x-prefixed
+-- hex string for a bytea argument, but the encoding is one more thing between
+-- the client and a function whose refusal is the only thing standing between an
+-- attacker and the server copy. Plain text in, decode here, and the length is
+-- checked after decoding.
+create or replace function public.set_delete_code(code text)
 returns void
 language plpgsql
 security definer
@@ -362,9 +397,57 @@ set search_path = ''
 as $$
 declare
   uid uuid := auth.uid();
+  raw bytea;
 begin
   if uid is null then
     raise exception 'Not signed in';
+  end if;
+  if code is null or code !~ '^[0-9a-f]{64}$' then
+    raise exception 'A delete code must be 64 hex characters';
+  end if;
+  raw := decode(code, 'hex');
+  update public.journals
+     set delete_code = raw
+   where user_id = uid
+     and delete_code is null;
+end;
+$$;
+
+revoke all on function public.set_delete_code(text) from public, anon;
+grant execute on function public.set_delete_code(text) to authenticated;
+-- The bytea form from the first draft, dropped so two signatures cannot both be
+-- granted.
+drop function if exists public.set_delete_code(bytea);
+
+-- The old no-argument form is dropped rather than left alongside this one.
+-- Postgres would keep both as separate functions, and the zero-argument one
+-- would still be granted to authenticated: the hole this closes, still open
+-- under its own signature.
+drop function if exists public.delete_account();
+drop function if exists public.delete_account(bytea);
+
+create or replace function public.delete_account(code text default null)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+  stored bytea;
+begin
+  if uid is null then
+    raise exception 'Not signed in';
+  end if;
+  select delete_code into stored from public.journals where user_id = uid;
+  -- Compared here rather than in the client, because the client is exactly what
+  -- an attacker is not using. A null stored code is the migration window
+  -- described on the column.
+  if stored is not null
+     and (code is null
+          or code !~ '^[0-9a-f]{64}$'
+          or decode(code, 'hex') <> stored) then
+    raise exception 'The journal key code is required to delete this account';
   end if;
   delete from public.user_usage where user_id = uid;
   delete from public.journal_updates where user_id = uid;
@@ -384,8 +467,8 @@ $$;
 -- anyone holding it can delete users directly anyway. Re-running emits a
 -- "no privileges could be revoked" warning once the default grant is gone; that
 -- is cosmetic and the file stays idempotent.
-revoke all on function public.delete_account() from public, anon;
-grant execute on function public.delete_account() to authenticated;
+revoke all on function public.delete_account(text) from public, anon;
+grant execute on function public.delete_account(text) to authenticated;
 
 -- Realtime: broadcast inserts so other devices pick changes up live. Guarded so
 -- re-running doesn't error on the table already being a publication member.

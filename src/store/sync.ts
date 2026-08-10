@@ -38,6 +38,7 @@ import {
 import type { LinkRequest } from "./deviceLink";
 import {
   decryptUpdate,
+  deriveDeleteCode,
   encryptUpdate,
   generateDataKey,
   wrapDataKey,
@@ -512,6 +513,23 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     console.warn("[devices] could not check for granted keys", e);
   }
 
+  // The account's delete code, written once (assessment Finding 24). Only a
+  // device holding the keeper key can derive it, which is the whole point, and
+  // this is the one place in a connect where that is established. Called every
+  // time rather than tracked: set_delete_code is a no-op once a code is stored,
+  // so this doubles as the backfill for accounts created before the column, and
+  // a failure here must never stop a connect.
+  if (keeperUsable && held.keeperKey) {
+    try {
+      const { error } = await supabase.rpc("set_delete_code", {
+        code: await deriveDeleteCode(held.keeperKey),
+      });
+      if (error) throw new Error(error.message);
+    } catch (e) {
+      console.warn("[account] could not record the delete code", e);
+    }
+  }
+
   // Later epochs under the keeper key, for the device holding the recovery code.
   if (keeperUsable && held.keeperKey) {
     try {
@@ -948,6 +966,22 @@ export const approveDevice = async (request: LinkRequest): Promise<void> => {
  * the Sync screen says so instead of offering an action that would fail.
  */
 export const canRemoveDevices = (): boolean =>
+  Boolean(ring?.keeperKey && keeperUsable);
+
+/**
+ * Whether this device can delete the account (assessment Finding 24).
+ *
+ * The same condition as removing a device, for the reason getJournalKeyCode
+ * gives: every fresh install generates a keeper key, so holding one proves
+ * nothing until it has been shown to open this account's journal. Without
+ * `keeperUsable` a device whose connect failed would offer the action, derive a
+ * code from a key that was never the account's, and be refused by the database
+ * with a message about the journal key code — to the person who has it.
+ *
+ * A separate function from canRemoveDevices rather than a reuse of it: the two
+ * capabilities happen to share a condition today and are not the same question.
+ */
+export const canDeleteAccount = (): boolean =>
   Boolean(ring?.keeperKey && keeperUsable);
 
 /**
@@ -1667,7 +1701,25 @@ export class DeviceNotClearedError extends Error {
  */
 export const deleteAccount = async (): Promise<void> => {
   if (!supabase || !session) throw new Error("Not signed in");
-  const { error } = await supabase.rpc("delete_account");
+  // The code the server compares, derived from the keeper key (Finding 24).
+  // Holding the mailbox is no longer enough to destroy the server copy, and
+  // there is no backup behind it on the free tier.
+  //
+  // A device without the keeper key cannot produce it, so it cannot delete the
+  // account. Said here as well as being disabled in the interface, because this
+  // function is callable from elsewhere and a caller that got past the button
+  // should get the reason rather than a refusal from the database.
+  // Narrowed into a const rather than asserted through canDeleteAccount(), which
+  // the compiler cannot see into. src/ has one non-null assertion in it and this
+  // is not worth being the second.
+  const keeperKey = ring?.keeperKey;
+  if (!keeperKey || !keeperUsable)
+    throw new Error(
+      "Deleting the account needs the device holding your journal key code. On this device, sign out to remove the journal from it."
+    );
+  const { error } = await supabase.rpc("delete_account", {
+    code: await deriveDeleteCode(keeperKey),
+  });
   if (error) throw new Error(error.message);
 
   // Point of no return. Nothing below may be reported as a failed deletion.
