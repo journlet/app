@@ -6,20 +6,45 @@
       Content Security Policy. The entire E2E model rests on the integrity of
       the JS running here, so lock script-src to self: no inline scripts, no
       remote script origins, so an injected string can never execute and read
-      the keyring out of IndexedDB. style-src keeps 'unsafe-inline' only
-      because React writes element styles inline; script-src stays strict.
+      the keyring out of IndexedDB.
+
+      style-src is 'self' with no 'unsafe-inline'. The old comment here said it
+      was needed "because React writes element styles inline", which is not how
+      the check works: React sets element styles through the CSSOM, and CSP
+      governs <style> elements and style attributes as they are parsed, not
+      CSSOM mutation. Verified rather than reasoned, on a real build with the
+      directive removed: the app renders identically, twenty style attributes
+      are still applied, the --grid custom property still resolves, and the
+      browser reports no style-src violation. The one place it does bite is
+      `vite dev`, which injects CSS as a runtime <style> element and so loses
+      every rule to this directive; devCspAllowInlineStyles in vite.config.ts
+      adds 'unsafe-inline' back for the dev server alone, and cannot touch
+      what is built. It matters because with
+      'unsafe-inline' present an HTML-injection foothold can exfiltrate through
+      CSS attribute selectors, and "the keyring never leaves" is the whole
+      claim. If a <style> element or a literal style="..." is ever added to
+      markup, this is the directive that will refuse it, which is the point.
+
       connect-src is limited to the Supabase project (REST + realtime wss).
       Fonts are self-hosted, so style-src and font-src are 'self' with no
       third-party origin anywhere in the policy: the Supabase project is now
       the only external host the app may reach, and it only ever receives
       ciphertext.
+      form-action is 'none', not 'self': the app submits no forms at all, and
+      the marketing site already uses 'none'. frame-src is 'none' because the
+      app embeds nothing, and both directives work through meta.
+
       Delivered via meta because GitHub Pages cannot set response headers;
       frame-ancestors is header-only, so clickjacking cover needs a header
-      (nginx path) or is accepted for the Pages deploy.
+      or is accepted for the Pages deploy. Note the local nginx rig is not that
+      header, deliberately: its job is to reproduce Pages, and Pages sends none.
+      A meta CSP also does not reach the service worker, whose policy comes from
+      its own response headers, so sw.js runs unrestricted on Pages regardless
+      of anything in this tag.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://hpbdtcoskwmcggiyqtde.supabase.co wss://hpbdtcoskwmcggiyqtde.supabase.co; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://hpbdtcoskwmcggiyqtde.supabase.co wss://hpbdtcoskwmcggiyqtde.supabase.co; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-src 'none'"
     />
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -36,7 +61,19 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <meta name="theme-color" content="#F5F4EF" />
+    <!--
+      Two theme-colors, not one. This paints the chrome around the app (the
+      Android status bar, the standalone PWA's title area), and a single cream
+      value meant a dark-mode launch flashed cream before the app itself
+      painted dark. The browser takes the first tag whose media matches, so
+      light is listed first and there is deliberately no media-less fallback:
+      one would always match and dark would never be reached. A browser that
+      does not understand the media attribute treats both as applicable and
+      takes the first, which is the cream it was already showing — no worse
+      than before. Values track --paper in src/index.css; keep them in step.
+    -->
+    <meta name="theme-color" content="#F5F4EF" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#191D23" media="(prefers-color-scheme: dark)" />
     <meta
       name="description"
       content="Journlet — the paper bullet journal, made digital. Offline-first and end-to-end encrypted."
@@ -81,6 +118,38 @@
     <title>Journlet</title>
   </head>
   <body>
+    <!--
+      Boot splash. #root is empty until the JS bundle has downloaded, parsed
+      and executed, which on a phone is the second or two of white the app was
+      showing before anything of ours appeared. This is the first thing the
+      browser can paint: markup already in the document, needing only the
+      stylesheet, which is a render-blocking <link> a fraction of the bundle's
+      size and precached by the service worker after the first visit.
+
+      The usual trick — inline the few critical rules in a <style> here — is
+      not available: style-src is 'self' with no 'unsafe-inline' (see the CSP
+      above), and that is worth more than the one saved request. So the rules
+      live in src/index.css with everything else, and nothing here carries a
+      style attribute. Same reason there is no inline script: main.tsx clears
+      the splash, and cannot do it any earlier than it runs.
+
+      This covers only the gap before React mounts. App then shows "opening
+      journal…" while the encrypted journal loads out of IndexedDB, so the two
+      states chain rather than overlap.
+
+      The spinner runs from the first frame, and deliberately says nothing
+      about why the wait is happening. An earlier version put a sentence here
+      after eight seconds suggesting the reader check their connection, which
+      is wrong in most cases it would fire in: the bundle is precached, so
+      every launch after the first needs no network at all.
+
+      role="status" so the wordmark is announced rather than the screen simply
+      going quiet; the spinner itself is aria-hidden, being decoration.
+    -->
+    <div id="boot" class="boot" role="status">
+      <p class="boot-mark">Journlet</p>
+      <div class="boot-spinner" aria-hidden="true"></div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

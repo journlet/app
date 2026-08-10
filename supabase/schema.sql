@@ -65,6 +65,130 @@ drop policy if exists "insert own updates" on public.journal_updates;
 create policy "insert own updates" on public.journal_updates
   for insert with check (auth.uid() = user_id);
 
+-- Per-account storage quota.
+--
+-- journal_updates is append-only and unbounded, and registration is open, so one
+-- account can consume the whole 500 MB of a free-tier project and every other
+-- account's writes start failing. Rate limits do not help: they slow how fast an
+-- account can be created, not how much a patient one can store.
+--
+-- 5 MB, chosen from measurement and then from what the number is for.
+--
+-- Six weeks of real daily use on this project is 407 updates and 127 kB, about
+-- 311 bytes an update and roughly 1.1 MB a year. A finished notebook becomes
+-- another volume rather than disappearing, so that accrues indefinitely. 5 MB is
+-- therefore about four and a half years at that rate, eighteen months for someone
+-- writing three times as much, and it takes a hundred accounts to threaten the
+-- database rather than twenty-five at 20 MB.
+--
+-- The reason not to be more generous is that a cap nobody reaches protects
+-- nothing and reports nothing. An account that reaches this one after eighteen
+-- months of heavy use is the moment to talk about paying for the app, and the
+-- aggregate forces that conversation anyway: fifty accounts at 5 MB is 250 MB of
+-- a 500 MB project regardless of who is heavy.
+--
+-- Low is also the safer of the two mistakes. quota_bytes is a column, so raising
+-- one account is an UPDATE. Lowering is not: an account already holding 15 MB
+-- would sit permanently over a smaller cap, unable to write and unable to prune,
+-- since the log has no delete policy. Too low costs a message and one row; too
+-- high costs an account that cannot be repaired.
+--
+-- What makes 5 MB humane rather than mean is the runway. 80% of it is 4 MB and
+-- the last megabyte is nearly a year of writing, so a warning at 80% gives months
+-- of notice, which the Menu now shows. verify.sql's check only tells the operator.
+--
+-- What was proven before this shipped, recorded here because the harness that
+-- proved it has been removed rather than kept as a file nobody could easily run.
+-- Against PostgreSQL 16.13 with an auth schema scaffolded to match Supabase: this
+-- file applies twice cleanly; the counter accumulates across inserts; an insert
+-- over the cap raises 53100 and the row does not land; an insert that still fits
+-- is allowed; another account is unaffected; a user updating their own
+-- quota_bytes changes no rows; the seed repairs a counter set to the wrong value;
+-- delete_account() removes the usage row; and the refusal message carries both
+-- the contact address and the reassurance. Each was confirmed to fail when the
+-- thing it checked was disabled, including replacing the comparison below with
+-- `if false`. Reproduce by pointing a scratch Postgres at this file.
+--
+-- One wrinkle to expect near the cap, because it does not look like a limit.
+-- Payloads are not uniform: the average is 311 bytes and the largest so far is
+-- 25 kB, a full-journal push from a re-link or a format migration, and that grows
+-- with the document. So an account at 9.98 MB can keep typing and still fail to
+-- re-link a device. verify.sql's 80% check and the Menu's readout exist so that
+-- is seen coming rather than met.
+--
+-- Honest about what this is not: the log cannot be pruned, by design, since
+-- journal_updates has no delete policy. So a quota on it is a countdown and not
+-- a limit, and the thing that would make it permanent is server-side compaction,
+-- which means building exactly what the append-only design exists to prevent.
+-- Worth designing when there are users, not before.
+create table if not exists public.user_usage (
+  user_id     uuid primary key references auth.users (id) on delete cascade,
+  bytes       bigint not null default 0,
+  quota_bytes bigint not null default 5242880,
+  updated_at  timestamptz not null default now()
+);
+
+alter table public.user_usage enable row level security;
+
+-- Readable by its owner so the app can show how full a journal is, and writable
+-- by nobody: the only writer is the trigger below, which runs as definer. A user
+-- who could update this row could raise their own quota.
+drop policy if exists "select own usage" on public.user_usage;
+create policy "select own usage" on public.user_usage
+  for select using (auth.uid() = user_id);
+
+create or replace function public.account_for_journal_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  used bigint;
+  cap  bigint;
+  size bigint := octet_length(new.payload);
+begin
+  insert into public.user_usage (user_id) values (new.user_id)
+  on conflict (user_id) do nothing;
+
+  -- for update, so two devices pushing at once cannot both read the old total
+  -- and both be allowed through it.
+  select bytes, quota_bytes into used, cap
+    from public.user_usage where user_id = new.user_id for update;
+
+  if used + size > cap then
+    -- pg_size_pretty rather than arithmetic, and qualified because search_path
+    -- is empty here. A hand-rolled MB conversion reads "0.0 of 0.0 MB" for any
+    -- cap under a megabyte, which is what a test with a small cap surfaced.
+    raise exception
+      'Journal storage limit reached: % of % used on the server. Nothing has been lost and this device still holds your journal, but new writing is not reaching the server. Email hello@journlet.com to have your limit raised.',
+      pg_catalog.pg_size_pretty(used), pg_catalog.pg_size_pretty(cap)
+      using errcode = '53100';
+  end if;
+
+  update public.user_usage
+     set bytes = bytes + size, updated_at = now()
+   where user_id = new.user_id;
+
+  return new;
+end;
+$$;
+
+-- Deliberately no revoke on this function, unlike delete_account(). PostgreSQL
+-- checks EXECUTE on a trigger function against the table owner rather than the
+-- inserting user, and PL/pgSQL refuses to run a trigger function called
+-- directly, so a revoke would buy nothing and risks breaking every insert.
+drop trigger if exists journal_updates_quota on public.journal_updates;
+create trigger journal_updates_quota
+  before insert on public.journal_updates
+  for each row execute function public.account_for_journal_update();
+
+-- Seed, and self-heal. Recomputed from the log on every apply, so the counter
+-- cannot drift permanently: if it is ever wrong, running this file fixes it.
+insert into public.user_usage (user_id, bytes)
+select user_id, sum(octet_length(payload)) from public.journal_updates group by user_id
+on conflict (user_id) do update set bytes = excluded.bytes, updated_at = now();
+
 -- Per-device keys (spec/device-identity-design.md, steps 2 and 3). These exist
 -- so that one device can be signed out without locking out the rest: with a
 -- single shared keeper key the only lever is rotating it, which hits everything
@@ -242,6 +366,7 @@ begin
   if uid is null then
     raise exception 'Not signed in';
   end if;
+  delete from public.user_usage where user_id = uid;
   delete from public.journal_updates where user_id = uid;
   delete from public.journals where user_id = uid;
   delete from public.device_link_requests where user_id = uid;

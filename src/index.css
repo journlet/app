@@ -125,6 +125,92 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Boot splash — the markup is in index.html, which explains why it exists and
+   why the rules are here rather than inline. It covers the stretch between
+   this stylesheet landing and the JS bundle finishing; main.tsx fades it out
+   once React has painted.
+
+   Everything it needs resolves from the palette above, so it is already
+   correct in dark mode before any JS runs: the prefers-color-scheme block
+   sets --paper and --ink for the "system" case, and an explicit light/dark
+   choice saved in settings is pinned a moment later by applyTheme(). That
+   ordering is unchanged by the splash — it just means the flash it replaces
+   is now the right colour as well as no longer blank. */
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px; /* one grid row */
+  background: var(--paper);
+  color: var(--ink);
+  transition: opacity 220ms ease-out;
+}
+/* Added by main.tsx to fade the splash out; the node is removed just after. */
+.boot-done {
+  opacity: 0;
+}
+/* Matches the brand mark in journlet/site styles.css — keep the two in step.
+   Georgia is the stated fallback rather than a generic serif because Fraunces
+   is font-display: swap, so on a cold cache this is what the wordmark renders
+   as for the first frames. */
+.boot-mark {
+  margin: 0;
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+/* Shown from the first frame, for the whole life of the splash. It says only
+   "something is happening", which is the one thing that can honestly be said
+   here: the earlier wording guessed at a cause, and guessed wrong nearly every
+   time. This app is precached by the service worker, so every launch after the
+   first needs no network at all and a slow one is not a connection problem.
+
+   --line against --ink-soft rather than a partly transparent ring, so the
+   contrast holds in both palettes without depending on what is behind it. */
+.boot-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line);
+  border-top-color: var(--ink-soft);
+  border-radius: 50%;
+  animation: boot-spin 700ms linear infinite;
+}
+@keyframes boot-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Reduced motion means no rotation — an indefinitely spinning object is
+   exactly what that preference is asking to be spared. The element still has
+   to say "working", so it breathes on opacity instead: the ring is complete
+   rather than gapped, so a frozen one would read as a drawn circle, not as
+   progress. The splash's own fade goes too; main.tsx removes the node on a
+   timer rather than transitionend, so nothing depends on a transition that no
+   longer runs. */
+@media (prefers-reduced-motion: reduce) {
+  .boot {
+    transition: none;
+  }
+  .boot-spinner {
+    border-color: var(--line);
+    animation: boot-breathe 1600ms ease-in-out infinite alternate;
+  }
+  @keyframes boot-breathe {
+    from {
+      opacity: 0.35;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
 /* Grid rhythm: the paper's dot pitch is --grid (set from src/lib/grid.ts
    on the app root). Every line of journal text is a --grid line box and
    every stacked block is a multiple of it, so entries sit in the dot
@@ -738,4 +824,84 @@ table.habits {
   .actions {
     transition: none;
   }
+}
+
+/* PagePicker: the chosen page, which is also the button that opens the
+   chooser panel. Quiet until touched — it is a label first, a control
+   second — but never so quiet that it reads as plain text. */
+.pagePickName {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.pagePickName:hover,
+.pagePickName:focus-visible {
+  border-color: var(--line);
+}
+.pagePickName.isOpen {
+  border-color: var(--ink);
+}
+/* PeriodChooser cells: days, weeks, months or years — whichever kind of page
+   is being chosen. The current one is outlined, the chosen one filled, and
+   both are named in full by the button's aria-label. */
+.pickCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 7px 2px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 34px;
+  justify-content: center;
+}
+/* A week row is a line, not a tile: its number and its dates belong together */
+.pickCell.isWide {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+}
+.pickCell:hover:not(:disabled) {
+  border-color: var(--line);
+}
+.pickCell:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.pickCell.isMuted {
+  color: var(--ink-soft);
+  opacity: 0.55;
+}
+.pickCell.isNow {
+  border-color: var(--line);
+  font-weight: 600;
+}
+.pickCell.isOn {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.pickCell.isOn span {
+  color: var(--paper);
+}
+.pickCell:disabled {
+  opacity: 0.3;
+  cursor: default;
 }

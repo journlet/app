@@ -27,14 +27,19 @@ concurrency:
   # in-flight deploy-pages step is worse than queueing behind it.
   cancel-in-progress: false
 
+# Actions are pinned to commit SHAs, not tags. A tag is a movable pointer: a
+# compromised or careless retag of v7 changes what runs here, and this workflow
+# is the thing that publishes the JavaScript the whole encryption model trusts.
+# The trailing comment is the human-readable version, and Dependabot rewrites
+# both the SHA and the comment together, so pinning does not mean freezing.
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -51,7 +56,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: dist
 
@@ -68,5 +73,28 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # No `with: timeout:` here, and that is the finding rather than an
+      # omission. deploy-pages caps the input at its 600000 ms default and says
+      # so in a warning that is easy to miss among two hundred lines of polling:
+      # "timeout value is greater than the allowed maximum - timeout set to the
+      # maximum of 600000 milliseconds". Ten minutes is a ceiling, not a default.
+      #
+      # 6 August 2026, and read this before believing a red deploy. Pages publish
+      # latency for this repository regressed from seconds to over ten minutes,
+      # which others reported the same day in the community Pages category. The
+      # consequence is not a failed deploy, it is a deploy that succeeds and
+      # reports failure: the deployment reaches deployment_in_progress and
+      # completes, but past the ceiling, so the action gives up and cancels
+      # something already published. Confirmed on commit 1f57433, where the job
+      # failed at 10m 4s and the app then reported "This build: 2026-08-06T14:12Z
+      # commit 1f57433".
+      #
+      # So in that window the workflow's verdict is not the answer. The app's own
+      # build stamp on the Sync screen is, and it does not depend on this job at
+      # all. Timing out also costs a commit when it happens before publishing:
+      # the deployment is keyed on the commit SHA, so re-running asks for
+      # something already cancelled and fails in seconds, though a
+      # workflow_dispatch does mint a fresh one for the same SHA.
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+

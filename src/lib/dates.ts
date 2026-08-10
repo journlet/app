@@ -87,6 +87,66 @@ export const periodSub = (scope: Scope, anchorKey: string): string => {
   return anchorKey.slice(0, 4);
 };
 
+/**
+ * The six Monday-first rows of a month grid: every day of the month the anchor
+ * falls in, plus the neighbouring days that fill the corners. Always 42 cells,
+ * so the grid never changes height as you step through the months.
+ */
+export const monthGrid = (anchor: string): string[] => {
+  const start = mondayOf(`${anchor.slice(0, 7)}-01`);
+  return Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return dkey(d);
+  });
+};
+
+/**
+ * The Monday of every ISO week that overlaps the anchor's month. A week
+ * straddling two months is listed under both, because it belongs to both on
+ * paper — its page is the same page either way.
+ */
+export const weeksOfMonth = (anchor: string): string[] => {
+  const month = anchor.slice(0, 7);
+  const out: string[] = [];
+  let mon = dkey(mondayOf(`${month}-01`));
+  for (let i = 0; i < 6; i++) {
+    const sun = shiftAnchor("day", mon, 6);
+    if (mon.slice(0, 7) === month || sun.slice(0, 7) === month) out.push(mon);
+    mon = shiftAnchor("week", mon, 1);
+  }
+  return out;
+};
+
+/** The current period of each scope, in words. A picker sitting on the page
+ *  you are already living in should say so, not imply it with a highlight. */
+export const SCOPE_NOW_WORD: Record<Scope, string> = {
+  day: "today",
+  week: "this week",
+  month: "this month",
+  year: "this year",
+};
+
+/**
+ * The full name of the page an anchor day falls in, at a given scope. Spelled
+ * out rather than abbreviated — pageLabel's job is to fit a header, this one's
+ * is to leave no doubt which page has been chosen, so a week names its dates
+ * as well as its number.
+ */
+export const periodName = (scope: Scope, anchor: string): string => {
+  if (scope === "day")
+    return fmt(toDate(anchor), {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  if (scope === "week")
+    return `Week ${isoWeekKey(anchor).slice(6)} · ${periodSub("week", anchor)}`;
+  if (scope === "month") return periodSub("month", anchor);
+  return anchor.slice(0, 4);
+};
+
 // Step a per-scope anchor day backwards/forwards by one period
 export const shiftAnchor = (
   scope: Scope,

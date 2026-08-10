@@ -4,7 +4,11 @@ services:
   dev:
     image: node:22-alpine
     working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    # npm ci, not npm install. This container exists to check a change before
+    # it is pushed, and npm install is free to resolve versions the lockfile
+    # does not name, which is exactly the difference that would make the check
+    # disagree with CI. The Dockerfile already uses ci for the same reason.
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
     ports:
       - "5173:5173"
     volumes:
