@@ -879,6 +879,20 @@ describe("what the approving device is shown", () => {
   };
 
   /**
+   * Let a foregrounded refresh finish.
+   *
+   * Waiting on the status does not work here: it is already "synced", so
+   * vi.waitFor returns on its first attempt and an assertion lands before the
+   * refresh it was meant to observe. Nor does counting table reads, which the
+   * fake client increments when the query is built rather than when it resolves.
+   * The fake client answers immediately, so draining the microtask and timer
+   * queues a few times is what actually settles it.
+   */
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+
+  /**
    * A request from a device that is not on the account yet.
    *
    * agoMs rather than a fixed timestamp: listLinkRequests drops anything older
@@ -948,22 +962,57 @@ describe("what the approving device is shown", () => {
     );
   });
 
+  test("signing out clears the approval card", async () => {
+    // teardown's own comment is the reason, and it was untested: a
+    // pending-approval card left on screen after a sign-out would offer to
+    // grant a device access with a data key this device no longer holds. The
+    // four assignments that did this are now one resetLinkState().
+    const pair = await generateDeviceKeyPair();
+    const key = await exportDevicePublicKey(pair.publicKey);
+
+    asks("laptop", key, 0);
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getLinkRequests()).toHaveLength(1));
+
+    await sync.signOutAndWipe();
+
+    expect(sync.getLinkRequests()).toHaveLength(0);
+  });
+
   test("still returns early when nothing about the request changed", async () => {
     // The early-out is worth keeping. Widening the comparison must not turn
-    // every poll into a re-render.
+    // every poll into a re-render, and since the requests moved into the sync
+    // snapshot it must not turn every poll into a new published identity
+    // either: LinkPrompts counts down to expiry from this array, and a fresh
+    // one restarts the countdown.
+    //
+    // Two halves, because the first alone checks nothing. This test used to
+    // wait for the status to become "synced" after foregrounding, which is what
+    // it already was, so the assertion ran before any second read of the table
+    // and disabling the early-out did not fail it. The second half foregrounds
+    // again with the request genuinely changed, which proves the path under the
+    // first half is live.
     const pair = await generateDeviceKeyPair();
     const key = await exportDevicePublicKey(pair.publicKey);
 
     asks("laptop", key, 10 * 60 * 1000);
     const sync = await boot();
     await vi.waitFor(() => expect(sync.getLinkRequests()).toHaveLength(1));
-
     const held = sync.getLinkRequests();
-    await foreground();
-    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
 
-    // Same array identity: nothing was reassigned, so no listener was notified.
+    await foreground();
+    await settle();
+
+    // Same array identity: nothing was reassigned, so nothing was published.
     expect(sync.getLinkRequests()).toBe(held);
+
+    // Same request, asked again: requestedAt moves, so this must publish.
+    asks("laptop", key, 0);
+    await foreground();
+    await settle();
+
+    expect(sync.getLinkRequests()).not.toBe(held);
+    expect(sync.getLinkRequests()).toHaveLength(1);
   });
 });
 
@@ -1147,6 +1196,22 @@ describe("telling apart behind, unproven and removed", () => {
 
     await vi.waitFor(() => expect(sync.getLinkStage()).toBe("waiting"));
     expect(sync.wasRemoved()).toBe(false);
+  });
+
+  test("and signing out takes the code and the stage with it", async () => {
+    // From the waiting device's side. A code still on screen after a sign-out
+    // is an invitation to approve a request with no session behind it. Note
+    // this one survives resetLinkState being removed, because withdrawing the
+    // request clears the code on the way out too, so it pins the outcome rather
+    // than the step that produces it. The approval-card test above is the one
+    // that pins teardown itself.
+    const sync = await bootAsUnprovenPhone();
+    await vi.waitFor(() => expect(sync.getLinkCode()).toBeTruthy());
+
+    await sync.signOutAndWipe();
+
+    expect(sync.getLinkCode()).toBeNull();
+    expect(sync.getLinkStage()).toBeNull();
   });
 
   test("and it keeps the journal it already had", async () => {

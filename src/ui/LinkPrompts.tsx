@@ -60,7 +60,13 @@ const line: React.CSSProperties = {
 };
 
 export default function LinkPrompts() {
-  const [requests, setRequests] = useState<LinkRequest[]>(getLinkRequests());
+  // readonly, because the requests now come out of the sync snapshot, which
+  // hands out the same array identity until the list actually changes. That
+  // identity is what stops the expiry countdown below restarting on a publish
+  // that had nothing to do with these requests.
+  const [requests, setRequests] = useState<readonly LinkRequest[]>(
+    getLinkRequests()
+  );
   const [deferred, setDeferred] = useState<string[]>([]);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [ownCode, setOwnCode] = useState<string | null>(getLinkCode());

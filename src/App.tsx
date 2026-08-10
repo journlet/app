@@ -44,9 +44,6 @@ import {
   isConfigured,
   askToBeAddedBack,
   signOutAndWipe,
-  getLinkCode,
-  getLinkStage,
-  wasRemoved,
   subscribeSync,
   retryConnect,
 } from "./store/sync";
@@ -697,7 +694,7 @@ export default function App() {
   // Signed in but unable to open the journal: ask for the key rather than
   // rendering an empty spread, which reads as a journal that has lost its
   // contents (see lib/onboarding).
-  const [removed, setRemoved] = useState(wasRemoved());
+  const removed = sync.removed;
   const [asking, setAsking] = useState(false);
   const unlocking = needsJournalKey({
     configured: isConfigured(),
@@ -733,20 +730,12 @@ export default function App() {
     syncedOnce,
   });
 
-  // The code this device is displaying while it waits to be approved. Read off
-  // the same status notifications, since the engine publishes the request as part
-  // of arriving at needs-key.
-  const [linkCode, setLinkCode] = useState(getLinkCode());
-  const [linkStage, setLinkStage] = useState(getLinkStage());
-  useEffect(
-    () =>
-      subscribeSync(() => {
-        setLinkCode(getLinkCode());
-        setLinkStage(getLinkStage());
-        setRemoved(wasRemoved());
-      }),
-    []
-  );
+  // The code this device is displaying while it waits to be approved, and how
+  // far along it is. Both come off the one snapshot subscribed to above, along
+  // with `removed`: they were three useState mirrors kept in step by an effect
+  // that re-read three getters on every publish (assessment Finding 12).
+  const linkCode = sync.linkCode;
+  const linkStage = sync.linkStage;
 
   // Second stage of first run: the recovery code, shown once before the journal
   // on the device that created it (decision 4). Re-read on every status change

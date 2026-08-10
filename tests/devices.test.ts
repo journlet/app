@@ -364,6 +364,27 @@ describe("observing", () => {
     d.touchThisDevice();
     expect(calls).toBe(after);
   });
+
+  test("marking a device removed notifies too, which is what refreshes the list", async () => {
+    // Load-bearing for store/sync.ts: removeDevice() used to end with a sync
+    // notification purely so the Sync screen re-read the register. That
+    // notification carried nothing and nothing read it, and it went with the
+    // link state moving into the snapshot. This is why deleting it is safe —
+    // markDeviceRemoved sets a field on a nested map, and observeDeep is what
+    // makes that reach the screen. A shallow observe would not see it.
+    const d = await load();
+    d.touchThisDevice();
+    const id = d.listDevices()[0].id;
+
+    let calls = 0;
+    const off = d.onDevicesChange(() => (calls += 1));
+    d.markDeviceRemoved(id);
+    await Promise.resolve();
+
+    expect(calls).toBeGreaterThan(0);
+    expect(d.listDevices()[0].removedAt).toBeGreaterThan(0);
+    off();
+  });
 });
 
 describe("a device that was removed and then approved again", () => {
