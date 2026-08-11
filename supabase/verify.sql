@@ -3,10 +3,10 @@
 --
 -- Run order for the whole of item 17. Do (b) first or (a) cannot work.
 --
---   (b) Paste supabase/schema.sql into the SQL Editor and run it.
---       public.delete_account() does not exist until you do, and the delete
---       button fails with a missing-function error. Safe to re-run: verified
---       idempotent on 4 Aug by applying it twice to a scratch Postgres 16.
+--   (b) Paste supabase/schema.sql into the SQL Editor and run it. Safe to
+--       re-run: verified idempotent by applying it twice to a scratch Postgres
+--       16, including over a project that still had the deletion function and
+--       column this file now expects to be absent.
 --
 --   (c) Paste THIS file and run it. Every row should read ok = true.
 --       Failures sort to the top. Each row names what it expected.
@@ -17,15 +17,14 @@
 --
 --   (d) Client behaviour, not SQL. See the note at the foot of this file.
 --
---   (a) Account deletion, in the app rather than here. Checklist at the foot.
+--   (a) Account deletion. No longer an app action, so no longer a checklist
+--       here. Note at the foot of this file.
 --
---   Note, 10 Aug 2026 (assessment Finding 24): delete_account() now takes the
---   delete code and the zero-argument form is dropped, so re-run schema.sql on
---   the live project before this file or checks 8, 9 and 24 will report on a
---   function that is no longer the one the app calls. Check 28 says whether the
---   protection is on for the accounts that exist: an account whose delete_code is
---   still null can be deleted on the mailbox alone, and the app writes the code
---   on the next connect from the device holding the journal key code.
+--   Note, 11 Aug 2026 (assessment Finding 24): account deletion is no longer in
+--   the app at all. delete_account(), set_delete_code() and journals.delete_code
+--   are dropped, and checks 5 and 6 now assert their absence. Re-run schema.sql
+--   on the live project before this file, or those two will report on the state
+--   this repository has just left behind.
 --
 -- What was already verified off-project on 4 Aug, so you are not checking it
 -- again: schema.sql applied twice to a scratch Postgres 16 (idempotent, clean
@@ -33,8 +32,8 @@
 -- to fail when the thing it checks is deliberately broken (publishing
 -- journals, dropping a policy, granting anon execute, unpinning search_path,
 -- disabling RLS, recreating the old index) and to recover when undone.
--- delete_account() was also run end to end there: it cleared all six tables
--- and the auth user, and raised "Not signed in" with no claim set.
+-- The deletion function was also run end to end there while it existed, and
+-- against the live project on 11 August, before being removed altogether.
 --
 -- Note, 4 Aug 2026: the journals UPDATE policy was dropped, so check 1's
 -- expected count for that table went from 3 to 2. Re-run schema.sql on the live
@@ -52,7 +51,7 @@
 --                            update destroys access to everything written
 --                            before the first rotation; the client only ever
 --                            selects and inserts here. The row goes with the
---                            account via delete_account().
+--                            account, back when the app could.
 --   journal_updates       2  select, insert only. Append-only by design, which
 --                            is what stops a client rewriting history
 --                            (remediation item 23).
@@ -121,52 +120,26 @@ checks as (
           where schemaname = 'public' and tablename = 'journals'
             and cmd in ('UPDATE', 'DELETE'))
 
-  -- (c) delete_account exists and is hardened
   union all
-  select 5, '(c) delete_account(text) exists',
-         'present',
-         coalesce((select 'present' from pg_proc p
-                   join pg_namespace n on n.oid = p.pronamespace
-                   where n.nspname = 'public' and p.proname = 'delete_account'),
-                  'MISSING')
+  -- (c) Finding 24, settled 11 August 2026: account deletion left the app, so
+  -- neither function should exist. Their absence is the control now. A form left
+  -- behind would still be granted to authenticated and would still delete an
+  -- account, and every signature either has ever had is covered because this
+  -- project may be converging from any of them.
+  select 5, '(c) no account-deletion function remains',
+         '0',
+         (select count(*)::text from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public'
+            and p.proname in ('delete_account', 'set_delete_code'))
 
   union all
-  select 6, '(c) delete_account(text) is security definer',
-         'true',
-         coalesce((select prosecdef::text from pg_proc p
-                   join pg_namespace n on n.oid = p.pronamespace
-                   where n.nspname = 'public' and p.proname = 'delete_account'),
-                  'no such function')
+  select 6, '(c) journals.delete_code is gone',
+         'absent',
+         coalesce((select 'present' from information_schema.columns
+                   where table_schema = 'public' and table_name = 'journals'
+                     and column_name = 'delete_code'), 'absent')
 
-  union all
-  select 7, '(c) delete_account(text) search_path pinned empty',
-         'search_path=""',   -- Postgres normalises set search_path = '' to this
-         coalesce((select array_to_string(proconfig, ',') from pg_proc p
-                   join pg_namespace n on n.oid = p.pronamespace
-                   where n.nspname = 'public' and p.proname = 'delete_account'),
-                  'NOT PINNED')
-
-  -- (c) who may execute it. anon covers PUBLIC too, since PUBLIC is inherited.
-  union all
-  -- delete_account(text) since Finding 24: it takes the delete code. The
-  -- zero-argument form it replaced is checked for separately, and its absence is
-  -- the point rather than a detail.
-  select 8, '(c) delete_account(text) executable by authenticated',
-         'true',
-         case when to_regprocedure('public.delete_account(text)') is null
-              then 'no such function'
-              else has_function_privilege('authenticated',
-                     'public.delete_account(text)', 'execute')::text end
-
-  union all
-  select 9, '(c) delete_account(text) NOT executable by anon',
-         'false',
-         case when to_regprocedure('public.delete_account(text)') is null
-              then 'no such function'
-              else has_function_privilege('anon',
-                     'public.delete_account(text)', 'execute')::text end
-
-  -- (c) item 15's volume column, backfilled by its default
   union all
   select 10, '(c) journal_updates.volume default',
          '''v1''::text',
@@ -271,7 +244,8 @@ checks as (
                      and t.tgname = 'journal_updates_quota'), 'MISSING')
 
   -- (c) the trigger function is definer with an empty search_path, like
-  -- delete_account. Invoker rights would fail, since user_usage has no write
+  -- the deletion function that used to sit here. Invoker rights would fail,
+  -- since user_usage has no write
   -- policy, so this is load-bearing rather than hygiene.
   union all
   select 20, '(c) account_for_journal_update() is definer, search_path empty',
@@ -305,70 +279,6 @@ checks as (
          (select count(*)::text || ' accounts' from public.user_usage
           where bytes > quota_bytes * 0.8)
 
-  -- (c) Finding 24: the mailbox alone must not be able to destroy the server
-  -- copy. Five things have to hold together, so each is its own row.
-  union all
-  select 23, '(c) journals.delete_code exists',
-         'bytea',
-         coalesce((select data_type from information_schema.columns
-                   where table_schema = 'public' and table_name = 'journals'
-                     and column_name = 'delete_code'), 'MISSING')
-
-  -- The zero-argument form is the hole. Postgres keeps overloads side by side, so
-  -- leaving it behind would leave delete_account() callable with no code at all.
-  union all
-  select 24, '(c) no zero-argument delete_account remains',
-         '0',
-         (select count(*)::text from pg_proc p
-          join pg_namespace n on n.oid = p.pronamespace
-          where n.nspname = 'public' and p.proname = 'delete_account'
-            and p.pronargs = 0)
-
-  union all
-  select 25, '(c) delete_account takes one text argument',
-         '1 text',
-         coalesce((select count(*)::text || ' ' ||
-                          pg_catalog.format_type(p.proargtypes[0], null)
-                   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                   where n.nspname = 'public' and p.proname = 'delete_account'
-                     and p.pronargs = 1
-                   group by p.proargtypes), 'MISSING')
-
-  union all
-  select 26, '(c) set_delete_code is definer, search_path empty, not for anon',
-         'definer, pinned, revoked',
-         coalesce((select case when p.prosecdef then 'definer' else 'INVOKER' end
-                          || ', '
-                          || case when 'search_path=' = any(
-                                 select left(c, 12) from unnest(p.proconfig) c)
-                             then 'pinned' else 'NOT PINNED' end
-                          || ', '
-                          || case when has_function_privilege(
-                                      'anon', p.oid, 'execute')
-                             then 'ANON CAN EXECUTE' else 'revoked' end
-                   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                   where n.nspname = 'public' and p.proname = 'set_delete_code'),
-                  'MISSING')
-
-  -- journals must still have no update policy. An update policy here would let a
-  -- caller who should not be there set their own delete code, which is Finding 7
-  -- again under a new name, and it is why the code is written by a definer.
-  union all
-  select 27, '(c) journals still has no update policy',
-         'none',
-         coalesce((select string_agg(policyname, ', ') from pg_policies
-                   where schemaname = 'public' and tablename = 'journals'
-                     and cmd = 'UPDATE'), 'none')
-
-  -- Informational, and the one that says whether the protection is actually on
-  -- for the accounts that exist. An account with a null code can still be
-  -- deleted on the mailbox alone: that is the migration window, and it closes
-  -- when the app next connects from the device holding the journal key code.
-  union all
-  select 28, '(c) every account has a delete code recorded',
-         '0 without',
-         (select count(*)::text || ' without' from public.journals
-          where delete_code is null)
 )
 select check_name, expected, actual, (actual = expected) as ok
 from checks
@@ -394,31 +304,21 @@ order by (actual = expected), seq, check_name;
 -- which is the assumption that cost the 28 July bug.
 --
 -- ---------------------------------------------------------------------------
--- (a) Account deletion, in the app. Do this last, after (b) and (c) pass.
+-- (a) Account deletion, 11 August 2026. There is nothing to check here any more.
 --
---   1. Private window, app.journlet.com, sign in as gary.rutland+del1@dae.mn
---      (a plus address reaches the same mailbox and is a distinct account).
---   2. Complete first run: save the journal key, log one entry.
---   3. Confirm the account exists on the server, as a before-shot:
---        select count(*) from public.journals      where user_id = '<uid>';
---        select count(*) from public.journal_updates where user_id = '<uid>';
---      Get <uid> from Auth -> Users, or run: select auth.uid();
---   4. In the app: Sync -> delete account. Type the account email to confirm.
---   5. Confirm all of it is gone:
---        select count(*) from public.journals            where user_id = '<uid>'; -- 0
---        select count(*) from public.journal_updates     where user_id = '<uid>'; -- 0
---        select count(*) from public.device_keys         where user_id = '<uid>'; -- 0
---        select count(*) from public.device_wrapped_keys where user_id = '<uid>'; -- 0
---        select count(*) from public.journal_keys        where user_id = '<uid>'; -- 0
---        select count(*) from auth.users                 where id = '<uid>';      -- 0
---      And Auth -> Users no longer lists the address.
+-- It was an in-app action calling public.delete_account(), and this file used to
+-- carry a checklist for exercising it. Both are gone. Deletion is now a request
+-- to the operator: notice to the registered address, a wait, then the rows are
+-- removed by hand. See the privacy page for what is promised.
 --
--- If step 4 fails with a permission error: that is the thing this was checking
--- for. It means the function owner cannot delete from auth.users on this
--- project, which newer Supabase projects cause by not making postgres the
--- owner of that table. The failure is safe by design: the whole function is
--- one transaction, so nothing is deleted and the app says so rather than
--- half-deleting. Fix is to change the function's owner to a role that can.
+-- What that means for whoever runs it. There is no longer any code path that
+-- deletes an account, so a mistyped statement in this editor is the only way it
+-- can happen at all, and that has gone wrong once already. So: take a dump
+-- first, key the statement on the email address rather than on a uid copied off
+-- a screen, and make it refuse rather than proceed if the address matches a
+-- number of users you did not expect. The seven tables to clear, in this order,
+-- are user_usage, journal_updates, journals, device_link_requests, journal_keys,
+-- device_wrapped_keys, device_keys, then auth.users.
 --
 -- Known limit, expected and not a failure: auth.audit_log_entries does not
 -- cascade from auth.users, so sign-in records survive. Disclosed on the

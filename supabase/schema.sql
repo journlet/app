@@ -12,24 +12,27 @@ create table if not exists public.journals (
   created_at timestamptz not null default now()
 );
 
--- delete_code: what a caller must present to delete this account (assessment
--- Finding 24). SHA-256 of a label and the keeper key, so it is derived from the
--- journal key code the account holder already has and nothing here can be
--- turned back into that key.
+-- delete_code is dropped, along with delete_account() and set_delete_code()
+-- further down (assessment Finding 24, settled 11 August 2026).
 --
--- The point is that holding the mailbox is not enough. delete_account() takes no
--- arguments and is granted to authenticated, so account takeover meant the
--- server copy could be destroyed outright, and the free tier keeps no backup
--- behind it. The typing confirmation in the app is client-side only, so at the
--- API level that friction does not exist.
+-- The column held SHA-256 of a label and the keeper key, and delete_account()
+-- compared what a caller presented against it. The idea was that reaching the
+-- mailbox should not be enough to destroy the server copy, since no backup sits
+-- behind it. It did not work: the select policy on this table lets a device read
+-- its own row, and Supabase's default grants cover every column, so the caller
+-- could read the very value it was supposed to prove it knew and hand it back.
+-- Two API calls.
 --
--- Nullable, and delete_account() still allows a delete while it is null. That is
--- the migration window for accounts created before this column: the client sets
--- it on the next connect from a device holding the keeper key, and it cannot be
--- set from a device that does not. Refusing while null would strand an existing
--- account with no way to delete itself at all.
+-- Rather than store a verifier and defend it, account deletion left the app. It
+-- is a request to the operator, with notice to the registered address and a wait
+-- before anything is removed, and there is no longer any function for a mailbox
+-- to call. Signing out still clears a device, and export still produces a
+-- readable copy.
+--
+-- Dropped rather than left unused, because a definer granted to authenticated
+-- that destroys an account is not made safe by nothing calling it.
 alter table public.journals
-  add column if not exists delete_code bytea;
+  drop column if exists delete_code;
 
 alter table public.journals enable row level security;
 
@@ -123,7 +126,8 @@ create policy "insert own updates" on public.journal_updates
 -- over the cap raises 53100 and the row does not land; an insert that still fits
 -- is allowed; another account is unaffected; a user updating their own
 -- quota_bytes changes no rows; the seed repairs a counter set to the wrong value;
--- delete_account() removes the usage row; and the refusal message carries both
+-- deleting an account removed the usage row, back when a function did that; and
+-- the refusal message carries both
 -- the contact address and the reassurance. Each was confirmed to fail when the
 -- thing it checked was disabled, including replacing the comparison below with
 -- `if false`. Reproduce by pointing a scratch Postgres at this file.
@@ -193,7 +197,8 @@ begin
 end;
 $$;
 
--- Deliberately no revoke on this function, unlike delete_account(). PostgreSQL
+-- Deliberately no revoke on this function, unlike the account-deletion function
+-- that used to sit below. PostgreSQL
 -- checks EXECUTE on a trigger function against the table owner rather than the
 -- inserting user, and PL/pgSQL refuses to run a trigger function called
 -- directly, so a revoke would buy nothing and risks breaking every insert.
@@ -373,102 +378,16 @@ create policy "delete own link requests" on public.device_link_requests
 -- standard hardening for security definer: without it a caller could put a
 -- malicious `auth` or `public` schema ahead on the path and have it run with
 -- the owner's rights.
--- Write the delete code, once. Nothing can change it afterwards.
+-- Both functions dropped. See the note on public.journals above for why.
 --
--- A function rather than an UPDATE policy, deliberately. journals has no update
--- policy at all (see above), and adding one so the client could write this
--- column would let a caller who should not be there set their own code and
--- delete the account anyway, which is Finding 7's mistake with a new name. The
--- `is null` clause is the write-once guard, and it is inside the definer so no
--- policy has to be relaxed for it.
---
--- Silent when a code is already stored: the client calls this on every connect
--- as a self-backfill, and a no-op is the expected outcome nearly every time.
--- Takes lowercase hex rather than bytea. PostgREST does accept a \x-prefixed
--- hex string for a bytea argument, but the encoding is one more thing between
--- the client and a function whose refusal is the only thing standing between an
--- attacker and the server copy. Plain text in, decode here, and the length is
--- checked after decoding.
-create or replace function public.set_delete_code(code text)
-returns void
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  uid uuid := auth.uid();
-  raw bytea;
-begin
-  if uid is null then
-    raise exception 'Not signed in';
-  end if;
-  if code is null or code !~ '^[0-9a-f]{64}$' then
-    raise exception 'A delete code must be 64 hex characters';
-  end if;
-  raw := decode(code, 'hex');
-  update public.journals
-     set delete_code = raw
-   where user_id = uid
-     and delete_code is null;
-end;
-$$;
-
-revoke all on function public.set_delete_code(text) from public, anon;
-grant execute on function public.set_delete_code(text) to authenticated;
--- The bytea form from the first draft, dropped so two signatures cannot both be
--- granted.
-drop function if exists public.set_delete_code(bytea);
-
--- The old no-argument form is dropped rather than left alongside this one.
--- Postgres would keep both as separate functions, and the zero-argument one
--- would still be granted to authenticated: the hole this closes, still open
--- under its own signature.
+-- Named in every signature they have ever had, because this file has to converge
+-- a project that may be at any of them, and a form left behind would still be
+-- granted to authenticated and would still delete an account.
 drop function if exists public.delete_account();
 drop function if exists public.delete_account(bytea);
-
-create or replace function public.delete_account(code text default null)
-returns void
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  uid uuid := auth.uid();
-  stored bytea;
-begin
-  if uid is null then
-    raise exception 'Not signed in';
-  end if;
-  select delete_code into stored from public.journals where user_id = uid;
-  -- Compared here rather than in the client, because the client is exactly what
-  -- an attacker is not using. A null stored code is the migration window
-  -- described on the column.
-  if stored is not null
-     and (code is null
-          or code !~ '^[0-9a-f]{64}$'
-          or decode(code, 'hex') <> stored) then
-    raise exception 'The journal key code is required to delete this account';
-  end if;
-  delete from public.user_usage where user_id = uid;
-  delete from public.journal_updates where user_id = uid;
-  delete from public.journals where user_id = uid;
-  delete from public.device_link_requests where user_id = uid;
-  delete from public.journal_keys where user_id = uid;
-  delete from public.device_wrapped_keys where user_id = uid;
-  delete from public.device_keys where user_id = uid;
-  delete from auth.users where id = uid;
-end;
-$$;
-
--- Supabase's default privileges grant EXECUTE on new public functions to anon,
--- authenticated and service_role, so the revoke is load-bearing rather than
--- decorative: without it an unauthenticated caller could invoke this. service_role
--- keeps its grant, which is harmless — that key never ships in the client, and
--- anyone holding it can delete users directly anyway. Re-running emits a
--- "no privileges could be revoked" warning once the default grant is gone; that
--- is cosmetic and the file stays idempotent.
-revoke all on function public.delete_account(text) from public, anon;
-grant execute on function public.delete_account(text) to authenticated;
+drop function if exists public.delete_account(text);
+drop function if exists public.set_delete_code(bytea);
+drop function if exists public.set_delete_code(text);
 
 -- Realtime: broadcast inserts so other devices pick changes up live. Guarded so
 -- re-running doesn't error on the table already being a publication member.

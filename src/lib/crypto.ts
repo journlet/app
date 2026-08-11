@@ -266,40 +266,6 @@ const fromBase32 = (s: string): Uint8Array => {
   return new Uint8Array(out);
 };
 
-/**
- * What `delete_account()` requires, derived from the keeper key (assessment
- * Finding 24).
- *
- * The server stores SHA-256 of a label and the raw keeper key, set once at
- * `journals` creation and never changeable. So deleting the account needs the
- * journal key code as well as the mailbox, and what the server holds cannot be
- * turned back into that key: the input is 256 bits of uniform randomness, so
- * there is nothing to search.
- *
- * The label is there so this value can never coincide with anything else derived
- * from the same key, and it is versioned so a future scheme can be told apart
- * from this one rather than silently replacing it.
- *
- * This exports the keeper key, which is already exported one line below to be
- * shown as the journal key code. It grants nothing new.
- */
-const DELETE_CODE_LABEL = "journlet/delete-account/v1";
-
-export const deriveDeleteCode = async (
-  keeperKey: CryptoKey
-): Promise<string> => {
-  const raw = new Uint8Array(await crypto.subtle.exportKey("raw", keeperKey));
-  const label = new TextEncoder().encode(DELETE_CODE_LABEL);
-  const input = new Uint8Array(label.length + raw.length);
-  input.set(label, 0);
-  input.set(raw, label.length);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
-  // Lowercase hex, because the function takes text and decodes it: the encoding
-  // of a bytea argument is one more thing between the client and the only check
-  // standing between an attacker and the server copy.
-  return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
-};
-
 export const exportJournalKeyCode = async (
   keeperKey: CryptoKey
 ): Promise<string> => {

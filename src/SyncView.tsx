@@ -13,10 +13,7 @@ import QRCode from "qrcode";
 import jsQR from "jsqr";
 import {
   acceptJournalKey,
-  holdsJournalKey,
   canRemoveDevices,
-  deleteAccount,
-  DeviceNotClearedError,
   getJournalKeyCode,
   getSessionEmail,
   getSyncSnapshot,
@@ -33,7 +30,6 @@ import { listDevices, onDevicesChange } from "./store/devices";
 import type { DeviceRecord } from "./store/devices";
 import { pendingJournalKey } from "./lib/pendingKey";
 import {
-  isJournalKeyCode,
   looksLikeJournalKey,
   looksLikeSignInCode,
 } from "./lib/credentialShape";
@@ -100,8 +96,6 @@ export default function SyncView() {
   // Acknowledgement that unsynced entries will be lost. Only asked for when
   // there are any: see the sign-out box.
   const [lossAck, setLossAck] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState("");
   const [keyCode, setKeyCode] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [keyEntry, setKeyEntry] = useState("");
@@ -347,29 +341,6 @@ export default function SyncView() {
    * out on a device that has been offline for a while.
    */
   const unsynced = status !== "synced";
-
-  // Deleting an account is the one genuinely irreversible action in the app,
-  // so it is the documented exception to the undo-toast rule (spec §4.1a):
-  // typing the account's own email is the gate. Compared case-insensitively
-  // and trimmed, because the friction should come from having to read which
-  // account is being destroyed, not from a stray space.
-  const accountEmail = getSessionEmail();
-  // Either credential arms it. The email address is a confirmation rather than a
-  // check, and it only counts on a device that already holds the journal key
-  // code, because that is the device whose keyring the code is then derived from.
-  // Typing the code itself works anywhere, which is what lets a device added by
-  // approval delete the account (assessment Finding 24).
-  const hasKey = holdsJournalKey();
-  const typedTheKey = isJournalKeyCode(deleteConfirm);
-  const typedTheEmail =
-    Boolean(accountEmail) &&
-    deleteConfirm.trim().toLowerCase() === accountEmail?.trim().toLowerCase();
-  const deleteArmed = typedTheKey || (hasKey && typedTheEmail);
-
-  const closeDelete = () => {
-    setDeleteOpen(false);
-    setDeleteConfirm("");
-  };
 
   return (
     <section style={{ marginBottom: 18 }}>
@@ -813,106 +784,40 @@ export default function SyncView() {
           </div>
 
           <div style={ST.keyBox}>
-            <div style={ST.keyLabel}>Delete account</div>
-            {deleteOpen ? (
-              <>
-                <p style={{ ...ST.p, marginTop: 0 }}>
-                  This deletes your account, every encrypted update the server
-                  holds for it, and your email address. It cannot be undone and
-                  there is no grace period — once it is gone, nobody can bring
-                  it back, including whoever runs Journlet.
-                </p>
-                <p style={ST.p}>
-                  This journal will also be removed from this device. Other
-                  devices you are signed in on keep the copy they already have
-                  until you sign out or delete the app there — nothing can erase
-                  a device remotely. Export first from the menu if you want to
-                  keep a readable copy.
-                </p>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 13.5,
-                    lineHeight: 1.5,
-                    color: INK,
-                    maxWidth: 480,
-                    margin: "10px 0 6px",
-                  }}
-                >
-                  {hasKey ? (
-                    <>
-                      Type <strong>{accountEmail}</strong> to confirm, or your
-                      journal key code.
-                    </>
-                  ) : (
-                    <>
-                      Type your <strong>journal key code</strong> to confirm.
-                      This device was added by approving it on another device, so
-                      it does not hold that code and your email address is not
-                      enough here. It starts <code>J1-</code>.
-                    </>
-                  )}
-                  <input
-                    value={deleteConfirm}
-                    onChange={(ev) => setDeleteConfirm(ev.target.value)}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    aria-label="Type your email address or your journal key code to confirm account deletion"
-                    style={{ ...ST.input, width: "100%", margin: "6px 0 4px" }}
-                  />
-                </label>
-                <div style={ST.row}>
-                  <button
-                    className="sheetBtn isDanger"
-                    style={{ width: "auto" }}
-                    disabled={busy || !deleteArmed}
-                    onClick={async () => {
-                      setError(null);
-                      setBusy(true);
-                      try {
-                        await deleteAccount(deleteConfirm);
-                        window.location.reload();
-                      } catch (e) {
-                        setBusy(false);
-                        // Two very different failures. Before the server call
-                        // succeeds nothing is destroyed and saying so is the
-                        // reassurance that matters. After it, the account is
-                        // gone for good and only the local clear-up failed —
-                        // claiming the journal is untouched would be a lie at
-                        // the one moment it would do real harm.
-                        if (e instanceof DeviceNotClearedError) {
-                          setError(
-                            `Your account and everything the server held are deleted. This device could not be cleared automatically (${e.message}). The journal is still on this device: sign out, or clear this site's data in your browser settings, to remove it.`
-                          );
-                        } else {
-                          setError(
-                            e instanceof Error
-                              ? `Could not delete the account: ${e.message}. Nothing has been deleted — your journal is untouched.`
-                              : "Could not delete the account. Nothing has been deleted — your journal is untouched."
-                          );
-                        }
-                      }
-                    }}
-                  >
-                    Delete account and all synced data
-                  </button>
-                  <button
-                    className="sheetBtn isQuiet"
-                    style={{ width: "auto" }}
-                    disabled={busy}
-                    onClick={closeDelete}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </>
-            ) : (
-              <button className="miniBtn" onClick={() => setDeleteOpen(true)}>
-                delete account and all synced data
-              </button>
-            )}
+            <div style={ST.keyLabel}>Delete account and data</div>
+            <p style={{ ...ST.p, marginTop: 0 }}>
+              Deleting the account is done by asking, not by a button here. Email{" "}
+              <a
+                href="mailto:privacy@journlet.com?subject=Delete%20my%20account"
+                style={{ color: INK }}
+              >
+                privacy@journlet.com
+              </a>{" "}
+              from the address the account is registered to. You will be written
+              to at that address before anything is removed, and there is a wait
+              before it happens, so a request nobody made can be stopped.
+            </p>
+            <p style={ST.p}>
+              It works that way because a button here could not tell you from
+              somebody who had reached your email, and there is no backup behind
+              the copy on the server. The full account of what is removed and how
+              long it takes is on{" "}
+              <a
+                href="https://www.journlet.com/privacy.html#your-data"
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: INK }}
+              >
+                journlet.com/privacy
+              </a>
+              .
+            </p>
+            <p style={ST.p}>
+              Two things you can do here and now. <strong>Sign out</strong> above
+              removes this journal and its keys from this device immediately.{" "}
+              <strong>Export</strong> from the menu gives you a readable copy to
+              keep first.
+            </p>
           </div>
         </>
       )}
