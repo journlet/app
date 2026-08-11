@@ -122,6 +122,7 @@ import {
 } from "./lib/onboarding";
 import { acknowledgeRecovery, recoveryPending } from "./lib/recoveryAck";
 import { buildSpreadData } from "./ui/spreadData";
+import { buildMigrationHistory } from "./ui/migrationHistory";
 import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
 
 interface DeletedToast {
@@ -424,6 +425,13 @@ export default function App() {
 
   // Derived view-model (nowKeys, past/future/due lists, future-log grouping).
   // Pure — see ./ui/spreadData.
+  //
+  // Memoised because it walks every page four times and App re-renders far
+  // more often than the journal changes: every keystroke in capture, details,
+  // an inline edit, the thread and nest filters and the search box, and every
+  // 30 seconds on setTick. `days` and `recurrences` are useState values in
+  // useJournal, replaced only when the document changes, so the identity check
+  // here holds across all of those renders (Finding 18).
   const {
     nowKeys,
     pastOpen,
@@ -432,7 +440,10 @@ export default function App() {
     futureLogGroups,
     futureLogCount,
     dueItems,
-  } = buildSpreadData(days, recurrences, today);
+  } = useMemo(
+    () => buildSpreadData(days, recurrences, today),
+    [days, recurrences, today]
+  );
 
   // Collection currently open, if any
   const activeCol =
@@ -874,29 +885,16 @@ export default function App() {
   const sheetMigrates =
     sheetOnPast && sheetEntry?.type === "task" && sheetEntry?.state === "open";
 
-  // Migration history: walk the migratedFrom chain both ways (spec §4.3)
-  const sheetHistory: string[] = (() => {
-    if (!sheetEntry) return [];
-    const all = Object.values(days).flat();
-    const byId = new Map(all.map((e) => [e.id, e]));
-    const byFrom = new Map(
-      all.filter((e) => e.migratedFrom).map((e) => [e.migratedFrom as string, e])
-    );
-    const chain: string[] = [sheetEntry.pageKey];
-    let cur: Entry | undefined = sheetEntry;
-    for (let i = 0; i < 20 && cur?.migratedFrom; i++) {
-      cur = byId.get(cur.migratedFrom);
-      if (!cur) break;
-      chain.unshift(cur.pageKey);
-    }
-    cur = sheetEntry;
-    for (let i = 0; i < 20; i++) {
-      cur = byFrom.get(cur!.id);
-      if (!cur) break;
-      chain.push(cur.pageKey);
-    }
-    return chain.length > 1 ? chain : [];
-  })();
+  // Migration history: walk the migratedFrom chain both ways (spec §4.3).
+  //
+  // Memoised for the same reason as buildSpreadData above: it flattens every
+  // page and builds two Maps, and it ran on every keystroke. Gated on the
+  // sheet being open as well, so a journal with no sheet on screen does no
+  // walk at all — the same shape as searchResults below (Finding 18).
+  const sheetHistory: string[] = useMemo(
+    () => buildMigrationHistory(days, sheetEntry),
+    [days, sheetEntry]
+  );
 
   // Open any page by its key — a collection or a period page. Used by the
   // threading affordances (spec §4.4), where the reference is a page number

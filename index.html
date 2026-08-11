@@ -26,6 +26,16 @@
       markup, this is the directive that will refuse it, which is the point.
 
       connect-src is limited to the Supabase project (REST + realtime wss).
+      The SUPABASE_ORIGINS token below is substituted at build time from
+      SUPABASE_URL in src/lib/supabaseConfig.ts, by cspSupabaseOrigins in
+      vite.config.ts (written without its percent signs here so the
+      substitution does not rewrite this sentence as well). The
+      host used to be written out here as well as there, and changing one and
+      not the other broke sync silently, because the policy refuses the request
+      before Supabase ever sees it and there is no server error to report. One
+      source of truth instead. The substitution throws if this token is ever
+      removed, so re-inlining the host fails the build rather than quietly
+      restoring the trap.
       Fonts are self-hosted, so style-src and font-src are 'self' with no
       third-party origin anywhere in the policy: the Supabase project is now
       the only external host the app may reach, and it only ever receives
@@ -44,7 +54,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://hpbdtcoskwmcggiyqtde.supabase.co wss://hpbdtcoskwmcggiyqtde.supabase.co; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' %SUPABASE_ORIGINS%; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-src 'none'"
     />
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

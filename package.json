@@ -41,5 +41,8 @@
     "workbox-core": "^7.4.1",
     "workbox-precaching": "^7.4.1",
     "workbox-routing": "^7.4.1"
+  },
+  "overrides": {
+    "@trickfilm400/rollup-plugin-off-main-thread": "npm:@surma/rollup-plugin-off-main-thread@^2.2.3"
   }
 }
