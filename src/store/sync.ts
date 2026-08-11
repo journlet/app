@@ -15,7 +15,6 @@ import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
 import {
   markDeviceRemoved,
   markThisDeviceSignedOut,
-  thisClientLabel,
   thisDeviceId,
   touchThisDevice,
 } from "./devices";
@@ -825,11 +824,7 @@ const explainMissingKey = async (): Promise<void> => {
 const askToBeAdded = async (): Promise<void> => {
   if (!supabase || !session) return;
   try {
-    const code = await publishLinkRequest(
-      supabase,
-      deviceBinding(),
-      thisClientLabel()
-    );
+    const code = await publishLinkRequest(supabase, deviceBinding());
     watchForGrant();
     setLinkState({ linkCode: code, linkStage: "waiting" });
   } catch (e) {

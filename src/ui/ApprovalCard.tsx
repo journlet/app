@@ -101,7 +101,7 @@ export default function ApprovalCard({
           marginBottom: 3,
         }}
       >
-        Add {request.client ?? "another device"} to your journal?
+        Add it to your journal?
       </div>
       <p style={body}>
         Asked {ago(request.requestedAt)}. It cannot read anything until you say

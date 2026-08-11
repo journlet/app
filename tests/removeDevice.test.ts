@@ -905,7 +905,6 @@ describe("what the approving device is shown", () => {
         user_id: USER_ID,
         device_id: deviceId,
         public_key: publicKey,
-        client: "Safari on iOS",
         requested_at: new Date(Date.now() - agoMs).toISOString(),
       },
     ];

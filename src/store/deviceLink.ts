@@ -219,12 +219,19 @@ export const shareDataKeyWithDevices = async (
 
 // ---------- step 3: asking, and being asked ----------
 
-/** A device waiting to be let in, as the approving device sees it. */
+/**
+ * A device waiting to be let in, as the approving device sees it.
+ *
+ * It does not say what it is. The row used to carry a `client` label ("Safari
+ * (iOS)") so the prompt could name what was asking, and that was the only
+ * plaintext description of anything in the schema. Spec §6.5 forbids it: a column
+ * holds ciphertext or operational metadata and nothing else. The code is what
+ * authenticates in any case, and a label relayed by the server is the one element
+ * of that screen an attacker could choose.
+ */
 export interface LinkRequest {
   deviceId: string;
   publicKey: string;
-  /** What it calls itself. Plaintext, and null if it declined to say. */
-  client: string | null;
   requestedAt: number;
   /** Computed here from the public key that actually arrived. */
   code: string;
@@ -241,8 +248,7 @@ export interface LinkRequest {
  */
 export const publishLinkRequest = async (
   client: SupabaseClient,
-  binding: DeviceBinding,
-  clientLabel: string
+  binding: DeviceBinding
 ): Promise<string> => {
   const pair = await ensureDeviceKeyPair();
   const publicKey = await exportDevicePublicKey(pair.publicKey);
@@ -251,7 +257,6 @@ export const publishLinkRequest = async (
       user_id: binding.userId,
       device_id: binding.deviceId,
       public_key: publicKey,
-      client: clientLabel,
       // Reset on every ask, so a device that has been sitting on a stale request
       // gets a fresh half hour rather than expiring mid-approval.
       requested_at: new Date().toISOString(),
@@ -266,9 +271,10 @@ export const publishLinkRequest = async (
  * Requests worth showing someone, newest first.
  *
  * Expired rows are deleted rather than merely filtered. Nothing in this app runs
- * on a timer server-side, so if the device that notices a stale request does not
- * clear it, the plaintext client string stays on the server indefinitely — which
- * is precisely the thing the thirty-minute window is supposed to bound.
+ * on a timer server-side, so a row nobody clears sits there for good, and an
+ * expired request is one that can never be approved: the asking device has moved
+ * on to a fresh one. Deleting is what keeps the table a queue rather than a log of
+ * every device that has ever asked.
  *
  * This device's own request is excluded. A device cannot vouch for itself, and
  * showing it its own prompt would be an invitation to approve it.
@@ -279,13 +285,12 @@ export const listLinkRequests = async (
 ): Promise<LinkRequest[]> => {
   const { data, error } = await client
     .from("device_link_requests")
-    .select("device_id, public_key, client, requested_at");
+    .select("device_id, public_key, requested_at");
   if (error) throw new Error(`Could not read link requests: ${error.message}`);
 
   const rows = (data ?? []) as {
     device_id: string;
     public_key: string;
-    client: string | null;
     requested_at: string;
   }[];
 
@@ -303,7 +308,6 @@ export const listLinkRequests = async (
     fresh.push({
       deviceId: row.device_id,
       publicKey: row.public_key,
-      client: row.client,
       requestedAt,
       code: await verificationCode(row.public_key),
     });
