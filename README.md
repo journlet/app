@@ -45,6 +45,8 @@ npm run icons    # regenerate PWA icons from the SVG mark
 One-time setup, all in the Supabase dashboard:
 
 1. SQL Editor → paste and run `supabase/schema.sql` (tables, RLS, realtime, storage quota). Then paste `supabase/verify.sql`, which changes nothing and should report every row `ok = true`. Re-running `schema.sql` is safe and is also how a drifted usage total is repaired.
+
+   `supabase/delete-user.sql` is the third file, and it is the operator's rather than the installer's. Deleting an account is not something the app can do: it is a request, answered by hand, for the reasons on the privacy page. That file is how, in four parts, and it refuses to run unless the address matches exactly one user, is not in its protected list, and has the number of updates you say it has. Read its header before using it. The protected list holds the operator's own address, and taking an address out of it should feel deliberate.
 2. Authentication → Sign In / Up: enable Email. Both templates must carry `{{ .Token }}` and no link, which is a control rather than a preference: a link cannot be tapped into the wrong browser if the email does not contain one.
 3. Authentication → URL Configuration: set Site URL to `https://app.journlet.com`.
 4. Authentication → Rate Limits: sign-ups and sign-ins at 5 per 5 minutes per IP, emails at 25 an hour. The ratio matters more than either number. Left at the defaults the per-IP limit is looser than the project-wide email budget it feeds, so one address can spend an hour of email in five minutes.
