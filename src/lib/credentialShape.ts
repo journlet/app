@@ -33,21 +33,6 @@ const strip = (value: string): string =>
  * Supabase codes are numeric and at most ten digits even if the length is
  * raised from the default six. So twelve is clear of both.
  */
-/**
- * Unambiguously a journal key code, rather than merely resembling one.
- *
- * The J1 prefix and nothing looser, because this one decides whether a field is
- * read as a key at all. looksLikeJournalKey below is deliberately generous, since
- * its job is to notice a likely mistake and say something; anything that generous
- * here would read an email address as a key, an email address being comfortably
- * longer than twelve characters.
- *
- * Agrees with importJournalKeyCode, which refuses anything without the prefix, so
- * a field armed by this cannot then fail to parse for want of one.
- */
-export const isJournalKeyCode = (value: string): boolean =>
-  strip(value).startsWith("J1");
-
 export const looksLikeJournalKey = (value: string): boolean => {
   const s = strip(value);
   if (!s) return false;

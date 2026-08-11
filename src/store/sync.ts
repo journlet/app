@@ -38,7 +38,6 @@ import {
 import type { LinkRequest } from "./deviceLink";
 import {
   decryptUpdate,
-  deriveDeleteCode,
   encryptUpdate,
   generateDataKey,
   wrapDataKey,
@@ -62,7 +61,6 @@ import {
   stashKey,
   stashKeyFromUrl,
 } from "../lib/pendingKey";
-import { isJournalKeyCode } from "../lib/credentialShape";
 import { markRecoveryPending } from "../lib/recoveryAck";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import {
@@ -403,32 +401,6 @@ doc.on("update", (update: Uint8Array, origin: unknown) => {
  */
 let keeperUsable = false;
 
-/**
- * Record the account's delete code, once (assessment Finding 24).
- *
- * Only a device holding the keeper key can derive it, which is the whole point.
- * Called rather than tracked: set_delete_code is a no-op once a code is stored,
- * so this doubles as the backfill for accounts created before the column.
- *
- * A function rather than two inline blocks because there are two moments where a
- * device is known to hold a usable keeper key, and the first one was missed. See
- * the two call sites below.
- *
- * Never throws. A failure here must not stop a connect: the function may not
- * exist yet on an older schema, and the device may be offline.
- */
-const recordDeleteCode = async (keeperKey: CryptoKey): Promise<void> => {
-  if (!supabase) return;
-  try {
-    const { error } = await supabase.rpc("set_delete_code", {
-      code: await deriveDeleteCode(keeperKey),
-    });
-    if (error) throw new Error(error.message);
-  } catch (e) {
-    console.warn("[account] could not record the delete code", e);
-  }
-};
-
 // Returns true when this device's keys are good for the remote journal
 const ensureJournalKeys = async (): Promise<boolean> => {
   if (!supabase || !ring) return false;
@@ -486,12 +458,6 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     // (decision 4, spec device-identity-design.md).
     markRecoveryPending();
     keeperUsable = true;
-    // The account is protected from the moment it exists, not from the next cold
-    // start. This branch returns early, so the call further down never ran for a
-    // new account: it was created with no delete code and stayed that way until
-    // the app was next launched, which is the widest the window could be and at
-    // the point the account is newest.
-    await recordDeleteCode(held.keeperKey);
     return true;
   }
   // Journal exists. Gather every epoch key this device can get hold of, by both
@@ -546,9 +512,6 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     console.warn("[devices] could not check for granted keys", e);
   }
 
-  // The other moment: an existing journal this device has just proved it can
-  // open. This is the backfill path for every account created before the column.
-  if (keeperUsable && held.keeperKey) await recordDeleteCode(held.keeperKey);
 
   // Later epochs under the keeper key, for the device holding the recovery code.
   if (keeperUsable && held.keeperKey) {
@@ -986,27 +949,6 @@ export const approveDevice = async (request: LinkRequest): Promise<void> => {
  * the Sync screen says so instead of offering an action that would fail.
  */
 export const canRemoveDevices = (): boolean =>
-  Boolean(ring?.keeperKey && keeperUsable);
-
-/**
- * Whether this device holds this account's journal key code.
- *
- * Renamed from canDeleteAccount, which stopped being true: an account can now be
- * deleted from any device by typing the code, so what this reports is narrower
- * than what it was being asked. It decides whether the confirmation box will take
- * an email address as well as a code, and it is what getJournalKeyCode needs to
- * be true before it will display one.
- *
- * `keeperUsable` as well as the key, for the reason getJournalKeyCode gives:
- * every fresh install generates a keeper key, so holding one proves nothing until
- * it has opened this account's journal. Saying yes on the strength of an unproven
- * key would offer an email confirmation that then derived a code from a key that
- * was never the account's.
- *
- * A separate function from canRemoveDevices rather than a reuse of it: the two
- * happen to share a condition today and are not the same question.
- */
-export const holdsJournalKey = (): boolean =>
   Boolean(ring?.keeperKey && keeperUsable);
 
 /**
@@ -1687,99 +1629,20 @@ export const signOutAndWipe = async (): Promise<void> => {
   await wipeThisDevice();
 };
 
-/**
- * The account was deleted but this device could not be cleared. Distinct from a
- * failed deletion because the two need opposite advice, and telling someone
- * their journal is untouched when the account is already gone is the worst
- * thing this flow could do.
- */
-export class DeviceNotClearedError extends Error {
-  constructor(detail: string) {
-    super(detail);
-    this.name = "DeviceNotClearedError";
-  }
-}
-
-/**
- * Delete the account and everything the server holds for it, then wipe this
- * device (remediation item 16, UK GDPR right to erasure).
- *
- * The server side is one RPC to a security definer function that deletes only
- * auth.uid() — see supabase/schema.sql. Deleting an auth user otherwise needs
- * the service role key, which cannot ship in a client-only app.
- *
- * Server first, deliberately. If the RPC fails, nothing has been destroyed and
- * the caller can say so; wiping first would leave someone with nothing local
- * AND an account they can no longer reach to retry.
- *
- * The consequence is that the RPC is a point of no return, and the two sides of
- * it need different error handling. A wipe that fails afterwards is not a
- * failed deletion — the account is already gone — so it throws
- * DeviceNotClearedError, which the UI must never report as "nothing was
- * deleted". IndexedDB can and does reject: quota, private mode, an eviction
- * mid-flight.
- *
- * Other signed-in devices keep the copy they hold. Their next push fails
- * against the missing user row, and once the refresh token is gone they land
- * back at signed-out. Nothing can remotely erase a device, which the UI says
- * plainly.
- */
-export const deleteAccount = async (confirmation?: string): Promise<void> => {
-  if (!supabase || !session) throw new Error("Not signed in");
-  // The code the server compares, derived from the keeper key (Finding 24).
-  // Holding the mailbox is no longer enough to destroy the server copy, and
-  // there is no backup behind it on the free tier.
-  //
-  // A device without the keeper key cannot produce it, so it cannot delete the
-  // account. Said here as well as being disabled in the interface, because this
-  // function is callable from elsewhere and a caller that got past the button
-  // should get the reason rather than a refusal from the database.
-  // Either credential opens this. A journal key code typed into the confirmation
-  // box is used in preference to the keyring, which is what lets a device added by
-  // approval delete the account, and what stops a borrowed unlocked device doing
-  // it on the strength of an email address alone being typed into a field.
-  //
-  // Narrowed into a const rather than asserted through holdsJournalKey(), which
-  // the compiler cannot see into. src/ has one non-null assertion in it and this
-  // is not worth being the second.
-  const typedKey = confirmation && isJournalKeyCode(confirmation);
-  const keeperKey = typedKey
-    ? await importJournalKeyCode(confirmation)
-    : keeperUsable
-      ? ring?.keeperKey
-      : undefined;
-  if (!keeperKey)
-    throw new Error(
-      "Deleting the account needs your journal key code. Type it in the box above, or use the device that holds it."
-    );
-  const { error } = await supabase.rpc("delete_account", {
-    code: await deriveDeleteCode(keeperKey),
-  });
-  if (error)
-    throw new Error(
-      typedKey
-        ? `That journal key code does not open this account: ${error.message}`
-        : error.message
-    );
-
-  // Point of no return. Nothing below may be reported as a failed deletion.
-  teardown();
-  clearPendingKey();
-  try {
-    // The JWT outlives the user row, so drop it rather than leaving a token
-    // that authenticates to a deleted account.
-    await supabase.auth.signOut({ scope: "local" });
-  } catch {
-    // The account is already gone; a failed sign-out must not block the wipe.
-  }
-  try {
-    await wipeThisDevice();
-  } catch (e) {
-    throw new DeviceNotClearedError(
-      e instanceof Error ? e.message : String(e)
-    );
-  }
-};
+// Account deletion is not in the app. It is a request to the operator, and the
+// Sync screen says so and links the page that explains it (assessment Finding
+// 24, settled 11 August).
+//
+// What was here was delete_account(), an RPC granted to authenticated that
+// destroyed every row plus the auth user. Reaching the mailbox was enough to
+// call it, and no backup sits behind it. A code compared inside the function
+// closed that, then turned out to be readable by the caller through the same
+// select policy that lets a device read its own journal row, so it closed
+// nothing. Rather than protect a verifier, the function is gone: there is no
+// longer anything for a mailbox to call.
+//
+// Signing out still wipes this device, and the Menu still exports a readable
+// copy, which is what people usually mean by wanting it gone.
 
 export const getSessionEmail = (): string | null =>
   session?.user.email ?? null;
