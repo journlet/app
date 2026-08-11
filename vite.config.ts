@@ -2,6 +2,8 @@ import { execSync } from "node:child_process";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { injectSupabaseOrigins } from "./build/csp.ts";
+import { SUPABASE_URL } from "./src/lib/supabaseConfig.ts";
 
 // Which commit this build came from, so a reported bug can be traced to exact
 // source. In CI the checkout is a single known commit (GITHUB_SHA). Locally we
@@ -60,6 +62,23 @@ function devCspAllowInlineStyles(): Plugin {
   };
 }
 
+// The Supabase origins in index.html's connect-src, derived from the one place
+// the project is configured (assessment Finding 20). Unlike the dev-only plugin
+// above this runs for `vite build` as well, because the built policy is the one
+// that has to name the right host: no `apply`, deliberately. See build/csp.ts
+// for why it throws rather than passing the html through.
+function cspSupabaseOrigins(): Plugin {
+  return {
+    name: "journlet:csp-supabase-origins",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        return injectSupabaseOrigins(html, SUPABASE_URL);
+      },
+    },
+  };
+}
+
 // journlet.com is served from the domain root, so base stays "/"
 export default defineConfig({
   base: "/",
@@ -68,6 +87,7 @@ export default defineConfig({
     __BUILD_COMMIT__: JSON.stringify(buildCommit()),
   },
   plugins: [
+    cspSupabaseOrigins(),
     devCspAllowInlineStyles(),
     react(),
     VitePWA({
