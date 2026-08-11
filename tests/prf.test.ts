@@ -22,6 +22,10 @@ const ACCOUNT = {
   email: "someone@example.invalid",
 };
 
+/** What a platform hands back from create: a credential with an id on it. */
+const CREATED_ID = new Uint8Array([9, 8, 7, 6]);
+const created = () => ({ rawId: CREATED_ID.buffer });
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -116,7 +120,7 @@ describe("the three outcomes of asking for a secret", () => {
   }) =>
     vi.stubGlobal("navigator", {
       credentials: {
-        create: impl.create ?? (async () => ({})),
+        create: impl.create ?? (async () => created()),
         get: impl.get ?? (async () => null),
       },
     });
@@ -183,6 +187,18 @@ describe("the three outcomes of asking for a secret", () => {
     ).rejects.toBeInstanceOf(CredentialRefusedError);
   });
 
+  test("a create that resolves nothing is a refusal, not a credential", async () => {
+    // `create` may resolve null in the same conditions `get` does, and a
+    // credential with no id is nothing to enrol: the next step has to name it.
+    // Returning it anyway would put an undefined id into allowCredentials, which
+    // fails later and somewhere less obvious.
+    withCredentials({ create: async () => null });
+
+    await expect(
+      createCredential(ACCOUNT, "journlet.com")
+    ).rejects.toBeInstanceOf(CredentialRefusedError);
+  });
+
   test("the refusal keeps the original error, so the console still has it", async () => {
     const original = new DOMException("nope", "NotAllowedError");
     withCredentials({
@@ -209,7 +225,7 @@ describe("what is asked of the authenticator", () => {
       credentials: {
         create: async (o: CredentialCreationOptions) => {
           seen = o.publicKey;
-          return {};
+          return created();
         },
       },
     });
@@ -232,7 +248,7 @@ describe("what is asked of the authenticator", () => {
       credentials: {
         create: async (o: CredentialCreationOptions) => {
           seen = o.publicKey;
-          return {};
+          return created();
         },
       },
     });
@@ -240,6 +256,18 @@ describe("what is asked of the authenticator", () => {
     await createCredential(ACCOUNT, undefined);
 
     expect(seen?.rp).not.toHaveProperty("id");
+  });
+
+  test("the id of the credential it made comes back to the caller", async () => {
+    // Enrolment needs it a moment later, and this is the only moment it exists:
+    // nothing stores it, and §6.5 keeps it off the row deliberately.
+    vi.stubGlobal("navigator", {
+      credentials: { create: async () => created() },
+    });
+
+    await expect(createCredential(ACCOUNT, "journlet.com")).resolves.toEqual(
+      CREATED_ID
+    );
   });
 
   test("the assertion constrains nothing, so a synced credential is offered", async () => {
@@ -263,5 +291,32 @@ describe("what is asked of the authenticator", () => {
 
     expect(seen?.allowCredentials).toEqual([]);
     expect(seen?.userVerification).toBe("required");
+  });
+
+  test("unless a credential is named, which is what enrolment must do", async () => {
+    // The other half of the same decision. Enrolment has just created a credential
+    // and is proving that one can produce a secret; left open, the platform may
+    // offer an older Journlet passkey for the same account, the wrap would be
+    // written for that one, and the enrolment would add no new route while
+    // reporting that it had.
+    let seen: PublicKeyCredentialRequestOptions | undefined;
+    vi.stubGlobal("navigator", {
+      credentials: {
+        get: async (o: CredentialRequestOptions) => {
+          seen = o.publicKey;
+          return {
+            getClientExtensionResults: () => ({
+              prf: { results: { first: new Uint8Array(32).buffer } },
+            }),
+          };
+        },
+      },
+    });
+
+    await deriveSecret("journlet.com", CREATED_ID);
+
+    expect(seen?.allowCredentials).toEqual([
+      { type: "public-key", id: CREATED_ID },
+    ]);
   });
 });

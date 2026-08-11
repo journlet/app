@@ -28,8 +28,14 @@ import type { DeviceBinding, DeviceWrappedKeyJson } from "../lib/deviceKeys";
  * Enforced by the client rather than the database: nothing here runs on a
  * schedule (no pg_cron), so a request expires by being ignored and deleted by
  * whichever device next looks at it. Thirty minutes is long enough to walk to
- * another room and short enough that the plaintext client string is not sitting
- * on the server for any length of time.
+ * another room and short enough that a request nobody answered stops being
+ * approvable while it is still recognised.
+ *
+ * The second half of that used to read differently: it justified the window partly
+ * by not leaving a plaintext client string on the server for any length of time.
+ * §6.5 removed that column outright, so the justification went with it and the
+ * number did not — thirty minutes was always the length of an approval, and now
+ * that is all it is.
  */
 export const LINK_REQUEST_TTL_MS = 30 * 60 * 1000;
 
