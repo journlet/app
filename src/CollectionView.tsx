@@ -217,7 +217,12 @@ const INK_SOFT = "var(--ink-soft)";
 const LINE = "var(--line)";
 const INK = "var(--ink)";
 
-const ST: Record<string, CSSProperties> = {
+// `as const satisfies` rather than a Record<string, CSSProperties> annotation.
+// The annotation types the values and throws the keys away, so a mistyped key
+// compiles and hands back undefined: an element with no styling and no error.
+// This keeps the value checking and infers the key union, so a typo is a build
+// failure (assessment Finding 15; ui/styles.ts:12 has the longer version).
+const ST = {
   // GRID rhythm — matches the dot pitch of the paper background
   head: {
     display: "flex",
@@ -261,4 +266,4 @@ const ST: Record<string, CSSProperties> = {
     fontFamily: "inherit",
     minWidth: 0,
   },
-};
+} as const satisfies Record<string, CSSProperties>;
