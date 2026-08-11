@@ -70,6 +70,7 @@ select u.id,
        (select count(*) from public.device_wrapped_keys  x where x.user_id = u.id) as wrapped_keys,
        (select count(*) from public.device_link_requests x where x.user_id = u.id) as link_requests,
        (select count(*) from public.user_usage           x where x.user_id = u.id) as usage_rows,
+       (select count(*) from public.keeper_wraps         x where x.user_id = u.id) as keeper_wraps,
        (select count(*) from auth.audit_log_entries      a
          where a.payload ->> 'actor_id' = u.id::text)                             as sign_in_records
 from auth.users u
@@ -102,7 +103,11 @@ select jsonb_pretty(jsonb_build_object(
   'device_keys',          (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from public.device_keys          x where x.user_id = u.id),
   'device_wrapped_keys',  (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from public.device_wrapped_keys  x where x.user_id = u.id),
   'device_link_requests', (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from public.device_link_requests x where x.user_id = u.id),
-  'user_usage',           (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from public.user_usage           x where x.user_id = u.id)
+  'user_usage',           (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from public.user_usage           x where x.user_id = u.id),
+  -- Ciphertext, like the key tables above it. Dumped so the export is the whole
+  -- account rather than most of it: without these rows a restored dump would have
+  -- a journal nobody could unlock except by the journal key code.
+  'keeper_wraps',         (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from public.keeper_wraps         x where x.user_id = u.id)
 )) as backup
 from auth.users u
 where u.email = 'PASTE THE ADDRESS HERE';
@@ -178,6 +183,7 @@ begin
   delete from public.journal_keys         where user_id = uid;
   delete from public.device_wrapped_keys  where user_id = uid;
   delete from public.device_keys          where user_id = uid;
+  delete from public.keeper_wraps         where user_id = uid;
 
   -- Sign-in records do not cascade from auth.users, and the privacy page says
   -- they are cleared on request, so they go here rather than being left behind.
@@ -213,4 +219,6 @@ union all select 'device_wrapped_keys', count(*) from public.device_wrapped_keys
 union all select 'device_link_requests', count(*) from public.device_link_requests x
   where not exists (select 1 from auth.users u where u.id = x.user_id)
 union all select 'user_usage', count(*) from public.user_usage x
+  where not exists (select 1 from auth.users u where u.id = x.user_id)
+union all select 'keeper_wraps', count(*) from public.keeper_wraps x
   where not exists (select 1 from auth.users u where u.id = x.user_id);

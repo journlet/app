@@ -26,9 +26,27 @@
 --   on the live project before this file, or those two will report on the state
 --   this repository has just left behind.
 --
+-- Run against the LIVE project on 11 Aug 2026, after keeper_wraps was applied:
+-- all 45 rows ok = true, which is the first time check (c) has been run there
+-- since the account-deletion removal and the new table. Note that the three
+-- publication rows pass on the live project and fail on a fresh scratch instance,
+-- because logical decoding is off by default there; see scratch-scaffold.sql.
+--
+-- Re-verified off-project on 11 Aug 2026, against PostgreSQL 16.13 on the
+-- scaffold now kept in supabase/scratch-scaffold.sql (rebuilt because the 4 Aug
+-- harness had been deleted). schema.sql applied twice, clean both times; this
+-- file returned 45 rows and every one ok = true, up from 40 before keeper_wraps
+-- and its two checks; checks 23 and 24 were each confirmed to fail when the thing
+-- they check was broken (a DELETE policy added, a default put on wrap_id) and to
+-- recover when undone; and delete-user.sql was run end to end against a seeded
+-- account, which cleared its keeper_wraps row and left no orphans.
+--
+-- The count above is rows returned, not checks written: checks 1, 2, 3 and 16 fan
+-- out per table, which is why adding one table added three rows.
+--
 -- What was already verified off-project on 4 Aug, so you are not checking it
 -- again: schema.sql applied twice to a scratch Postgres 16 (idempotent, clean
--- both times), all 34 checks below green against it (35 now, see the note below), and each check confirmed
+-- both times), every check below green against it, and each check confirmed
 -- to fail when the thing it checks is deliberately broken (publishing
 -- journals, dropping a policy, granting anon execute, unpinning search_path,
 -- disabling RLS, recreating the old index) and to recover when undone.
@@ -62,16 +80,23 @@
 --                            orphan every row written under it, deleting one
 --                            would cut the recovery code out of that stretch.
 --   device_link_requests  4  full CRUD: requests are approved or refused.
+--   keeper_wraps          2  select, insert only (spec §6.1e, added 11 Aug
+--                            2026). Write-once for the same reason as
+--                            journal_keys: overwriting a wrap destroys a route
+--                            into the journal. Delete arrives with credential
+--                            removal (§12.1 phase 6), which waits on §11 Q13,
+--                            so a DELETE policy here now would be a capability
+--                            with no caller and no agreed wording.
 
 with tables(t) as (
   values ('journals'), ('journal_updates'), ('device_keys'),
          ('device_wrapped_keys'), ('journal_keys'), ('device_link_requests'),
-         ('user_usage')
+         ('user_usage'), ('keeper_wraps')
 ),
 expected_policies(t, n) as (
   values ('journals', 2), ('journal_updates', 2), ('device_keys', 4),
          ('device_wrapped_keys', 4), ('journal_keys', 2),
-         ('device_link_requests', 4), ('user_usage', 1)
+         ('device_link_requests', 4), ('user_usage', 1), ('keeper_wraps', 2)
 ),
 published(t) as (
   values ('journal_updates'), ('device_link_requests'), ('device_wrapped_keys')
@@ -279,6 +304,35 @@ checks as (
          (select count(*)::text || ' accounts' from public.user_usage
           where bytes > quota_bytes * 0.8)
 
+  -- (c) keeper_wraps is write-once, like journal_keys and journals. Named
+  -- rather than left to the policy count, so re-adding one fails by name.
+  union all
+  select 23, '(c) keeper_wraps has no update/delete policy',
+         '0',
+         (select count(*)::text from pg_policies
+          where schemaname = 'public' and tablename = 'keeper_wraps'
+            and cmd in ('UPDATE', 'DELETE'))
+
+  -- (c) keeper_wraps.wrap_id must have no default.
+  --
+  -- Not tidiness. The wrap id goes inside the AES-GCM additional authenticated
+  -- data, so the client has to choose it before the ciphertext exists. A
+  -- gen_random_uuid() default added here by hand would mean a client encrypting
+  -- against an id the server had not issued yet, and every wrap written that way
+  -- would be unopenable. It would look like a working column.
+  union all
+  select 24, '(c) keeper_wraps.wrap_id has no default',
+         'none',
+         coalesce((select pg_get_expr(d.adbin, d.adrelid)
+                   from pg_attribute a
+                   join pg_class c on c.oid = a.attrelid
+                   join pg_namespace n on n.oid = c.relnamespace
+                   left join pg_attrdef d
+                     on d.adrelid = a.attrelid and d.adnum = a.attnum
+                   where n.nspname = 'public'
+                     and c.relname = 'keeper_wraps'
+                     and a.attname = 'wrap_id'), 'none')
+
 )
 select check_name, expected, actual, (actual = expected) as ok
 from checks
@@ -316,9 +370,10 @@ order by (actual = expected), seq, check_name;
 -- can happen at all, and that has gone wrong once already. So: take a dump
 -- first, key the statement on the email address rather than on a uid copied off
 -- a screen, and make it refuse rather than proceed if the address matches a
--- number of users you did not expect. The seven tables to clear, in this order,
+-- number of users you did not expect. The eight tables to clear, in this order,
 -- are user_usage, journal_updates, journals, device_link_requests, journal_keys,
--- device_wrapped_keys, device_keys, then auth.users.
+-- device_wrapped_keys, device_keys, keeper_wraps, then auth.users. delete-user.sql
+-- does all of this and refuses when the count is not what you expected.
 --
 -- Known limit, expected and not a failure: auth.audit_log_entries does not
 -- cascade from auth.users, so sign-in records survive. Disclosed on the
