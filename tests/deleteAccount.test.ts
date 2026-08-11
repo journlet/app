@@ -52,7 +52,7 @@ vi.mock("@supabase/supabase-js", () => ({
         order: () => query,
         limit: async () => ({ data: [], error: null }),
         maybeSingle: async () =>
-          table === "journals"
+          table === "journals" && journalExists
             ? { data: { wrapped_key: journalsRow }, error: null }
             : { data: null, error: null },
         then<T>(res: (v: { data: unknown[]; error: null }) => T) {
@@ -61,7 +61,10 @@ vi.mock("@supabase/supabase-js", () => ({
       };
       return {
         select: () => query,
-        insert: async () => ({ error: null }),
+        insert: async () => {
+          calls.push(`insert:${table}`);
+          return { error: null };
+        },
         upsert: async () => ({ error: null }),
         delete: () => ({ eq: () => ({ then: (r: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(r) }) }),
       };
@@ -107,6 +110,15 @@ const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
 const journalsRow = { v: 1, iv: b64(wrapped.iv), blob: b64(wrapped.blob) };
 
 let ringHasKeeper = true;
+/**
+ * Whether the account already has a journals row.
+ *
+ * False exercises the first-device branch of ensureJournalKeys, which creates the
+ * row and returns early. That early return is why a brand-new account went
+ * without a delete code until the next cold start: the harness only ever
+ * described the other state, so one fixture covered one of two paths.
+ */
+let journalExists = true;
 
 vi.mock("../src/lib/keystore", () => ({
   ensureKeys: async () => ({
@@ -161,6 +173,7 @@ let deleteResult: { error: { message: string } | null } = { error: null };
 beforeEach(async () => {
   calls.length = 0;
   ringHasKeeper = true;
+  journalExists = true;
   deleteResult = { error: null };
   vi.clearAllMocks();
   rpc.mockImplementation(async (fn: string) =>
@@ -181,6 +194,35 @@ describe("recording the delete code", () => {
     expect(rpc).toHaveBeenCalledWith("set_delete_code", {
       code: await deriveDeleteCode(keeperKey),
     });
+  });
+
+  test("a brand-new account gets one as its journal is created", async () => {
+    // The branch that was missed. ensureJournalKeys returns early after creating
+    // the journals row, so the call further down never ran, and a new account was
+    // created unprotected and stayed that way until the app was next launched
+    // from cold. doConnect early-outs while a connection is live, so nothing
+    // shorter than a relaunch would have closed it.
+    const expected = await deriveDeleteCode(keeperKey);
+    journalExists = false;
+    signIn();
+
+    await vi.waitFor(() =>
+      expect(rpc).toHaveBeenCalledWith("set_delete_code", { code: expected })
+    );
+  });
+
+  test("and it is recorded after the journal row exists, not before", async () => {
+    // Order matters: set_delete_code updates journals, so a call that arrives
+    // before the insert would match no row and silently do nothing, which is the
+    // same failure wearing a different hat.
+    journalExists = false;
+    signIn();
+
+    await vi.waitFor(() => expect(calls).toContain("rpc:set_delete_code"));
+    expect(calls.indexOf("insert:journals")).toBeGreaterThanOrEqual(0);
+    expect(calls.indexOf("insert:journals")).toBeLessThan(
+      calls.indexOf("rpc:set_delete_code")
+    );
   });
 
   test("a device with no journal key code records nothing", async () => {
