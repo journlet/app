@@ -37,7 +37,6 @@ const CONFIRMATION_MS = 7_000;
 
 interface Outcome {
   kind: "added" | "rejected";
-  what: string;
 }
 
 // Same panel geometry as the approval card and the Sync screen's sections, so a
@@ -101,17 +100,17 @@ export default function LinkPrompts() {
   const showing = requests.filter((r) => !deferred.includes(r.deviceId));
   const waiting = requests.filter((r) => deferred.includes(r.deviceId));
 
-  const describe = (r: LinkRequest) => r.client ?? "The device";
-
+  // Nothing here names the device. Requests carry no label since §6.5, and the
+  // code is the only true way to tell two of them apart, so it is what the
+  // deferred line shows.
   const approve = async (request: LinkRequest) => {
     await approveDevice(request);
-    setOutcome({ kind: "added", what: describe(request) });
+    setOutcome({ kind: "added" });
   };
 
   const reject = async (deviceId: string) => {
-    const request = requests.find((r) => r.deviceId === deviceId);
     await rejectDevice(deviceId);
-    setOutcome({ kind: "rejected", what: request ? describe(request) : "It" });
+    setOutcome({ kind: "rejected" });
   };
 
   const minutesLeft = (r: LinkRequest) =>
@@ -122,7 +121,7 @@ export default function LinkPrompts() {
       {outcome?.kind === "added" && (
         <div style={line}>
           <span style={{ flex: 1 }}>
-            {outcome.what} was added. Your journal is on its way to it.
+            That device was added. Your journal is on its way to it.
           </span>
           <button className="miniBtn" onClick={() => setOutcome(null)}>
             dismiss
@@ -168,8 +167,11 @@ export default function LinkPrompts() {
       {waiting.map((r) => (
         <div key={r.deviceId} style={line}>
           <span style={{ flex: 1 }}>
-            {describe(r)} is waiting to be added. It expires in{" "}
-            {minutesLeft(r)} minutes.
+            A device showing{" "}
+            <strong style={{ fontVariantNumeric: "tabular-nums" }}>
+              {r.code}
+            </strong>{" "}
+            is waiting to be added. It expires in {minutesLeft(r)} minutes.
           </span>
           <button
             className="miniBtn"

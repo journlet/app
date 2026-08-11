@@ -535,7 +535,7 @@ describe("sharing the data key", () => {
 /** A request row as a waiting device would have written it. */
 const aRequest = async (
   id: string,
-  opts: { client?: string | null; age?: number; requestedAt?: string } = {}
+  opts: { age?: number; requestedAt?: string } = {}
 ) => {
   const pair = await generateDeviceKeyPair();
   const publicKey = await exportDevicePublicKey(pair.publicKey);
@@ -543,9 +543,6 @@ const aRequest = async (
     user_id: USER,
     device_id: id,
     public_key: publicKey,
-    // `in` rather than ??, so an explicit null is a device that declined to say
-    // rather than one that was not asked.
-    client: "client" in opts ? opts.client : "Safari (iOS)",
     requested_at:
       opts.requestedAt ??
       new Date(Date.now() - (opts.age ?? 60_000)).toISOString(),
@@ -554,12 +551,11 @@ const aRequest = async (
 };
 
 describe("asking to be added", () => {
-  test("publishes the key and client, and returns the code to show", async () => {
-    const code = await publishLinkRequest(client, binding, "Safari (iOS)");
+  test("publishes the key, and returns the code to show", async () => {
+    const code = await publishLinkRequest(client, binding);
 
     const row = tables.device_link_requests?.[0];
     expect(row?.device_id).toBe("this-device");
-    expect(row?.client).toBe("Safari (iOS)");
     expect(row?.public_key).toBe(await exportDevicePublicKey(myPair.publicKey));
     // The code must be of the key that was actually sent, or comparing the two
     // screens compares nothing.
@@ -572,8 +568,8 @@ describe("asking to be added", () => {
     // someone notice a device presenting a *different* key than last time, which
     // means it was wiped or is not the device they think it is. A per-request
     // random code would prove only that two screens agree right now.
-    const first = await publishLinkRequest(client, binding, "Safari (iOS)");
-    const second = await publishLinkRequest(client, binding, "Safari (iOS)");
+    const first = await publishLinkRequest(client, binding);
+    const second = await publishLinkRequest(client, binding);
 
     expect(second).toBe(first);
   });
@@ -582,10 +578,10 @@ describe("asking to be added", () => {
     // Which is the only thing that should change it: a sign-out or a wipe takes
     // the keystore with it. Removal does not, so a re-approved device shows the
     // code it showed before.
-    const before = await publishLinkRequest(client, binding, "Safari (iOS)");
+    const before = await publishLinkRequest(client, binding);
 
     myPair = await generateDeviceKeyPair();
-    const after = await publishLinkRequest(client, binding, "Safari (iOS)");
+    const after = await publishLinkRequest(client, binding);
 
     expect(after).not.toBe(before);
   });
@@ -593,11 +589,11 @@ describe("asking to be added", () => {
   test("asking again restarts the clock", async () => {
     // A device that has been sitting on a stale request should get a fresh half
     // hour rather than expiring in the middle of somebody approving it.
-    await publishLinkRequest(client, binding, "Safari (iOS)");
+    await publishLinkRequest(client, binding);
     const first = tables.device_link_requests?.[0].requested_at as string;
     await new Promise((r) => setTimeout(r, 5));
 
-    await publishLinkRequest(client, binding, "Safari (iOS)");
+    await publishLinkRequest(client, binding);
 
     expect(tables.device_link_requests).toHaveLength(1);
     expect(
@@ -613,14 +609,13 @@ describe("seeing who is asking", () => {
     const [request] = await listLinkRequests(client, binding);
 
     expect(request.deviceId).toBe("phone");
-    expect(request.client).toBe("Safari (iOS)");
     expect(request.code).toBe(await verificationCode(phone.publicKey));
   });
 
   test("never shows this device its own request", async () => {
     // A device cannot vouch for itself, and showing it its own prompt would be
     // an invitation to approve it.
-    await publishLinkRequest(client, binding, "Chrome (macOS)");
+    await publishLinkRequest(client, binding);
 
     expect(await listLinkRequests(client, binding)).toEqual([]);
   });
@@ -635,9 +630,9 @@ describe("seeing who is asking", () => {
   });
 
   test("an expired request is not shown, and is deleted", async () => {
-    // Deleted rather than merely filtered: nothing here runs on a schedule, so
-    // if the device that notices does not clear it, the plaintext client string
-    // stays on the server indefinitely.
+    // Deleted rather than merely filtered: nothing here runs on a schedule, so a
+    // row nobody clears sits there for good, and an expired request is one that
+    // can never be approved.
     await aRequest("stale", { age: LINK_REQUEST_TTL_MS + 60_000 });
 
     expect(await listLinkRequests(client, binding)).toEqual([]);
@@ -660,12 +655,18 @@ describe("seeing who is asking", () => {
     expect(tables.device_link_requests).toEqual([]);
   });
 
-  test("a device that will not say what it is still gets shown", async () => {
-    // Better an approval prompt that admits it does not know than no prompt.
-    await aRequest("quiet", { client: null });
+  test("a request carries no description of the device at all", async () => {
+    // Spec §6.5. The row used to hold "Safari (iOS)", which was the only
+    // plaintext description of anything in the schema, and the prompt named it.
+    // Asserted at both ends because either one could put it back: nothing is
+    // written, and nothing is read.
+    await publishLinkRequest(client, binding);
+    const written = tables.device_link_requests?.[0] ?? {};
+    expect(Object.keys(written)).not.toContain("client");
 
+    await aRequest("phone");
     const [request] = await listLinkRequests(client, binding);
-    expect(request.client).toBeNull();
+    expect(Object.keys(request)).not.toContain("client");
   });
 });
 

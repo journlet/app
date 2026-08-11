@@ -14,7 +14,6 @@ import type { LinkRequest } from "../../src/store/deviceLink";
 const request: LinkRequest = {
   deviceId: "phone",
   publicKey: "irrelevant-here",
-  client: "Installed app (iOS)",
   requestedAt: Date.now() - 30_000,
   code: "2MHY HMQ3 W1HB PM11",
 };
@@ -37,11 +36,17 @@ const renderCard = () => {
 };
 
 describe("what the prompt says", () => {
-  test("names what is asking, and shows the code to compare", () => {
+  test("shows the code to compare, and names nothing", () => {
+    // It used to open with "Add Installed app (iOS) to your journal?". The label
+    // came off the request row under spec §6.5, and the card is the reason that
+    // row carried it, so the wording is checked here rather than only the absence
+    // of the field: the code is what authenticates, and a label the server
+    // relayed is the one thing on this card an attacker could choose.
     renderCard();
 
-    expect(screen.getByText(/Installed app \(iOS\)/)).toBeTruthy();
     expect(screen.getByText("2MHY HMQ3 W1HB PM11")).toBeTruthy();
+    expect(screen.getByText(/Add it to your journal\?/)).toBeTruthy();
+    expect(screen.queryByText(/iOS|macOS|Safari|Chrome/)).toBeNull();
   });
 
   test("warns about a mismatch before the decision, not after it", () => {
