@@ -56,10 +56,19 @@ const show = async (canEnrol = true) => {
 
 const button = () => screen.queryByRole("button", { name: /set up a passkey/i });
 
+/** Served from the real host unless a test says otherwise (§12.1's binding rule). */
+const servedFrom = (hostname: string): void => {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...window.location, hostname },
+  });
+};
+
 beforeEach(() => {
   routes = 0;
   usable = true;
   enrol = async () => {};
+  servedFrom("app.journlet.com");
 });
 afterEach(cleanup);
 
@@ -115,6 +124,18 @@ describe("when it must not offer the button", () => {
 
     expect(button()).toBeNull();
     expect(screen.getByText(/does not hold the journal key itself/i)).toBeTruthy();
+  });
+
+  test("anywhere but journlet.com, because that binding cannot be undone", async () => {
+    // A credential is bound for good to the domain it was created against, so one
+    // enrolled from the Pages default host or a preview deployment could never open
+    // the journal on the real app. §12.1 makes this binding on every phase:
+    // disabled there rather than pointed somewhere else.
+    servedFrom("journlet.github.io");
+    await show();
+
+    expect(button()).toBeNull();
+    expect(screen.getByText(/only be set up on journlet.com/i)).toBeTruthy();
   });
 
   test("a browser that cannot do it at all", async () => {

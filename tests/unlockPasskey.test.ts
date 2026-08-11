@@ -248,8 +248,23 @@ const boot = async (signedIn = true) => {
   return sync;
 };
 
+/**
+ * Served from the real host by default.
+ *
+ * Enrolment is refused anywhere else, because the Relying Party ID cannot be
+ * changed once a credential exists (§12.1). jsdom would otherwise be localhost,
+ * which is one of the hosts that rule excludes.
+ */
+const servedFrom = (hostname: string): void => {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...window.location, hostname },
+  });
+};
+
 beforeEach(async () => {
   localStorage.clear();
+  servedFrom("app.journlet.com");
   prfAnswer = async () => SECRET.buffer;
   signOutMidAdopt = false;
   wrapRows = [await aWrapOf(SECRET)];
@@ -387,6 +402,19 @@ describe("adding a passkey from a device that is already unlocked", () => {
 
     expect(askedFor[0]).toBeUndefined(); // the unlock
     expect(askedFor[1]).toEqual(CREATED_ID); // the enrolment
+  });
+
+  test("and is refused anywhere but journlet.com, before any prompt", async () => {
+    // The one-way decision in the whole design. A credential created against the
+    // Pages default host or a preview deployment is invisible from the real app for
+    // ever, so this does not create one and does not ask.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    servedFrom("journlet.github.io");
+
+    await expect(sync.enrolPasskey()).rejects.toThrow(/only be set up on journlet.com/);
+    expect(created).toBe(0);
+    expect(wrapRows).toHaveLength(1);
   });
 
   test("a credential that cannot produce a secret leaves no row behind", async () => {

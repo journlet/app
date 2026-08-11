@@ -1251,7 +1251,27 @@ export const enrolPasskey = async (): Promise<void> => {
       "This device does not hold the journal key, so it cannot set up a passkey"
     );
 
+  /**
+   * Refused outright anywhere but journlet.com, which §12.1 makes binding on every
+   * phase of this work.
+   *
+   * The Relying Party ID is the one decision in the design that cannot be taken
+   * back: a credential is bound to the domain it was created against, and one
+   * enrolled from the Pages default host or a preview deployment is invisible from
+   * app.journlet.com for ever. Since relyingPartyId answers undefined off
+   * journlet.com, letting enrolment run there would silently create exactly that
+   * credential and report a route the app can never use. Disabled rather than
+   * pointed somewhere else, which is what the rule says.
+   *
+   * The cost is that enrolment cannot be exercised on localhost. That is already
+   * true in practice — it can only be tested on hardware from app.journlet.com —
+   * and a credential made in development would not follow the app anywhere.
+   */
   const rpId = relyingPartyId(location.hostname);
+  if (!rpId)
+    throw new Error(
+      "Passkeys can only be set up on journlet.com. This copy of the app is served from somewhere else, and a passkey created here could never open your journal on the real one."
+    );
   const credentialId = await createCredential(
     { userId, email: session?.user.email ?? "" },
     rpId

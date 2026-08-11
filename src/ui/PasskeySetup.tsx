@@ -22,6 +22,7 @@ import {
   CredentialRefusedError,
   PrfUnsupportedError,
   probeCredentialSupport,
+  relyingPartyId,
 } from "../lib/prf";
 import type { PrfCapability } from "../lib/prf";
 
@@ -114,6 +115,13 @@ export default function PasskeySetup({
   };
 
   const cannot = capability ? capabilityMessage(capability) : null;
+  /**
+   * Anywhere but journlet.com, enrolment is disabled rather than pointed somewhere
+   * else — the Relying Party ID cannot be changed later, and §12.1 makes this
+   * binding on every phase. Said here as well as refused in the store, because a
+   * button that always fails is the no-guessing rule broken (§4.1).
+   */
+  const wrongHost = relyingPartyId(location.hostname) === undefined;
 
   return (
     <div style={boxStyle}>
@@ -147,6 +155,13 @@ export default function PasskeySetup({
           having been added by another device. Set a passkey up on a device that
           can show the journal key, and it will open this journal here too if the
           two share a password manager.
+        </p>
+      ) : wrongHost ? (
+        <p style={{ ...textStyle, marginBottom: 0 }}>
+          Passkeys can only be set up on journlet.com, and this copy of the app is
+          served from {location.hostname}. A passkey is tied for good to the
+          address it was created on, so one made here could never open your
+          journal on the real app.
         </p>
       ) : cannot ? (
         <p style={{ ...textStyle, marginBottom: 0 }}>{cannot}</p>
