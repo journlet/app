@@ -19,6 +19,14 @@
 --
 --   (a) Account deletion, in the app rather than here. Checklist at the foot.
 --
+--   Note, 10 Aug 2026 (assessment Finding 24): delete_account() now takes the
+--   delete code and the zero-argument form is dropped, so re-run schema.sql on
+--   the live project before this file or checks 8, 9 and 24 will report on a
+--   function that is no longer the one the app calls. Check 28 says whether the
+--   protection is on for the accounts that exist: an account whose delete_code is
+--   still null can be deleted on the mailbox alone, and the app writes the code
+--   on the next connect from the device holding the journal key code.
+--
 -- What was already verified off-project on 4 Aug, so you are not checking it
 -- again: schema.sql applied twice to a scratch Postgres 16 (idempotent, clean
 -- both times), all 34 checks below green against it (35 now, see the note below), and each check confirmed
@@ -115,7 +123,7 @@ checks as (
 
   -- (c) delete_account exists and is hardened
   union all
-  select 5, '(c) delete_account() exists',
+  select 5, '(c) delete_account(text) exists',
          'present',
          coalesce((select 'present' from pg_proc p
                    join pg_namespace n on n.oid = p.pronamespace
@@ -123,7 +131,7 @@ checks as (
                   'MISSING')
 
   union all
-  select 6, '(c) delete_account() is security definer',
+  select 6, '(c) delete_account(text) is security definer',
          'true',
          coalesce((select prosecdef::text from pg_proc p
                    join pg_namespace n on n.oid = p.pronamespace
@@ -131,7 +139,7 @@ checks as (
                   'no such function')
 
   union all
-  select 7, '(c) delete_account() search_path pinned empty',
+  select 7, '(c) delete_account(text) search_path pinned empty',
          'search_path=""',   -- Postgres normalises set search_path = '' to this
          coalesce((select array_to_string(proconfig, ',') from pg_proc p
                    join pg_namespace n on n.oid = p.pronamespace
@@ -140,20 +148,23 @@ checks as (
 
   -- (c) who may execute it. anon covers PUBLIC too, since PUBLIC is inherited.
   union all
-  select 8, '(c) delete_account() executable by authenticated',
+  -- delete_account(text) since Finding 24: it takes the delete code. The
+  -- zero-argument form it replaced is checked for separately, and its absence is
+  -- the point rather than a detail.
+  select 8, '(c) delete_account(text) executable by authenticated',
          'true',
-         case when to_regprocedure('public.delete_account()') is null
+         case when to_regprocedure('public.delete_account(text)') is null
               then 'no such function'
               else has_function_privilege('authenticated',
-                     'public.delete_account()', 'execute')::text end
+                     'public.delete_account(text)', 'execute')::text end
 
   union all
-  select 9, '(c) delete_account() NOT executable by anon',
+  select 9, '(c) delete_account(text) NOT executable by anon',
          'false',
-         case when to_regprocedure('public.delete_account()') is null
+         case when to_regprocedure('public.delete_account(text)') is null
               then 'no such function'
               else has_function_privilege('anon',
-                     'public.delete_account()', 'execute')::text end
+                     'public.delete_account(text)', 'execute')::text end
 
   -- (c) item 15's volume column, backfilled by its default
   union all
@@ -293,6 +304,71 @@ checks as (
          '0 accounts',
          (select count(*)::text || ' accounts' from public.user_usage
           where bytes > quota_bytes * 0.8)
+
+  -- (c) Finding 24: the mailbox alone must not be able to destroy the server
+  -- copy. Five things have to hold together, so each is its own row.
+  union all
+  select 23, '(c) journals.delete_code exists',
+         'bytea',
+         coalesce((select data_type from information_schema.columns
+                   where table_schema = 'public' and table_name = 'journals'
+                     and column_name = 'delete_code'), 'MISSING')
+
+  -- The zero-argument form is the hole. Postgres keeps overloads side by side, so
+  -- leaving it behind would leave delete_account() callable with no code at all.
+  union all
+  select 24, '(c) no zero-argument delete_account remains',
+         '0',
+         (select count(*)::text from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.proname = 'delete_account'
+            and p.pronargs = 0)
+
+  union all
+  select 25, '(c) delete_account takes one text argument',
+         '1 text',
+         coalesce((select count(*)::text || ' ' ||
+                          pg_catalog.format_type(p.proargtypes[0], null)
+                   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname = 'public' and p.proname = 'delete_account'
+                     and p.pronargs = 1
+                   group by p.proargtypes), 'MISSING')
+
+  union all
+  select 26, '(c) set_delete_code is definer, search_path empty, not for anon',
+         'definer, pinned, revoked',
+         coalesce((select case when p.prosecdef then 'definer' else 'INVOKER' end
+                          || ', '
+                          || case when 'search_path=' = any(
+                                 select left(c, 12) from unnest(p.proconfig) c)
+                             then 'pinned' else 'NOT PINNED' end
+                          || ', '
+                          || case when has_function_privilege(
+                                      'anon', p.oid, 'execute')
+                             then 'ANON CAN EXECUTE' else 'revoked' end
+                   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname = 'public' and p.proname = 'set_delete_code'),
+                  'MISSING')
+
+  -- journals must still have no update policy. An update policy here would let a
+  -- caller who should not be there set their own delete code, which is Finding 7
+  -- again under a new name, and it is why the code is written by a definer.
+  union all
+  select 27, '(c) journals still has no update policy',
+         'none',
+         coalesce((select string_agg(policyname, ', ') from pg_policies
+                   where schemaname = 'public' and tablename = 'journals'
+                     and cmd = 'UPDATE'), 'none')
+
+  -- Informational, and the one that says whether the protection is actually on
+  -- for the accounts that exist. An account with a null code can still be
+  -- deleted on the mailbox alone: that is the migration window, and it closes
+  -- when the app next connects from the device holding the journal key code.
+  union all
+  select 28, '(c) every account has a delete code recorded',
+         '0 without',
+         (select count(*)::text || ' without' from public.journals
+          where delete_code is null)
 )
 select check_name, expected, actual, (actual = expected) as ok
 from checks

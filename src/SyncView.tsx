@@ -13,6 +13,7 @@ import QRCode from "qrcode";
 import jsQR from "jsqr";
 import {
   acceptJournalKey,
+  canDeleteAccount,
   canRemoveDevices,
   deleteAccount,
   DeviceNotClearedError,
@@ -804,7 +805,21 @@ export default function SyncView() {
 
           <div style={ST.keyBox}>
             <div style={ST.keyLabel}>Delete account</div>
-            {deleteOpen ? (
+            {!canDeleteAccount() ? (
+              // Only offered where it can be carried out, which is the rule this
+              // screen already follows for removing a device. Deletion now needs
+              // the code derived from the journal key code, so a device linked by
+              // approval cannot do it (assessment Finding 24). Saying so here is
+              // the difference between a plainly labelled limit and a button that
+              // fails.
+              <p style={{ ...ST.p, marginTop: 0 }}>
+                Deleting the account needs the device holding your journal key
+                code, because that code is what proves the request came from you
+                rather than from someone who has reached your email. This device
+                was added by approval and does not hold it. To remove the journal
+                from this device only, sign out above.
+              </p>
+            ) : deleteOpen ? (
               <>
                 <p style={{ ...ST.p, marginTop: 0 }}>
                   This deletes your account, every encrypted update the server

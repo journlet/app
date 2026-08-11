@@ -23,6 +23,8 @@ const signOutAndWipe = vi.fn();
 // caches like the real store does and only rebuilds when the status changes.
 const SNAPSHOT = { status: "synced", error: null, revision: 0 };
 
+let canDelete = true;
+
 vi.mock("../../src/store/sync", () => {
   // A real class, so the component's `instanceof` branch is exercised rather
   // than stubbed past.
@@ -37,6 +39,10 @@ vi.mock("../../src/store/sync", () => {
     deleteAccount: (...a: unknown[]) => deleteAccount(...a),
     signOutAndWipe: (...a: unknown[]) => signOutAndWipe(...a),
     getJournalKeyCode: vi.fn(async () => "J1-TESTKEY"),
+    // This device holds the journal key code, so the delete section is offered.
+    // Without it the screen explains why deletion is unavailable instead, which
+    // is the Finding 24 behaviour tested at the foot of this file.
+    canDeleteAccount: () => canDelete,
     getSessionEmail: () => EMAIL,
     getSyncError: () => null,
     getSyncStatus: () => "synced",
@@ -61,6 +67,7 @@ const reload = vi.fn();
 const realLocation = window.location;
 
 beforeEach(() => {
+  canDelete = true;
   vi.clearAllMocks();
   Object.defineProperty(window, "location", {
     configurable: true,
@@ -203,5 +210,42 @@ describe("running the delete", () => {
     expect(screen.getByText(/QuotaExceededError/)).toBeTruthy();
     expect(screen.getByText(/clear this site's data/i)).toBeTruthy();
     expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+// Assessment Finding 24: deleting the account now needs the code derived from
+// the journal key code, so a device that does not hold it cannot do it. The rule
+// this screen already follows for removing a device is to offer an action only
+// where it can be carried out, rather than offering it and then failing.
+describe("a device that does not hold the journal key code", () => {
+  test("is told why deletion is unavailable, and what to do instead", () => {
+    canDelete = false;
+    render(<SyncView />);
+
+    expect(
+      screen.getByText(/needs the device holding your journal key code/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/sign out above/i)
+    ).toBeTruthy();
+  });
+
+  test("is not offered the opener at all", () => {
+    canDelete = false;
+    render(<SyncView />);
+
+    expect(
+      screen.queryByText(/Delete account and all synced data/i)
+    ).toBeNull();
+  });
+
+  test("and the section is still headed Delete account, so it is findable", () => {
+    // Hiding it entirely would leave someone hunting for a control that is
+    // deliberately absent, which reads as a missing feature rather than a
+    // stated limit.
+    canDelete = false;
+    render(<SyncView />);
+
+    expect(screen.getByText("Delete account")).toBeTruthy();
   });
 });

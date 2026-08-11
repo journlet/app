@@ -42,6 +42,7 @@ vi.mock("../../src/store/sync", () => ({
   },
   provideJournalKey: vi.fn(),
   canRemoveDevices: () => canRemove,
+  canDeleteAccount: () => true,
   removeDevice: vi.fn(),
   signIn: (...a: unknown[]) => signIn(...(a as [])),
   verifyEmailCode: vi.fn(),
