@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 //
-// Unlocking a device from a keeper wrap (spec §6.1e, §12.1 phase 4).
+// Unlocking a device from a keeper wrap, and adding one (spec §6.1e, §12.1 phases
+// 3 and 4).
 //
 // The decryption itself is not what this file is about — keeperWrap.test.ts covers
 // that against fixed bytes, and hardware covers the part where the bytes come from
@@ -27,7 +28,11 @@ import {
   generateKeeperKey,
   wrapDataKey,
 } from "../src/lib/crypto";
-import { newWrapId, wrapKeeperKey } from "../src/lib/keeperWrap";
+import {
+  newWrapId,
+  unwrapKeeperKey,
+  wrapKeeperKey,
+} from "../src/lib/keeperWrap";
 import type { KeeperWrapJson } from "../src/lib/keeperWrap";
 import { CredentialRefusedError, PrfUnsupportedError } from "../src/lib/prf";
 import type { KeyRing } from "../src/lib/keystore";
@@ -81,6 +86,10 @@ let prfAnswer: () => Promise<ArrayBuffer> = async () => SECRET.buffer;
 let derivations = 0;
 /** Sign out inside the one await between proving a key and installing it. */
 let signOutMidAdopt = false;
+/** The id createCredential hands back, and what each derive was told to use. */
+const CREATED_ID = new Uint8Array([4, 5, 6, 7]);
+let created = 0;
+let askedFor: (Uint8Array | undefined)[] = [];
 
 const signIn = (): void => {
   if (!authCallback)
@@ -92,8 +101,13 @@ const signIn = (): void => {
 // is that only the platform call is replaced.
 vi.mock("../src/lib/prf", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/prf")>()),
-  deriveSecret: async () => {
+  createCredential: async () => {
+    created++;
+    return CREATED_ID;
+  },
+  deriveSecret: async (_rpId: string | undefined, credentialId?: Uint8Array) => {
     derivations++;
+    askedFor.push(credentialId);
     return prfAnswer();
   },
 }));
@@ -145,6 +159,10 @@ vi.mock("@supabase/supabase-js", () => ({
               opts?.head
                 ? Promise.resolve(answer)
                 : { order: async () => answer },
+            insert: async (row: { wrap_id: string; wrapped: KeeperWrapJson }) => {
+              wrapRows.push({ wrap_id: row.wrap_id, wrapped: row.wrapped });
+              return { error: null };
+            },
           };
         }
         const b = {
@@ -210,6 +228,8 @@ const boot = async (signedIn = true) => {
   doc = new Y.Doc();
   authCallback = null;
   derivations = 0;
+  created = 0;
+  askedFor = [];
   ringWrites = [];
   localStorage.setItem("journlet-device-id", "phone-id");
   storedRing = {
@@ -308,6 +328,79 @@ describe("a device unlocking from a passkey", () => {
     const sync = await boot();
 
     await expect(sync.countPasskeyRoutes()).resolves.toBe(2);
+  });
+});
+
+describe("adding a passkey from a device that is already unlocked", () => {
+  test("needs the keeper key, and writes nothing without it", async () => {
+    // Wrapping needs the keeper key, so enrolment requires already being unlocked —
+    // the same entitlement logic as approving a device (§6.1d). This device is
+    // signed in and holds nothing that works, which is exactly the state in which
+    // an offer to add a passkey would be a route to nowhere.
+    const sync = await boot();
+
+    expect(sync.canEnrolPasskey()).toBe(false);
+    await expect(sync.enrolPasskey()).rejects.toThrow(/does not hold the journal key/);
+    expect(wrapRows).toHaveLength(1);
+    expect(created).toBe(0);
+  });
+
+  test("once unlocked, it adds a second route rather than replacing the first", async () => {
+    // Many wraps, any one sufficient, none privileged. Two routes is the whole
+    // point of the second one: an iCloud user who also uses Windows.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+
+    expect(sync.canEnrolPasskey()).toBe(true);
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    await sync.enrolPasskey();
+
+    expect(wrapRows).toHaveLength(2);
+  });
+
+  test("and the wrap it wrote opens on the credential it enrolled", async () => {
+    // The check that makes the row worth having. A wrap written without deriving
+    // would be a stored route that might not open, which is why enrolment shows two
+    // prompts rather than one.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    await sync.enrolPasskey();
+
+    const added = wrapRows[wrapRows.length - 1];
+    await expect(
+      unwrapKeeperKey(added.wrapped, OTHER_SECRET, {
+        userId: USER_ID,
+        wrapId: added.wrap_id,
+      })
+    ).resolves.toBeTruthy();
+  });
+
+  test("naming the credential it just created when it asks for the secret", async () => {
+    // Left open, the platform may offer an older Journlet passkey for this account,
+    // the wrap would belong to that one, and the enrolment would report success
+    // having added no new route. Unlocking is the opposite case and passes nothing,
+    // which is why one call does both.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    await sync.enrolPasskey();
+
+    expect(askedFor[0]).toBeUndefined(); // the unlock
+    expect(askedFor[1]).toEqual(CREATED_ID); // the enrolment
+  });
+
+  test("a credential that cannot produce a secret leaves no row behind", async () => {
+    // The unsupported-password-manager case. It has created a credential by then,
+    // which is untidy and is said on the screen; what must not happen is a row
+    // pointing at a route that cannot be opened.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    prfAnswer = async () => {
+      throw new PrfUnsupportedError();
+    };
+
+    await expect(sync.enrolPasskey()).rejects.toBeInstanceOf(PrfUnsupportedError);
+    expect(wrapRows).toHaveLength(1);
   });
 });
 

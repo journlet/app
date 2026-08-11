@@ -37,6 +37,12 @@ vi.mock("../../src/store/sync", () => {
       return () => {};
     },
     provideJournalKey: vi.fn(),
+    canEnrolPasskey: () => true,
+    countPasskeyRoutes: async () => 0,
+    enrolPasskey: vi.fn(),
+    unlockWithPasskey: vi.fn(),
+    NoPasskeyRouteError: class extends Error {},
+    UnknownCredentialError: class extends Error {},
     signIn: vi.fn(),
     verifyEmailCode: vi.fn(),
   };

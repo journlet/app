@@ -41,6 +41,12 @@ vi.mock("../../src/store/sync", () => ({
     return () => {};
   },
   provideJournalKey: vi.fn(),
+  canEnrolPasskey: () => canEnrol,
+  countPasskeyRoutes: async () => passkeyRoutes,
+  enrolPasskey: vi.fn(),
+  unlockWithPasskey: vi.fn(),
+  NoPasskeyRouteError: class extends Error {},
+  UnknownCredentialError: class extends Error {},
   canRemoveDevices: () => canRemove,
   removeDevice: vi.fn(),
   signIn: (...a: unknown[]) => signIn(...(a as [])),
@@ -53,6 +59,15 @@ vi.mock("../../src/store/sync", () => ({
  * remove anything (spec/device-identity-design.md, steps 4 and 5).
  */
 let canRemove = false;
+
+/**
+ * Whether this device can add a passkey route, and how many the account has.
+ *
+ * Same condition as canRemove in the store and separate here for the same reason
+ * it is separate there: one is about rotating and the other about wrapping.
+ */
+let canEnrol = false;
+let passkeyRoutes = 0;
 
 interface Row {
   id: string;

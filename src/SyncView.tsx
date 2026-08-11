@@ -11,8 +11,11 @@ import {
 import type { CSSProperties } from "react";
 import QRCode from "qrcode";
 import jsQR from "jsqr";
+import PasskeySetup from "./ui/PasskeySetup";
+import PasskeyUnlock from "./ui/PasskeyUnlock";
 import {
   acceptJournalKey,
+  canEnrolPasskey,
   canRemoveDevices,
   getJournalKeyCode,
   getSessionEmail,
@@ -481,6 +484,10 @@ export default function SyncView() {
 
       {status === "needs-key" && (
         <>
+          {/* First, and rendering nothing unless this account has a passkey and
+              this browser can use one. §6.1e makes it the quick route; everything
+              below it is unchanged and still offered by name. */}
+          <PasskeyUnlock textStyle={ST.p} />
           <p style={ST.p}>
             This account already has a journal, encrypted with a different
             journal key. Quickest: on your other device open Sync → show
@@ -523,6 +530,14 @@ export default function SyncView() {
           <p style={ST.p}>
             Signed in as <strong>{getSessionEmail()}</strong>.
           </p>
+          {/* Above the journal key, because §6.1e offers the passkey as the
+              default route and the code as belt and braces. */}
+          <PasskeySetup
+            canEnrol={canEnrolPasskey()}
+            boxStyle={ST.keyBox}
+            labelStyle={ST.keyLabel}
+            textStyle={ST.p}
+          />
           <div style={ST.keyBox}>
             <div style={ST.keyLabel}>Journal key</div>
             <p style={{ ...ST.p, marginTop: 0 }}>
