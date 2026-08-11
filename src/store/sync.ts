@@ -402,6 +402,32 @@ doc.on("update", (update: Uint8Array, origin: unknown) => {
  */
 let keeperUsable = false;
 
+/**
+ * Record the account's delete code, once (assessment Finding 24).
+ *
+ * Only a device holding the keeper key can derive it, which is the whole point.
+ * Called rather than tracked: set_delete_code is a no-op once a code is stored,
+ * so this doubles as the backfill for accounts created before the column.
+ *
+ * A function rather than two inline blocks because there are two moments where a
+ * device is known to hold a usable keeper key, and the first one was missed. See
+ * the two call sites below.
+ *
+ * Never throws. A failure here must not stop a connect: the function may not
+ * exist yet on an older schema, and the device may be offline.
+ */
+const recordDeleteCode = async (keeperKey: CryptoKey): Promise<void> => {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase.rpc("set_delete_code", {
+      code: await deriveDeleteCode(keeperKey),
+    });
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    console.warn("[account] could not record the delete code", e);
+  }
+};
+
 // Returns true when this device's keys are good for the remote journal
 const ensureJournalKeys = async (): Promise<boolean> => {
   if (!supabase || !ring) return false;
@@ -459,6 +485,12 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     // (decision 4, spec device-identity-design.md).
     markRecoveryPending();
     keeperUsable = true;
+    // The account is protected from the moment it exists, not from the next cold
+    // start. This branch returns early, so the call further down never ran for a
+    // new account: it was created with no delete code and stayed that way until
+    // the app was next launched, which is the widest the window could be and at
+    // the point the account is newest.
+    await recordDeleteCode(held.keeperKey);
     return true;
   }
   // Journal exists. Gather every epoch key this device can get hold of, by both
@@ -513,22 +545,9 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     console.warn("[devices] could not check for granted keys", e);
   }
 
-  // The account's delete code, written once (assessment Finding 24). Only a
-  // device holding the keeper key can derive it, which is the whole point, and
-  // this is the one place in a connect where that is established. Called every
-  // time rather than tracked: set_delete_code is a no-op once a code is stored,
-  // so this doubles as the backfill for accounts created before the column, and
-  // a failure here must never stop a connect.
-  if (keeperUsable && held.keeperKey) {
-    try {
-      const { error } = await supabase.rpc("set_delete_code", {
-        code: await deriveDeleteCode(held.keeperKey),
-      });
-      if (error) throw new Error(error.message);
-    } catch (e) {
-      console.warn("[account] could not record the delete code", e);
-    }
-  }
+  // The other moment: an existing journal this device has just proved it can
+  // open. This is the backfill path for every account created before the column.
+  if (keeperUsable && held.keeperKey) await recordDeleteCode(held.keeperKey);
 
   // Later epochs under the keeper key, for the device holding the recovery code.
   if (keeperUsable && held.keeperKey) {
