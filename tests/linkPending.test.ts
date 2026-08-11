@@ -219,6 +219,22 @@ describe("a device linking from a scanned key", () => {
     expect(localStorage.getItem(PENDING_STORAGE_KEY)).toBeNull();
   });
 
+  test("and can show the journal key code, having proved the key it adopted", async () => {
+    // The one thing on this path that nothing downstream would repair. A device
+    // linked from a scan reaches reconcile without ensureJournalKeys ever running
+    // again, so if the adoption does not record that the key opened the journal,
+    // this device syncs perfectly and then refuses to display the code it was
+    // linked with — and a code that cannot be shown from a device that holds it is
+    // how an account ends up with one copy of it (spec §6.1e).
+    await stash();
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
+
+    await expect(sync.getJournalKeyCode()).resolves.toBe(
+      await exportJournalKeyCode(realKeeper)
+    );
+  });
+
   test("a later foreground still works, rather than reusing a dead connect", async () => {
     // The deadlock poisoned `connecting` permanently, so every subsequent
     // trigger awaited the same promise that could never settle.
@@ -239,6 +255,19 @@ describe("a stashed key that does not fit", () => {
     const sync = await boot();
 
     await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+  });
+
+  test("typed in rather than scanned, it is refused in the words of what was typed", async () => {
+    // The shared adoption path cannot say "journal key", because a passkey wrap
+    // reaches it too and that person has typed nothing (spec §6.1e). So this path
+    // translates, and the translation is worth pinning: the message goes straight to
+    // the box someone has just typed sixteen characters into.
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+
+    await expect(
+      sync.provideJournalKey(await exportJournalKeyCode(await generateKeeperKey()))
+    ).rejects.toThrow(/journal key/);
   });
 
   test("is still cleared from disk, not left to be retried forever", async () => {

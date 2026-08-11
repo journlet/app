@@ -23,7 +23,10 @@
 //   A credential can authenticate and return no secret. That is a credential
 //   manager without PRF support, not a bug, and the only way to find out is to
 //   create one and try: Safari does not report `prf.enabled` at creation time.
-//   So enrolment creates, derives, and only then knows.
+//   So enrolment creates, derives, and only then knows. Which is also why
+//   enrolment raises two platform sheets rather than one — creating is one prompt
+//   and proving is a second — and why the second one names the credential the
+//   first just made. See deriveSecret for what that prevents.
 
 /** The fixed input the authenticator evaluates. Not a secret; see keeperWrap.ts. */
 import { PRF_SALT } from "./keeperWrap";
@@ -129,6 +132,21 @@ export const probeCredentialSupport = async (): Promise<PrfCapability> => {
   };
 };
 
+/**
+ * The id of one credential, as the platform's own bytes.
+ *
+ * Raw bytes rather than the base64url string WebAuthn also exposes on the
+ * credential, because the only thing that ever reads this hands it straight back
+ * to `allowCredentials`, which wants bytes. A string form would be an encode and a
+ * decode with no reader in between.
+ *
+ * It never reaches the server. §6.5 keeps credential ids off `keeper_wraps`
+ * deliberately — a row that named its credential would tell the operator which
+ * password manager somebody uses — so this lives for the length of one enrolment
+ * and is then dropped.
+ */
+export type CredentialId = Uint8Array<ArrayBuffer>;
+
 /** Who the credential belongs to, as the person's password manager will show it. */
 export interface CredentialAccount {
   /** The Supabase user id. Becomes the WebAuthn user handle. */
@@ -160,13 +178,18 @@ const random = (n: number): Uint8Array<ArrayBuffer> =>
  *
  * The user handle is the account id rather than something random, so enrolling
  * twice on one platform replaces rather than accumulates.
+ *
+ * Returns the id of the credential it created, because enrolment has to name it
+ * when it asks for the secret a moment later. See deriveSecret for what goes
+ * quietly wrong when it does not.
  */
 export const createCredential = async (
   account: CredentialAccount,
   rpId: string | undefined
-): Promise<void> => {
+): Promise<CredentialId> => {
+  let credential: Credential | null;
   try {
-    await navigator.credentials.create({
+    credential = await navigator.credentials.create({
       publicKey: {
         challenge: random(32),
         // The challenge is unverified, deliberately. Nothing about this credential
@@ -193,22 +216,37 @@ export const createCredential = async (
   } catch (e) {
     throw new CredentialRefusedError(e);
   }
+  // No id means nothing to enrol. `create` is specified as resolving null in the
+  // same conditions `get` is, so this is a refusal rather than an impossible
+  // state, and treating it as one keeps the caller down to three outcomes.
+  const rawId = (credential as PublicKeyCredential | null)?.rawId;
+  if (!rawId) throw new CredentialRefusedError();
+  return new Uint8Array(rawId);
 };
 
 /**
  * Ask a credential for the secret.
  *
- * With no allowCredentials, so the platform offers whatever discoverable
- * credential it holds for this Relying Party, including one synced from another
- * device that this one has never seen. That is the case the whole design exists
- * for, and constraining the list would break it.
+ * With no allowCredentials by default, so the platform offers whatever
+ * discoverable credential it holds for this Relying Party, including one synced
+ * from another device that this one has never seen. Unlocking passes no id for
+ * exactly that reason: a credential this device has never met is the case the
+ * whole design exists for, and naming one would exclude it.
+ *
+ * Enrolment is the one caller that does pass an id, and has to. It has just
+ * created a credential and is proving that *that* one can produce a secret; left
+ * open, the platform may offer an older Journlet passkey for the same account
+ * instead, the wrap would be written for that credential rather than the new one,
+ * and the enrolment would report success having added no new route. Not dangerous
+ * — the wrap it writes is a real one — and invisible, which is worse.
  *
  * Throws CredentialRefusedError if the sheet was refused and PrfUnsupportedError
  * if it was allowed and produced nothing, because the caller shows different
  * screens for those and must not have to guess which happened.
  */
 export const deriveSecret = async (
-  rpId: string | undefined
+  rpId: string | undefined,
+  credentialId?: CredentialId
 ): Promise<ArrayBuffer> => {
   let assertion: Credential | null;
   try {
@@ -216,7 +254,9 @@ export const deriveSecret = async (
       publicKey: {
         challenge: random(32),
         rpId,
-        allowCredentials: [],
+        allowCredentials: credentialId
+          ? [{ type: "public-key", id: credentialId as BufferSource }]
+          : [],
         userVerification: "required",
         timeout: 60_000,
         extensions: {

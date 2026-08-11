@@ -35,6 +35,7 @@ import {
   surrenderDeviceKeys,
 } from "./deviceLink";
 import type { LinkRequest } from "./deviceLink";
+import { countKeeperWraps, listKeeperWraps } from "./keeperWraps";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -47,6 +48,8 @@ import {
   exportJournalKeyCode,
 } from "../lib/crypto";
 import type { WrappedDataKey } from "../lib/crypto";
+import { unwrapKeeperKeyFromAny } from "../lib/keeperWrap";
+import { deriveSecret, relyingPartyId } from "../lib/prf";
 import { ensureKeys, replaceKeyRing, wipeKeys } from "../lib/keystore";
 // From keyring, not keystore: pure accessors, so the sync tests that stub
 // storage still exercise the real key selection.
@@ -1010,20 +1013,57 @@ export const rejectDevice = async (deviceId: string): Promise<void> => {
 };
 
 /**
- * Adopt a journal key code, leaving the keyring able to open the journal.
+ * A keeper key that opened its wrap, or was typed correctly, and still does not
+ * open this account's journal.
  *
- * Separate from provideJournalKey because this half must be callable from
- * *inside* doConnect, and provideJournalKey ends by calling connect(). connect()
- * is single-flight, so calling it from within doConnect returns the very promise
- * doConnect is still executing, and awaiting that deadlocks: the connect never
- * finishes, `connecting` is never cleared, and every later trigger gets the same
- * dead promise. That wedged a device linked from a QR scan in needs-key
- * permanently, with no reconcile and no device registration — see the tests in
- * tests/linkPending.test.ts.
+ * Typed here rather than thrown as a message because the two callers describe it
+ * differently and neither may borrow the other's words: one person has typed a
+ * journal key and can be told so, the other has passed a biometric and never saw a
+ * code at all. Reachable from both — a wrap decrypting proves only that the
+ * credential matched the row, not that what came out of it fits the journal.
  */
-const adoptJournalKey = async (code: string): Promise<void> => {
+class KeeperKeyMismatchError extends Error {
+  constructor() {
+    super("That key does not open this account's journal");
+    this.name = "KeeperKeyMismatchError";
+  }
+}
+
+/**
+ * Install a keeper key, having proved it against the journal, and let the connect
+ * that follows do the rest.
+ *
+ * The shared half of every route in. A typed journal key code (§6.1) and a passkey
+ * wrap (§6.1e) are two ways of *obtaining* the same key and nothing downstream of
+ * that differs, so they meet here rather than in two copies that drift: prove it
+ * opens the epoch 0 blob, install a keyring holding only what was proved, stop
+ * asking to be approved.
+ *
+ * Not exported, and neither is adoptJournalKey below, because the pair must be
+ * callable from *inside* doConnect while provideJournalKey and unlockWithPasskey
+ * end by calling connect(). connect() is single-flight, so calling one of those
+ * from within doConnect returns the very promise doConnect is still executing, and
+ * awaiting that deadlocks: the connect never finishes, `connecting` is never
+ * cleared, and every later trigger gets the same dead promise. That wedged a
+ * device linked from a QR scan in needs-key permanently, with no reconcile and no
+ * device registration — see the tests in tests/linkPending.test.ts.
+ */
+const adoptKeeperKey = async (keeperKey: CryptoKey): Promise<void> => {
   if (!supabase) throw new Error("Sync is not configured");
-  const keeperKey = await importJournalKeyCode(code);
+  /**
+   * The account this adoption is for, captured before the first await.
+   *
+   * Installing a keyring is the one write in this file that can bring back an
+   * account the user has just left: wipeThisDevice() nulls `ring` and drops
+   * `session`, and a sign-out landing in any of the awaits below would be followed
+   * by an assignment that puts the keys back. Same hazard as the `ring !== held`
+   * check in ensureJournalKeys, and the same answer — hold it once, re-check it
+   * before publishing, rather than reading module state twice and trusting it not
+   * to have moved.
+   */
+  const forUser = session?.user.id;
+  if (!forUser) throw new Error("Sign in before using this key");
+
   const { data, error } = await supabase
     .from("journals")
     .select("wrapped_key")
@@ -1034,22 +1074,42 @@ const adoptJournalKey = async (code: string): Promise<void> => {
   try {
     dataKey = await unwrapDataKey(wrapped, keeperKey);
   } catch {
-    throw new Error("That journal key does not match this account's journal");
+    throw new KeeperKeyMismatchError();
   }
-  // Epoch 0 only at this point. Later epochs are collected by the connect that
-  // follows, which can read journal_keys with this same keeper key.
-  ring = {
+  if (session?.user.id !== forUser)
+    throw new Error("Signed out before this key could be used");
+  // Epoch 0 only, and only the key just proved. Seeding anything else is the
+  // mistake ensureJournalKeys documents at length: a device that believes it holds
+  // keys it cannot use reports itself entitled and then decrypts nothing. Later
+  // epochs are collected by the connect that follows, which can read journal_keys
+  // with this same keeper key.
+  const next: KeyRing = {
     keeperKey,
     dataKeys: new Map([[0, dataKey]]),
     epoch: 0,
     wrapped,
     createdAt: Date.now(),
   };
-  await replaceKeyRing(ring);
+  ring = next;
+  await replaceKeyRing(next);
   // Proven by the unwrap above: this key opens this account's journal, so this
   // device can display it as the recovery code.
   keeperUsable = true;
   await withdrawLinkRequest();
+};
+
+/** Adopt a keeper key that arrived as a typed or scanned journal key code. */
+const adoptJournalKey = async (code: string): Promise<void> => {
+  const keeperKey = await importJournalKeyCode(code);
+  try {
+    await adoptKeeperKey(keeperKey);
+  } catch (e) {
+    // The wording for someone who has just typed sixteen characters, and the only
+    // thing this path adds over the shared one. SyncView shows the message.
+    if (e instanceof KeeperKeyMismatchError)
+      throw new Error("That journal key does not match this account's journal");
+    throw e;
+  }
 };
 
 /** Link this device: adopt the journal key code from another device, then sync. */
@@ -1082,6 +1142,101 @@ export const acceptJournalKey = async (
   }
   await provideJournalKey(code);
   return "linked";
+};
+
+// ---------- unlocking with a passkey (spec §6.1e, §12.1 phase 4) ----------
+//
+// The third way in, alongside the journal key code and approval by another device,
+// and the first one that asks nothing of the person beyond a biometric. The keeper
+// key is stored wrapped once per enrolled credential; any single wrap opens it, and
+// none is privileged. What follows is only about *obtaining* the key — everything
+// after that is adoptKeeperKey above, shared with the typed code.
+//
+// Nothing calls any of this yet. Phase 4 ships the mechanism invisible and one
+// later commit turns enrolment and unlocking on together, because a button that
+// enrols a credential before unlocking exists would offer a route that leads
+// nowhere, which is the class of half-truth that got the lost-device feature
+// deleted on 28 July (§6.1b).
+
+/**
+ * This account has no passkey route at all.
+ *
+ * An answer and not a fault: it is what every account looked like before §6.1e,
+ * and what one looks like now until somebody enrols. Separate from the error below
+ * because the two need opposite screens — this one says nobody has set this up, and
+ * that one says the credential in front of you is not one of the ones that were.
+ */
+export class NoPasskeyRouteError extends Error {
+  constructor() {
+    super("No passkey has been set up for this journal");
+    this.name = "NoPasskeyRouteError";
+  }
+}
+
+/**
+ * Wraps exist and this credential opened none of them.
+ *
+ * The ordinary answer on a device whose password manager belongs to a different
+ * ecosystem from every credential enrolled so far — an iCloud passkey met on
+ * Windows, say — which is the case §6.1e adds a second wrap for. So the route out
+ * is enrolling this one from a device that is already unlocked, or the journal key
+ * code, and not retrying.
+ */
+export class UnknownCredentialError extends Error {
+  constructor() {
+    super("That passkey is not one of the ones set up for this journal");
+    this.name = "UnknownCredentialError";
+  }
+}
+
+/**
+ * How many passkey routes this account has, without opening any of them.
+ *
+ * What a screen needs to decide whether to offer the biometric at all. Null rather
+ * than zero when there is no session or no sync: the table cannot be read without
+ * one, and zero would be a claim rather than an answer.
+ */
+export const countPasskeyRoutes = async (): Promise<number | null> => {
+  if (!supabase || !session) return null;
+  return countKeeperWraps(supabase);
+};
+
+/**
+ * Unlock this device from a keeper wrap: derive, trial-decrypt, adopt, connect.
+ *
+ * Reads the rows *before* asking for the secret, so a device with no route in never
+ * raises a platform sheet that could not have led anywhere. The trial decryption is
+ * the shape §6.5 forces: the rows carry no credential id, deliberately, since one
+ * would tell the operator which password manager somebody uses, so AES-GCM
+ * authentication is what picks the row this credential opens.
+ *
+ * Every failure leaves this device exactly as it was and travels out as itself —
+ * no route, an unrecognised credential, a credential manager without the
+ * extension, a refusal — because each of the four has a different thing to say and
+ * a different way on, and flattening them into one message here is what would make
+ * the screen guess (§12.1 phase 4).
+ *
+ * Public, so it ends in connect(), so nothing inside doConnect may call it. Nothing
+ * does and nothing should: the biometric needs a user gesture, so this starts at a
+ * button. adoptKeeperKey is the half that is safe in there.
+ */
+export const unlockWithPasskey = async (): Promise<void> => {
+  if (!supabase) throw new Error("Sync is not configured");
+  // Held rather than re-read, like everywhere else in this file: the trial
+  // decryption below binds each row to a user id, and reading `session` again
+  // afterwards could bind it to a different one.
+  const userId = session?.user.id;
+  if (!userId) throw new Error("Sign in before unlocking with a passkey");
+
+  const rows = await listKeeperWraps(supabase);
+  if (rows.length === 0) throw new NoPasskeyRouteError();
+
+  const secret = await deriveSecret(relyingPartyId(location.hostname));
+  const opened = await unwrapKeeperKeyFromAny(rows, secret, userId);
+  if (!opened) throw new UnknownCredentialError();
+
+  await adoptKeeperKey(opened.keeperKey);
+  await connect();
 };
 
 /**
