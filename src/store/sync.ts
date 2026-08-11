@@ -65,12 +65,19 @@ import { markRecoveryPending } from "../lib/recoveryAck";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import {
   clearError,
+  getLinkCode,
+  getLinkRequests,
+  getLinkStage,
   getSyncStatus,
   isConfigured,
-  notifyLinkChanged,
+  resetLinkState,
   setError,
+  setLinkRequests,
+  setLinkState,
+  setRemoved,
   setStatus,
   subscribeSync,
+  wasRemoved,
 } from "./syncStatus";
 import type { SyncStatus } from "./syncStatus";
 import { DEFAULT_VOLUME, getActiveVolume, setActiveVolume } from "../lib/volume";
@@ -80,13 +87,17 @@ const PAGE = 1000;
 // Status and error live in store/syncStatus.ts now, and are re-exported here so
 // the UI keeps one import surface for the store. See that file for why the
 // listener payload had to stop being the status value.
-export type { SyncStatus, SyncSnapshot } from "./syncStatus";
+export type { LinkStage, SyncStatus, SyncSnapshot } from "./syncStatus";
 export {
+  getLinkCode,
+  getLinkRequests,
+  getLinkStage,
   getSyncError,
   getSyncSnapshot,
   getSyncStatus,
   isConfigured,
   subscribeSync,
+  wasRemoved,
 } from "./syncStatus";
 
 export const supabase: SupabaseClient | null = isConfigured()
@@ -247,10 +258,7 @@ const teardown = () => {
   // A pending-approval card left on screen after a sign-out would offer to
   // grant a device access with a data key this device no longer holds.
   keeperUsable = false;
-  removedFromAccount = false;
-  linkCode = null;
-  linkStage = null;
-  pendingRequests = [];
+  resetLinkState();
   stopWatchingForGrant();
 };
 
@@ -598,7 +606,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   // card vanished from the approving device and this one waited for an answer to a
   // question it had retracted.
   await withdrawLinkRequest();
-  removedFromAccount = false;
+  setRemoved(false);
   return true;
 };
 
@@ -609,44 +617,11 @@ const deviceBinding = () => ({
   deviceId: thisDeviceId(),
 });
 
-const notify = notifyLinkChanged;
-
-/**
- * Has this device been removed from the account by another device?
- *
- * Kept separate from "cannot open the journal" because the two need opposite
- * screens. A device that is behind should be told to wait; a removed one has to
- * be told what happened and offered the way back, which is the same approval it
- * used when it was new. Gary tried removal on 3 August and got the first message
- * on a device in the second state, which reads as a fault in the app.
- */
-let removedFromAccount = false;
-export const wasRemoved = (): boolean => removedFromAccount;
-
-/** The code this device is displaying while it waits, or null if not waiting. */
-let linkCode: string | null = null;
-export const getLinkCode = (): string | null => linkCode;
-
-/**
- * Where this device is in being added.
- *
- * "opening" is the gap between being granted the key and having a journal to
- * show, which takes a fetch and a decrypt. Reported rather than left blank
- * because that gap is exactly where the screen looked hung: the code sat there
- * saying "waiting for approval" for seconds after the approval had happened.
- *
- * "declined" is the request having gone without a key arriving. It covers both a
- * refusal and an expiry, which are the same thing from here, and it exists because
- * the alternative was a device saying "waiting" for half an hour after the answer
- * had been given (Gary, 3 August).
- */
-export type LinkStage = "waiting" | "opening" | "declined";
-let linkStage: LinkStage | null = null;
-export const getLinkStage = (): LinkStage | null => linkStage;
-
-/** Requests this device could approve. */
-let pendingRequests: LinkRequest[] = [];
-export const getLinkRequests = (): LinkRequest[] => pendingRequests;
+// Whether this device has been removed, the code it is displaying, the stage it
+// has reached and the requests it could approve all live in the snapshot in
+// store/syncStatus.ts, and are re-exported above. They were four module-level
+// variables here, reaching the screen through a notification that said nothing
+// about them (assessment Finding 12, first slice after Finding 2).
 
 /**
  * The backstop under the realtime subscription below, not the primary path.
@@ -691,8 +666,7 @@ const pollForGrant = async (): Promise<void> => {
     // Said before the work rather than after it. Fetching and decrypting the
     // journal takes a moment, and during that moment the screen would otherwise
     // still be telling the user to go and approve something they just approved.
-    linkStage = "opening";
-    notify();
+    setLinkState({ linkStage: "opening" });
     await connect();
   } catch {
     // Still waiting. A failed check is not a refusal.
@@ -753,8 +727,7 @@ const watchForGrant = () => {
  * has to be a fresh decision taken on the removed device.
  */
 const enterRemovedState = (): void => {
-  if (removedFromAccount) return;
-  removedFromAccount = true;
+  if (wasRemoved()) return;
   // This device is not synced any more, and saying so here is what lets it
   // connect again later. Reached mostly from the realtime path, which never runs
   // ensureJournalKeys, so dropping the connection there alone was not enough —
@@ -763,7 +736,7 @@ const enterRemovedState = (): void => {
   dropConnection();
   clearError();
   setStatus("needs-key");
-  notify();
+  setRemoved(true);
 };
 
 /**
@@ -789,7 +762,7 @@ export const askToBeAddedBack = async (): Promise<void> => {
  * successful approval as a refusal.
  */
 const noticeIfDeclined = async (): Promise<void> => {
-  if (!supabase || !session || linkStage !== "waiting") return;
+  if (!supabase || !session || getLinkStage() !== "waiting") return;
   try {
     if (await hasPendingRequest(supabase, deviceBinding())) return;
   } catch {
@@ -798,9 +771,7 @@ const noticeIfDeclined = async (): Promise<void> => {
     return;
   }
   stopWatchingForGrant();
-  linkCode = null;
-  linkStage = "declined";
-  notify();
+  setLinkState({ linkCode: null, linkStage: "declined" });
 };
 
 /**
@@ -853,26 +824,23 @@ const explainMissingKey = async (): Promise<void> => {
 const askToBeAdded = async (): Promise<void> => {
   if (!supabase || !session) return;
   try {
-    linkCode = await publishLinkRequest(
+    const code = await publishLinkRequest(
       supabase,
       deviceBinding(),
       thisClientLabel()
     );
-    linkStage = "waiting";
     watchForGrant();
-    notify();
+    setLinkState({ linkCode: code, linkStage: "waiting" });
   } catch (e) {
-    linkCode = null;
-    linkStage = null;
+    setLinkState({ linkCode: null, linkStage: null });
     console.warn("[devices] could not ask to be added", e);
   }
 };
 
 /** Stop asking, once in or once leaving. */
 const withdrawLinkRequest = async (): Promise<void> => {
-  const wasAsking = linkCode !== null;
-  linkCode = null;
-  linkStage = null;
+  const wasAsking = getLinkCode() !== null;
+  setLinkState({ linkCode: null, linkStage: null });
   stopWatchingForGrant();
   if (!wasAsking || !supabase || !session) return;
   try {
@@ -921,12 +889,12 @@ const refreshLinkRequests = async (): Promise<void> => {
      * LinkPrompts counts down from the cached copy, so a renewed request was
      * displaying "expires in 0 minutes".
      */
+    const held = getLinkRequests();
     const unchanged =
-      next.length === pendingRequests.length &&
-      next.every((r, i) => sameRequest(r, pendingRequests[i]));
+      next.length === held.length &&
+      next.every((r, i) => sameRequest(r, held[i]));
     if (unchanged) return;
-    pendingRequests = next;
-    notify();
+    setLinkRequests(next);
   } catch (e) {
     console.warn("[devices] could not read link requests", e);
   }
@@ -964,10 +932,9 @@ export const approveDevice = async (request: LinkRequest): Promise<void> => {
       epoch
     );
   }
-  pendingRequests = pendingRequests.filter(
-    (r) => r.deviceId !== request.deviceId
+  setLinkRequests(
+    getLinkRequests().filter((r) => r.deviceId !== request.deviceId)
   );
-  notify();
 };
 
 /**
@@ -1032,16 +999,18 @@ export const removeDevice = async (deviceId: string): Promise<void> => {
 
   // Recorded in the register so the other devices show what happened, and pushed
   // under the new epoch as an ordinary edit.
+  // No republish here. The register lives in the encrypted document, so the
+  // Sync screen's own Yjs observer (store/devices.ts onDevicesChange) is what
+  // refreshes the list; the notification this used to send changed nothing in
+  // the snapshot and nothing read it.
   markDeviceRemoved(deviceId);
-  notify();
 };
 
 /** Refuse a request, whether because the codes differ or it was not expected. */
 export const rejectDevice = async (deviceId: string): Promise<void> => {
   if (!supabase) throw new Error("Sync is not configured");
   await rejectLinkRequest(supabase, deviceId);
-  pendingRequests = pendingRequests.filter((r) => r.deviceId !== deviceId);
-  notify();
+  setLinkRequests(getLinkRequests().filter((r) => r.deviceId !== deviceId));
 };
 
 /**

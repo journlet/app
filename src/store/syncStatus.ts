@@ -1,4 +1,5 @@
-// What the sync engine is doing, and what went wrong, as one observable value.
+// What the sync engine is doing, what went wrong, and where this device is in
+// being added, as one observable value.
 //
 // This was three module-level variables in store/sync.ts pushed through one
 // listener set, and the listener payload was the status alone. So an error with
@@ -13,12 +14,14 @@
 // useSyncExternalStore is built to consume: React re-renders on identity, so it
 // cannot bail out on a change it cannot see.
 //
-// Deliberately not published on a no-op. setStatus("synced") when the status is
-// already "synced" runs on every reconcile, and re-rendering App on each one is
-// not free while its journal walks are unmemoised. Link state, which currently
-// rides on those notifications, has notifyLinkChanged() instead: explicit, and
-// the next thing to move in here.
+// The link state moved in here second. It used to live in store/sync.ts and
+// reach the screen by being re-read whenever this snapshot changed, which worked
+// by accident while setStatus notified unconditionally and needed an explicit
+// notifyLinkChanged() once it stopped. Both that function and the `revision`
+// counter it existed to bump are gone: identity now changes exactly when a
+// field does, so there is nothing left to bump.
 
+import type { LinkRequest } from "./deviceLink";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 
 export type SyncStatus =
@@ -30,8 +33,26 @@ export type SyncStatus =
   | "pending" // local changes not yet on the server
   | "offline";
 
+/**
+ * Where this device is in being added.
+ *
+ * "opening" is the gap between being granted the key and having a journal to
+ * show, which takes a fetch and a decrypt. Reported rather than left blank
+ * because that gap is exactly where the screen looked hung: the code sat there
+ * saying "waiting for approval" for seconds after the approval had happened.
+ *
+ * "declined" is the request having gone without a key arriving. It covers both a
+ * refusal and an expiry, which are the same thing from here, and it exists
+ * because the alternative was a device saying "waiting" for half an hour after
+ * the answer had been given (Gary, 3 August).
+ */
+export type LinkStage = "waiting" | "opening" | "declined";
+
 export const isConfigured = (): boolean =>
   Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+
+/** Shared empty list, so "no requests" keeps one identity across publishes. */
+const NO_REQUESTS: readonly LinkRequest[] = [];
 
 export interface SyncSnapshot {
   readonly status: SyncStatus;
@@ -40,25 +61,65 @@ export interface SyncSnapshot {
    * problem does not masquerade as "offline".
    */
   readonly error: string | null;
+  /** The code this device is displaying while it waits, or null if not waiting. */
+  readonly linkCode: string | null;
+  /** How far along being added this device is. */
+  readonly linkStage: LinkStage | null;
   /**
-   * Bumped by every publish, including notifyLinkChanged(), which changes
-   * nothing else in here. It exists because link state is still owned by
-   * store/sync.ts and still reaches the UI by being re-read whenever this
-   * snapshot changes. When that state moves in here, this field goes.
+   * Requests this device could approve.
+   *
+   * Compared by identity like everything else here, which is why store/sync.ts
+   * keeps its own field-by-field check before handing a new array over: a fresh
+   * array of equal requests would restart LinkPrompts' expiry countdown.
    */
-  readonly revision: number;
+  readonly requests: readonly LinkRequest[];
+  /**
+   * Whether this device has been removed from the account by another device.
+   *
+   * Kept apart from "cannot open the journal" because the two need opposite
+   * screens. A device that is behind should be told to wait; a removed one has
+   * to be told what happened and offered the way back.
+   */
+  readonly removed: boolean;
 }
 
-let snapshot: SyncSnapshot = {
+const initial = (): SyncSnapshot => ({
   status: isConfigured() ? "signed-out" : "disabled",
   error: null,
-  revision: 0,
-};
+  linkCode: null,
+  linkStage: null,
+  requests: NO_REQUESTS,
+  removed: false,
+});
+
+let snapshot: SyncSnapshot = initial();
 
 const listeners = new Set<() => void>();
 
-const publish = (next: Omit<SyncSnapshot, "revision">): void => {
-  snapshot = { ...next, revision: snapshot.revision + 1 };
+/**
+ * Every field compared, so no setter needs a guard of its own and none can
+ * publish a value the consumers already hold.
+ *
+ * Written out rather than looped for a reason: a loop over Object.keys has to
+ * index the snapshot by a string, which is the index-signature hole Finding 15
+ * closed elsewhere in this codebase. Adding a field to the interface without
+ * adding it here would compile, so the test file asserts that every key of the
+ * snapshot is read by this function.
+ */
+const same = (a: SyncSnapshot, b: SyncSnapshot): boolean =>
+  a.status === b.status &&
+  a.error === b.error &&
+  a.linkCode === b.linkCode &&
+  a.linkStage === b.linkStage &&
+  a.requests === b.requests &&
+  a.removed === b.removed;
+
+const publish = (next: SyncSnapshot): void => {
+  // Not published on a no-op. setStatus("synced") when the status is already
+  // "synced" runs on every reconcile, and re-rendering App on each one is not
+  // free.
+  if (same(snapshot, next)) return;
+  snapshot = next;
   listeners.forEach((fn) => fn());
 };
 
@@ -74,42 +135,60 @@ export const subscribeSync = (fn: () => void): (() => void) => {
 
 export const getSyncStatus = (): SyncStatus => snapshot.status;
 export const getSyncError = (): string | null => snapshot.error;
+export const getLinkCode = (): string | null => snapshot.linkCode;
+export const getLinkStage = (): LinkStage | null => snapshot.linkStage;
+export const getLinkRequests = (): readonly LinkRequest[] => snapshot.requests;
+export const wasRemoved = (): boolean => snapshot.removed;
 
-export const setStatus = (status: SyncStatus): void => {
-  if (status === snapshot.status) return;
-  publish({ status, error: snapshot.error });
-};
+export const setStatus = (status: SyncStatus): void =>
+  publish({ ...snapshot, status });
 
-export const setError = (e: unknown): void => {
-  const error =
-    e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
-  if (error === snapshot.error) return;
-  publish({ status: snapshot.status, error });
-};
+export const setError = (e: unknown): void =>
+  publish({
+    ...snapshot,
+    error: e instanceof Error ? e.message : typeof e === "string" ? e : String(e),
+  });
 
-export const clearError = (): void => {
-  if (snapshot.error === null) return;
-  publish({ status: snapshot.status, error: null });
-};
+export const clearError = (): void => publish({ ...snapshot, error: null });
 
 /**
- * Republish without changing status or error.
+ * Set either half of the link state, or both in one publish.
  *
- * The device-linking code owns `linkCode`, `linkStage` and `pendingRequests`
- * and has always pushed them to the UI by triggering a status notification.
- * That worked by accident, because setStatus notified unconditionally. It now
- * does not, so the linking code says what it means.
+ * Both, because they are one state rather than two: "opening" keeps the code it
+ * was granted against, and a refusal clears the code and sets the stage in the
+ * same breath. Two setters would put a render between those, showing a device
+ * with no code and a stage that had not caught up.
  */
-export const notifyLinkChanged = (): void => {
-  publish({ status: snapshot.status, error: snapshot.error });
-};
+export const setLinkState = (next: {
+  linkCode?: string | null;
+  linkStage?: LinkStage | null;
+}): void => publish({ ...snapshot, ...next });
+
+export const setLinkRequests = (requests: readonly LinkRequest[]): void =>
+  publish({ ...snapshot, requests: requests.length ? requests : NO_REQUESTS });
+
+export const setRemoved = (removed: boolean): void =>
+  publish({ ...snapshot, removed });
+
+/**
+ * Clear everything about being added, in one publish.
+ *
+ * Called from teardown: link state belongs to a session and a keyring, both of
+ * which are going. A pending-approval card left on screen after a sign-out
+ * would offer to grant a device access with a data key this device no longer
+ * holds.
+ */
+export const resetLinkState = (): void =>
+  publish({
+    ...snapshot,
+    linkCode: null,
+    linkStage: null,
+    requests: NO_REQUESTS,
+    removed: false,
+  });
 
 /** Test seam: reset to a freshly loaded module's state. */
 export const resetSyncStatus = (): void => {
-  snapshot = {
-    status: isConfigured() ? "signed-out" : "disabled",
-    error: null,
-    revision: 0,
-  };
+  snapshot = initial();
   listeners.clear();
 };
