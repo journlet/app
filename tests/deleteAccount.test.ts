@@ -139,7 +139,9 @@ vi.mock("../src/lib/keystore", () => ({
   },
 }));
 
-const { deriveDeleteCode } = await import("../src/lib/crypto");
+const { deriveDeleteCode, exportJournalKeyCode } = await import(
+  "../src/lib/crypto"
+);
 
 /**
  * The engine, re-imported per test.
@@ -163,7 +165,7 @@ const signIn = () => {
 /** Signed in and connected far enough for the keeper key to have been proved. */
 const signInAndConnect = async () => {
   signIn();
-  await vi.waitFor(() => expect(sync.canDeleteAccount()).toBe(true));
+  await vi.waitFor(() => expect(sync.holdsJournalKey()).toBe(true));
 };
 
 
@@ -245,7 +247,7 @@ describe("recording the delete code", () => {
     );
     signIn();
 
-    await vi.waitFor(() => expect(sync.canDeleteAccount()).toBe(true));
+    await vi.waitFor(() => expect(sync.holdsJournalKey()).toBe(true));
   });
 });
 
@@ -285,19 +287,74 @@ describe("deleteAccount ordering", () => {
     });
   });
 
-  test("a device with no journal key code cannot delete, and says why", async () => {
-    // The point of Finding 24: holding the mailbox is not enough. A device
-    // linked by approval holds a data key and no keeper key, so it cannot derive
-    // the code, and the message names the device that can rather than letting
-    // the database refuse.
+  test("a device with no journal key code and nothing typed cannot delete", async () => {
+    // The point of Finding 24: holding the mailbox is not enough. A device linked
+    // by approval holds a data key and no keeper key, so there is nothing to
+    // derive from unless the person supplies it.
     ringHasKeeper = false;
     signIn();
     for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
-    expect(sync.canDeleteAccount()).toBe(false);
+    expect(sync.holdsJournalKey()).toBe(false);
     await expect(sync.deleteAccount()).rejects.toThrow(/journal key code/i);
     expect(calls).not.toContain("rpc:delete_account");
     expect(calls).not.toContain("wipeLocalJournal");
     expect(calls).not.toContain("wipeKeys");
+  });
+
+  test("but it can with the journal key code typed in", async () => {
+    // The limitation this removes. Before, such a device was told to go and find
+    // another one; now the code is enough on its own, which is also what covers
+    // an account whose only remaining device was added by approval.
+    const code = await exportJournalKeyCode(keeperKey);
+    ringHasKeeper = false;
+    signIn();
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+
+    await sync.deleteAccount(code);
+
+    expect(rpc).toHaveBeenCalledWith("delete_account", {
+      code: await deriveDeleteCode(keeperKey),
+    });
+    expect(calls).toContain("wipeLocalJournal");
+  });
+
+  test("the typed code is used in preference to the keyring", async () => {
+    // So a borrowed unlocked device cannot delete on an email address once the
+    // box has been given a code to check, and so the box means what it says.
+    const other = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["wrapKey", "unwrapKey"]
+    );
+    const otherCode = await exportJournalKeyCode(other);
+    await signInAndConnect();
+
+    await sync.deleteAccount(otherCode);
+
+    expect(rpc).toHaveBeenCalledWith("delete_account", {
+      code: await deriveDeleteCode(other),
+    });
+  });
+
+  test("a code that does not parse is refused before the server is called", async () => {
+    await signInAndConnect();
+    await expect(sync.deleteAccount("J1-NOTVALID")).rejects.toThrow();
+    expect(calls).not.toContain("rpc:delete_account");
+  });
+
+  test("a server refusal of a typed code says the code is the problem", async () => {
+    const code = await exportJournalKeyCode(keeperKey);
+    await signInAndConnect();
+    deleteResult = {
+      error: {
+        message: "The journal key code is required to delete this account",
+      },
+    };
+
+    await expect(sync.deleteAccount(code)).rejects.toThrow(
+      /does not open this account/i
+    );
+    expect(calls).not.toContain("wipeLocalJournal");
   });
 
   // The whole point of server-first: a failed RPC must leave the journal on the
