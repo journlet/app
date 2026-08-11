@@ -356,6 +356,61 @@ drop policy if exists "delete own link requests" on public.device_link_requests;
 create policy "delete own link requests" on public.device_link_requests
   for delete using (auth.uid() = user_id);
 
+-- The keeper key, wrapped so that one passkey can open it (spec §6.1e).
+--
+-- The keeper key sits at the top of the hierarchy: it wraps the data key for
+-- every epoch, so whoever holds it can read the whole journal and produce the
+-- journal key code. Until this table there was exactly one way to hold it, which
+-- was to have been shown that code once and kept it. A test account was lost that
+-- way on 11 August 2026.
+--
+-- The WebAuthn PRF extension returns the same 32 bytes from a passkey on every
+-- device it syncs to, and never leaves the device. Those bytes wrap the keeper
+-- key, so it stops being something a person keeps and becomes something a device
+-- obtains after a biometric check.
+--
+-- One row per enrolled credential, plus the journal key code, and any single one
+-- of them opens the journal. Not one, and not all: there is no main device and no
+-- root device. Deleting a row withdraws a route and locks nobody out.
+--
+-- wrap_id has no default on purpose. It goes inside the AES-GCM additional
+-- authenticated data, so it has to exist before the ciphertext does; a
+-- gen_random_uuid() default would mean encrypting against an id the server had
+-- not chosen yet and then trusting what came back.
+--
+-- Nothing else is on the row. No credential id and no label, per §6.5: either
+-- would tell the server which password manager somebody uses or what their
+-- devices are called. So a device unlocking cannot look its wrap up and tries
+-- each row instead, letting authentication pick. Which wrap belongs to which
+-- device is recorded in the device register, inside the encrypted journal.
+create table if not exists public.keeper_wraps (
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  wrap_id    uuid not null,
+  wrapped    jsonb not null,        -- { v, salt, iv, blob }, all base64
+  created_at timestamptz not null default now(),
+  primary key (user_id, wrap_id)
+);
+
+alter table public.keeper_wraps enable row level security;
+
+drop policy if exists "read own keeper wraps" on public.keeper_wraps;
+create policy "read own keeper wraps" on public.keeper_wraps
+  for select using (auth.uid() = user_id);
+drop policy if exists "write own keeper wraps" on public.keeper_wraps;
+create policy "write own keeper wraps" on public.keeper_wraps
+  for insert with check (auth.uid() = user_id);
+
+-- No update policy and no delete policy yet, and both are deliberate.
+--
+-- Update: a wrap is write-once. Overwriting one would destroy a route into the
+-- journal, and nothing has any reason to, exactly as with journal_keys above.
+--
+-- Delete: removing a credential is §12.1 phase 6, and it waits on §11 Q13.
+-- Deleting a row withdraws a route without taking back a keeper key the credential
+-- has already obtained, and the interface has to say which of those it is doing
+-- before the policy exists to do it. Granting it now, with nothing calling it,
+-- is how public.journals ended up with an update policy nobody wanted.
+
 -- Account deletion (remediation item 16). Deleting an auth user normally needs
 -- the service role key, which cannot ship in a client-only app. A security
 -- definer function is the way round it that keeps the "no server-side code"
