@@ -96,6 +96,14 @@ const CLASSES: Record<string, ColumnClass> = {
   "journal_keys.wrapped_key": "A",
   "journal_keys.created_at": "D",
 
+  // §6.1e. wrap_id is client-generated because it is inside the AAD; see the
+  // comment on the table. The row holds nothing else, which is why unlocking
+  // tries every row rather than looking one up.
+  "keeper_wraps.user_id": "C",
+  "keeper_wraps.wrap_id": "C",
+  "keeper_wraps.wrapped": "A",
+  "keeper_wraps.created_at": "D",
+
   "device_link_requests.user_id": "C",
   "device_link_requests.device_id": "C",
   "device_link_requests.public_key": "B",
