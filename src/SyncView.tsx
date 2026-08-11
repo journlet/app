@@ -13,7 +13,7 @@ import QRCode from "qrcode";
 import jsQR from "jsqr";
 import {
   acceptJournalKey,
-  canDeleteAccount,
+  holdsJournalKey,
   canRemoveDevices,
   deleteAccount,
   DeviceNotClearedError,
@@ -33,6 +33,7 @@ import { listDevices, onDevicesChange } from "./store/devices";
 import type { DeviceRecord } from "./store/devices";
 import { pendingJournalKey } from "./lib/pendingKey";
 import {
+  isJournalKeyCode,
   looksLikeJournalKey,
   looksLikeSignInCode,
 } from "./lib/credentialShape";
@@ -353,9 +354,17 @@ export default function SyncView() {
   // and trimmed, because the friction should come from having to read which
   // account is being destroyed, not from a stray space.
   const accountEmail = getSessionEmail();
-  const deleteArmed =
+  // Either credential arms it. The email address is a confirmation rather than a
+  // check, and it only counts on a device that already holds the journal key
+  // code, because that is the device whose keyring the code is then derived from.
+  // Typing the code itself works anywhere, which is what lets a device added by
+  // approval delete the account (assessment Finding 24).
+  const hasKey = holdsJournalKey();
+  const typedTheKey = isJournalKeyCode(deleteConfirm);
+  const typedTheEmail =
     Boolean(accountEmail) &&
     deleteConfirm.trim().toLowerCase() === accountEmail?.trim().toLowerCase();
+  const deleteArmed = typedTheKey || (hasKey && typedTheEmail);
 
   const closeDelete = () => {
     setDeleteOpen(false);
@@ -805,21 +814,7 @@ export default function SyncView() {
 
           <div style={ST.keyBox}>
             <div style={ST.keyLabel}>Delete account</div>
-            {!canDeleteAccount() ? (
-              // Only offered where it can be carried out, which is the rule this
-              // screen already follows for removing a device. Deletion now needs
-              // the code derived from the journal key code, so a device linked by
-              // approval cannot do it (assessment Finding 24). Saying so here is
-              // the difference between a plainly labelled limit and a button that
-              // fails.
-              <p style={{ ...ST.p, marginTop: 0 }}>
-                Deleting the account needs the device holding your journal key
-                code, because that code is what proves the request came from you
-                rather than from someone who has reached your email. This device
-                was added by approval and does not hold it. To remove the journal
-                from this device only, sign out above.
-              </p>
-            ) : deleteOpen ? (
+            {deleteOpen ? (
               <>
                 <p style={{ ...ST.p, marginTop: 0 }}>
                   This deletes your account, every encrypted update the server
@@ -844,7 +839,19 @@ export default function SyncView() {
                     margin: "10px 0 6px",
                   }}
                 >
-                  Type <strong>{accountEmail}</strong> to confirm.
+                  {hasKey ? (
+                    <>
+                      Type <strong>{accountEmail}</strong> to confirm, or your
+                      journal key code.
+                    </>
+                  ) : (
+                    <>
+                      Type your <strong>journal key code</strong> to confirm.
+                      This device was added by approving it on another device, so
+                      it does not hold that code and your email address is not
+                      enough here. It starts <code>J1-</code>.
+                    </>
+                  )}
                   <input
                     value={deleteConfirm}
                     onChange={(ev) => setDeleteConfirm(ev.target.value)}
@@ -852,7 +859,7 @@ export default function SyncView() {
                     autoCorrect="off"
                     autoCapitalize="none"
                     spellCheck={false}
-                    aria-label="Type your email address to confirm account deletion"
+                    aria-label="Type your email address or your journal key code to confirm account deletion"
                     style={{ ...ST.input, width: "100%", margin: "6px 0 4px" }}
                   />
                 </label>
@@ -865,7 +872,7 @@ export default function SyncView() {
                       setError(null);
                       setBusy(true);
                       try {
-                        await deleteAccount();
+                        await deleteAccount(deleteConfirm);
                         window.location.reload();
                       } catch (e) {
                         setBusy(false);

@@ -23,7 +23,7 @@ const signOutAndWipe = vi.fn();
 // caches like the real store does and only rebuilds when the status changes.
 const SNAPSHOT = { status: "synced", error: null, revision: 0 };
 
-let canDelete = true;
+let hasKey = true;
 
 vi.mock("../../src/store/sync", () => {
   // A real class, so the component's `instanceof` branch is exercised rather
@@ -39,10 +39,10 @@ vi.mock("../../src/store/sync", () => {
     deleteAccount: (...a: unknown[]) => deleteAccount(...a),
     signOutAndWipe: (...a: unknown[]) => signOutAndWipe(...a),
     getJournalKeyCode: vi.fn(async () => "J1-TESTKEY"),
-    // This device holds the journal key code, so the delete section is offered.
-    // Without it the screen explains why deletion is unavailable instead, which
-    // is the Finding 24 behaviour tested at the foot of this file.
-    canDeleteAccount: () => canDelete,
+    // Whether this device holds the account's journal key code. It decides
+    // whether the confirmation box will take an email address as well as a code
+    // (assessment Finding 24).
+    holdsJournalKey: () => hasKey,
     getSessionEmail: () => EMAIL,
     getSyncError: () => null,
     getSyncStatus: () => "synced",
@@ -67,7 +67,7 @@ const reload = vi.fn();
 const realLocation = window.location;
 
 beforeEach(() => {
-  canDelete = true;
+  hasKey = true;
   vi.clearAllMocks();
   Object.defineProperty(window, "location", {
     configurable: true,
@@ -91,7 +91,7 @@ const openDelete = () => {
 };
 
 const confirmField = () =>
-  screen.getByLabelText(/type your email address to confirm/i);
+  screen.getByLabelText(/confirm account deletion/i);
 
 const deleteButton = () =>
   screen.getByRole("button", { name: "Delete account and all synced data" });
@@ -218,34 +218,72 @@ describe("running the delete", () => {
 // this screen already follows for removing a device is to offer an action only
 // where it can be carried out, rather than offering it and then failing.
 describe("a device that does not hold the journal key code", () => {
-  test("is told why deletion is unavailable, and what to do instead", () => {
-    canDelete = false;
-    render(<SyncView />);
+  test("asks for the journal key code instead of the email address", () => {
+    hasKey = false;
+    openDelete();
 
     expect(
-      screen.getByText(/needs the device holding your journal key code/i)
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/sign out above/i)
-    ).toBeTruthy();
+      screen.getByText(/type your/i).textContent
+    ).toMatch(/journal key code/i);
+    expect(screen.getByText(/does not hold that code/i)).toBeTruthy();
   });
 
-  test("is not offered the opener at all", () => {
-    canDelete = false;
-    render(<SyncView />);
+  test("the email address does not arm it", () => {
+    // It would have nothing to derive from. Arming on it would produce a button
+    // that fails, which is the thing this screen does not do.
+    hasKey = false;
+    openDelete();
+    fireEvent.change(confirmField(), { target: { value: EMAIL } });
 
-    expect(
-      screen.queryByText(/Delete account and all synced data/i)
-    ).toBeNull();
+    expect(deleteButton().hasAttribute("disabled")).toBe(true);
   });
 
-  test("and the section is still headed Delete account, so it is findable", () => {
-    // Hiding it entirely would leave someone hunting for a control that is
-    // deliberately absent, which reads as a missing feature rather than a
-    // stated limit.
-    canDelete = false;
+  test("a journal key code arms it, and is what gets sent", () => {
+    hasKey = false;
+    openDelete();
+    fireEvent.change(confirmField(), {
+      target: { value: "J1-ABCD-EFGH-JKMN-PQRS" },
+    });
+    fireEvent.click(deleteButton());
+
+    expect(deleteAccount).toHaveBeenCalledWith("J1-ABCD-EFGH-JKMN-PQRS");
+  });
+
+  test("it is still offered at all, rather than hidden", () => {
+    // Hiding it would leave someone hunting for a control that is deliberately
+    // absent, which reads as a missing feature rather than a stated limit.
+    hasKey = false;
     render(<SyncView />);
 
     expect(screen.getByText("Delete account")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /delete account and all synced data/i })
+    ).toBeTruthy();
+  });
+});
+
+describe("a device that does hold it", () => {
+  test("takes either the email address or the code", () => {
+    openDelete();
+    fireEvent.change(confirmField(), { target: { value: EMAIL } });
+    expect(deleteButton().hasAttribute("disabled")).toBe(false);
+
+    fireEvent.change(confirmField(), {
+      target: { value: "J1-ABCD-EFGH-JKMN-PQRS" },
+    });
+    expect(deleteButton().hasAttribute("disabled")).toBe(false);
+  });
+
+  test("and passes on whichever was typed", () => {
+    openDelete();
+    fireEvent.change(confirmField(), { target: { value: EMAIL } });
+    fireEvent.click(deleteButton());
+    expect(deleteAccount).toHaveBeenCalledWith(EMAIL);
+  });
+
+  test("a near miss on the email still does not arm it", () => {
+    openDelete();
+    fireEvent.change(confirmField(), { target: { value: EMAIL + "x" } });
+    expect(deleteButton().hasAttribute("disabled")).toBe(true);
   });
 });

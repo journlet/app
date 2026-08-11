@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import {
+  isJournalKeyCode,
   looksLikeJournalKey,
   looksLikeSignInCode,
 } from "../src/lib/credentialShape";
@@ -69,5 +70,35 @@ describe("recognising a sign-in code in the journal key box", () => {
     expect(looksLikeSignInCode("12345")).toBe(false);
     expect(looksLikeSignInCode("1234567")).toBe(false);
     expect(looksLikeSignInCode("")).toBe(false);
+  });
+});
+
+// isJournalKeyCode decides whether a field is read as a key at all, so it has to
+// be narrow where looksLikeJournalKey is generous (assessment Finding 24). The
+// delete confirmation box takes either an email address or a code, and reading
+// one as the other is the failure that matters here.
+describe("isJournalKeyCode", () => {
+  test("accepts a real code, formatted or not", () => {
+    expect(isJournalKeyCode("J1-ABCD-EFGH-JKMN-PQRS")).toBe(true);
+    expect(isJournalKeyCode("j1abcdefghjkmnpqrs")).toBe(true);
+    expect(isJournalKeyCode("  J1-ABCD-EFGH  ")).toBe(true);
+  });
+
+  test("refuses an email address, which looksLikeJournalKey does not", () => {
+    // The whole reason for a second predicate. Any address is longer than the
+    // twelve characters that satisfies the generous one.
+    expect(isJournalKeyCode("gary@example.com")).toBe(false);
+    expect(looksLikeJournalKey("gary@example.com")).toBe(true);
+  });
+
+  test("refuses a sign-in code and an empty field", () => {
+    expect(isJournalKeyCode("123456")).toBe(false);
+    expect(isJournalKeyCode("")).toBe(false);
+    expect(isJournalKeyCode("   ")).toBe(false);
+  });
+
+  test("agrees with importJournalKeyCode about the prefix", () => {
+    // A field armed by this must not then fail to parse for want of a prefix.
+    expect(isJournalKeyCode("ABCD-EFGH-JKMN-PQRS")).toBe(false);
   });
 });

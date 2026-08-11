@@ -62,6 +62,7 @@ import {
   stashKey,
   stashKeyFromUrl,
 } from "../lib/pendingKey";
+import { isJournalKeyCode } from "../lib/credentialShape";
 import { markRecoveryPending } from "../lib/recoveryAck";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import {
@@ -988,19 +989,24 @@ export const canRemoveDevices = (): boolean =>
   Boolean(ring?.keeperKey && keeperUsable);
 
 /**
- * Whether this device can delete the account (assessment Finding 24).
+ * Whether this device holds this account's journal key code.
  *
- * The same condition as removing a device, for the reason getJournalKeyCode
- * gives: every fresh install generates a keeper key, so holding one proves
- * nothing until it has been shown to open this account's journal. Without
- * `keeperUsable` a device whose connect failed would offer the action, derive a
- * code from a key that was never the account's, and be refused by the database
- * with a message about the journal key code — to the person who has it.
+ * Renamed from canDeleteAccount, which stopped being true: an account can now be
+ * deleted from any device by typing the code, so what this reports is narrower
+ * than what it was being asked. It decides whether the confirmation box will take
+ * an email address as well as a code, and it is what getJournalKeyCode needs to
+ * be true before it will display one.
+ *
+ * `keeperUsable` as well as the key, for the reason getJournalKeyCode gives:
+ * every fresh install generates a keeper key, so holding one proves nothing until
+ * it has opened this account's journal. Saying yes on the strength of an unproven
+ * key would offer an email confirmation that then derived a code from a key that
+ * was never the account's.
  *
  * A separate function from canRemoveDevices rather than a reuse of it: the two
- * capabilities happen to share a condition today and are not the same question.
+ * happen to share a condition today and are not the same question.
  */
-export const canDeleteAccount = (): boolean =>
+export const holdsJournalKey = (): boolean =>
   Boolean(ring?.keeperKey && keeperUsable);
 
 /**
@@ -1718,7 +1724,7 @@ export class DeviceNotClearedError extends Error {
  * back at signed-out. Nothing can remotely erase a device, which the UI says
  * plainly.
  */
-export const deleteAccount = async (): Promise<void> => {
+export const deleteAccount = async (confirmation?: string): Promise<void> => {
   if (!supabase || !session) throw new Error("Not signed in");
   // The code the server compares, derived from the keeper key (Finding 24).
   // Holding the mailbox is no longer enough to destroy the server copy, and
@@ -1728,18 +1734,33 @@ export const deleteAccount = async (): Promise<void> => {
   // account. Said here as well as being disabled in the interface, because this
   // function is callable from elsewhere and a caller that got past the button
   // should get the reason rather than a refusal from the database.
-  // Narrowed into a const rather than asserted through canDeleteAccount(), which
+  // Either credential opens this. A journal key code typed into the confirmation
+  // box is used in preference to the keyring, which is what lets a device added by
+  // approval delete the account, and what stops a borrowed unlocked device doing
+  // it on the strength of an email address alone being typed into a field.
+  //
+  // Narrowed into a const rather than asserted through holdsJournalKey(), which
   // the compiler cannot see into. src/ has one non-null assertion in it and this
   // is not worth being the second.
-  const keeperKey = ring?.keeperKey;
-  if (!keeperKey || !keeperUsable)
+  const typedKey = confirmation && isJournalKeyCode(confirmation);
+  const keeperKey = typedKey
+    ? await importJournalKeyCode(confirmation)
+    : keeperUsable
+      ? ring?.keeperKey
+      : undefined;
+  if (!keeperKey)
     throw new Error(
-      "Deleting the account needs the device holding your journal key code. On this device, sign out to remove the journal from it."
+      "Deleting the account needs your journal key code. Type it in the box above, or use the device that holds it."
     );
   const { error } = await supabase.rpc("delete_account", {
     code: await deriveDeleteCode(keeperKey),
   });
-  if (error) throw new Error(error.message);
+  if (error)
+    throw new Error(
+      typedKey
+        ? `That journal key code does not open this account: ${error.message}`
+        : error.message
+    );
 
   // Point of no return. Nothing below may be reported as a failed deletion.
   teardown();
