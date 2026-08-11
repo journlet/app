@@ -415,7 +415,12 @@ export default function MenuView({
 const INK_SOFT = "var(--ink-soft)";
 const LINE = "var(--line)";
 
-const ST: Record<string, CSSProperties> = {
+// `as const satisfies` rather than a Record<string, CSSProperties> annotation.
+// The annotation types the values and throws the keys away, so a mistyped key
+// compiles and hands back undefined: an element with no styling and no error.
+// This keeps the value checking and infers the key union, so a typo is a build
+// failure (assessment Finding 15; ui/styles.ts:12 has the longer version).
+const ST = {
   head: {
     display: "flex",
     alignItems: "baseline",
@@ -487,4 +492,4 @@ const ST: Record<string, CSSProperties> = {
     lineHeight: `${GRID}px`,
     padding: "0 4px",
   },
-};
+} as const satisfies Record<string, CSSProperties>;
