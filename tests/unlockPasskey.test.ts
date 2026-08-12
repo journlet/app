@@ -92,6 +92,8 @@ let created = 0;
 let askedFor: (Uint8Array | undefined)[] = [];
 /** How many times the journal row has been read, which is once per real connect. */
 let journalReads = 0;
+/** Wrap ids the client asked the server to delete. */
+let deleted: string[] = [];
 
 const signIn = (): void => {
   if (!authCallback)
@@ -166,6 +168,13 @@ vi.mock("@supabase/supabase-js", () => ({
               wrapRows.push({ wrap_id: row.wrap_id, wrapped: row.wrapped });
               return { error: null };
             },
+            delete: () => ({
+              in: async (_col: string, ids: string[]) => {
+                deleted.push(...ids);
+                wrapRows = wrapRows.filter((r) => !ids.includes(r.wrap_id));
+                return { error: null };
+              },
+            }),
           };
         }
         const b = {
@@ -234,6 +243,7 @@ const boot = async (signedIn = true) => {
   created = 0;
   askedFor = [];
   journalReads = 0;
+  deleted = [];
   ringWrites = [];
   localStorage.setItem("journlet-device-id", "phone-id");
   storedRing = {
@@ -472,6 +482,61 @@ describe("giving the journal key to a device that is already syncing", () => {
     await expect(sync.takeJournalKey(wrong)).rejects.toThrow(/journal key/);
 
     expect(sync.canEnrolPasskey()).toBe(false);
+  });
+});
+
+describe("starting again with one passkey (spec §11 Q13, §12.1 phase 6)", () => {
+  test("enrols first and deletes only what was there before", async () => {
+    // The order is the whole safety of it: a failure leaves more routes than needed
+    // rather than none, and a wrap another device wrote in the meantime is not swept
+    // up by a call that never saw it.
+    wrapRows = [await aWrapOf(SECRET), await aWrapOf(OTHER_SECRET)];
+    const older = wrapRows.map((r) => r.wrap_id);
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+
+    await sync.replaceAllPasskeys();
+
+    expect(deleted.sort()).toEqual([...older].sort());
+    expect(wrapRows).toHaveLength(1);
+    expect(older).not.toContain(wrapRows[0].wrap_id);
+  });
+
+  test("and deletes nothing at all when the enrolment fails", async () => {
+    // Which is the case that matters: somebody cancels the sheet and still has every
+    // route they had a moment ago.
+    wrapRows = [await aWrapOf(SECRET)];
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    prfAnswer = async () => {
+      throw new CredentialRefusedError();
+    };
+
+    await expect(sync.replaceAllPasskeys()).rejects.toBeInstanceOf(
+      CredentialRefusedError
+    );
+
+    expect(deleted).toEqual([]);
+    expect(wrapRows).toHaveLength(1);
+  });
+
+  test("and the wrap it leaves behind is one this credential opens", async () => {
+    wrapRows = [await aWrapOf(OTHER_SECRET)];
+    const sync = await boot();
+    // Unlock on the old credential, then start again on a new secret.
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    await sync.unlockWithPasskey();
+    prfAnswer = async () => SECRET.buffer;
+
+    await sync.replaceAllPasskeys();
+
+    const left = wrapRows[0];
+    await expect(
+      unwrapKeeperKey(left.wrapped, SECRET, {
+        userId: USER_ID,
+        wrapId: left.wrap_id,
+      })
+    ).resolves.toBeTruthy();
   });
 });
 

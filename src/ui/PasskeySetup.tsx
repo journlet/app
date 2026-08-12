@@ -17,7 +17,11 @@
 // this project when an interface implies more than the mechanism delivers.
 
 import { useCallback, useEffect, useState } from "react";
-import { countPasskeyRoutes, enrolPasskey } from "../store/sync";
+import {
+  countPasskeyRoutes,
+  enrolPasskey,
+  replaceAllPasskeys,
+} from "../store/sync";
 import { probeCredentialSupport, relyingPartyId } from "../lib/prf";
 import type { PrfCapability } from "../lib/prf";
 import { enrolFailureMessage } from "../lib/passkeyMessages";
@@ -73,6 +77,8 @@ export default function PasskeySetup({
   const [details, setDetails] = useState(false);
   /** Whether the add-another step is open, which is where its warnings live. */
   const [adding, setAdding] = useState(false);
+  /** Whether the start-again step is open. Same reason: its caveat comes first. */
+  const [replacing, setReplacing] = useState(false);
 
   useEffect(() => {
     void probeCredentialSupport().then(setCapability);
@@ -86,17 +92,29 @@ export default function PasskeySetup({
   }, []);
   useEffect(refreshCount, [refreshCount]);
 
-  const setUp = async () => {
+  /**
+   * Enrol, either as an addition or as a replacement of everything before it.
+   *
+   * One function because the failure wording, the busy state and the recount are
+   * identical: the only difference is whether the ids read beforehand are deleted
+   * afterwards, and that difference lives in the store.
+   */
+  const setUp = async (replaceAll = false) => {
     setDone(null);
     setProblem(null);
     setBusy(true);
     try {
-      await enrolPasskey();
+      await (replaceAll ? replaceAllPasskeys() : enrolPasskey());
       // Short, because the box now says the rest of it for as long as the passkey
       // exists rather than only until the next reload.
-      setDone("Passkey set up.");
+      setDone(
+        replaceAll
+          ? "Passkey set up, and the older routes removed."
+          : "Passkey set up."
+      );
       // Back to the one-line state, which the new count will now describe.
       setAdding(false);
+      setReplacing(false);
       refreshCount();
     } catch (e) {
       // Shared with the first-run screen, which says the same three things.
@@ -208,10 +226,43 @@ export default function PasskeySetup({
               before the platform sheets — one about the two prompts, one about
               re-using the same password manager — and putting them on screen
               permanently is what made this box a wall of text. */}
-          {enrolled && !adding ? (
+          {enrolled && replacing ? (
+            <>
+              {/* The caveat before the action, and it is the one §11 Q13 turns on:
+                  this removes stored routes and takes nothing back. Saying it after
+                  the fact would be the lost-device feature of 28 July again. */}
+              <p style={{ ...textStyle, fontSize: 13 }}>
+                This sets up a new passkey here and removes the saved routes that
+                existed before it — useful when you have lost track of how many
+                there are, or set one up twice in the same password manager. It does
+                not take the key back from a device that already has it, and nothing
+                can. Your journal key does not change.
+              </p>
+              <p style={{ ...textStyle, fontSize: 13 }}>
+                Two prompts follow, as before.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="miniBtn"
+                  disabled={busy}
+                  onClick={() => void setUp(true)}
+                >
+                  {busy ? "starting again…" : "start again with one passkey"}
+                </button>
+                {!busy && (
+                  <button className="miniBtn" onClick={() => setReplacing(false)}>
+                    cancel
+                  </button>
+                )}
+              </div>
+            </>
+          ) : enrolled && !adding ? (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
               <button className="miniBtn" onClick={() => setAdding(true)}>
                 add another passkey
+              </button>
+              <button className="miniBtn" onClick={() => setReplacing(true)}>
+                start again
               </button>
               <button className="miniBtn" onClick={() => setDetails(!details)}>
                 {details ? "hide details" : "what this means"}
@@ -242,7 +293,7 @@ export default function PasskeySetup({
                 <button
                   className={enrolled ? "miniBtn" : "addBtn"}
                   disabled={busy}
-                  onClick={setUp}
+                  onClick={() => void setUp()}
                 >
                   {busy
                     ? "setting up…"

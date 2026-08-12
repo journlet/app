@@ -37,6 +37,7 @@ import {
 import type { LinkRequest } from "./deviceLink";
 import {
   countKeeperWraps,
+  deleteKeeperWraps,
   listKeeperWraps,
   publishKeeperWrap,
 } from "./keeperWraps";
@@ -1319,6 +1320,35 @@ export const enrolPasskey = async (): Promise<void> => {
   if (session?.user.id !== userId)
     throw new Error("Signed out before the passkey could be saved");
   await publishKeeperWrap(supabase, userId, wrapId, wrapped);
+};
+
+/**
+ * Start the passkeys again: enrol one here, then remove every route that existed
+ * before it (spec §11 Q13 answered 12 August 2026, §12.1 phase 6).
+ *
+ * What this is, stated as narrowly as the mechanism allows. It is not revocation. A
+ * credential that has already unwrapped the keeper key holds it, and nothing here or
+ * anywhere else can take that back — only rotating the keeper key could, and that
+ * would invalidate every written-down copy of the journal key code and require every
+ * other credential to be present to be re-wrapped, which Q13 declined for now.
+ *
+ * What it is for is the case §6.1f found: enrolling twice in one password manager
+ * replaces the credential and leaves a wrap nothing can open, so the count of routes
+ * overstates. This is also the only shape per-credential removal can honestly take,
+ * because §6.5 keeps credential ids off the rows — the client can count them and
+ * cannot tell one from another, so "remove that one" is not a sentence this interface
+ * can mean.
+ *
+ * Order matters and is the whole safety of it. Enrol first, then delete the ids read
+ * *before* enrolling. A failure anywhere leaves the account with more routes than it
+ * needs rather than none, and a wrap written by another device in the meantime is not
+ * swept up by a call that never saw it.
+ */
+export const replaceAllPasskeys = async (): Promise<void> => {
+  if (!supabase) throw new Error("Sync is not configured");
+  const before = (await listKeeperWraps(supabase)).map((r) => r.wrapId);
+  await enrolPasskey();
+  await deleteKeeperWraps(supabase, before);
 };
 
 /**
