@@ -400,16 +400,21 @@ drop policy if exists "write own keeper wraps" on public.keeper_wraps;
 create policy "write own keeper wraps" on public.keeper_wraps
   for insert with check (auth.uid() = user_id);
 
--- No update policy and no delete policy yet, and both are deliberate.
+-- No update policy, deliberately: a wrap is write-once. Overwriting one would
+-- destroy a route into the journal, and nothing has any reason to, exactly as with
+-- journal_keys above.
 --
--- Update: a wrap is write-once. Overwriting one would destroy a route into the
--- journal, and nothing has any reason to, exactly as with journal_keys above.
---
--- Delete: removing a credential is §12.1 phase 6, and it waits on §11 Q13.
--- Deleting a row withdraws a route without taking back a keeper key the credential
--- has already obtained, and the interface has to say which of those it is doing
--- before the policy exists to do it. Granting it now, with nothing calling it,
--- is how public.journals ended up with an update policy nobody wanted.
+-- Delete arrived with §12.1 phase 6, once §11 Q13 was answered (12 August 2026).
+-- The answer narrowed what a delete may claim rather than widening it. Removing a
+-- row withdraws a stored route and does not take back a keeper key a credential has
+-- already obtained, and per-credential removal cannot honestly be offered at all:
+-- §6.5 keeps credential ids and labels off these rows, so the client can count them
+-- and cannot tell one from another. What it can do is replace the lot — enrol a new
+-- credential, then delete the rows that were there before it — which is what this
+-- policy exists for and all it is used for.
+drop policy if exists "delete own keeper wraps" on public.keeper_wraps;
+create policy "delete own keeper wraps" on public.keeper_wraps
+  for delete using (auth.uid() = user_id);
 
 -- Account deletion (remediation item 16). Deleting an auth user normally needs
 -- the service role key, which cannot ship in a client-only app. A security

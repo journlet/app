@@ -88,3 +88,29 @@ export const countKeeperWraps = async (
     throw new Error(`Could not count the passkey routes: ${error.message}`);
   return count ?? 0;
 };
+
+/**
+ * Delete named wraps, and only named ones.
+ *
+ * Takes the ids the caller has already read rather than deleting by user, which is a
+ * deliberate narrowing: replacing every route means enrolling first and then
+ * removing what was there *before* that enrolment, so a wrap written in between —
+ * from another device, at the same moment — is not swept up by a call that could not
+ * have known about it.
+ *
+ * Nothing here is revocation, and the interface must not describe it as such: a
+ * credential that has already unwrapped the keeper key keeps it, and no delete can
+ * reach that (§11 Q13, answered 12 August 2026).
+ */
+export const deleteKeeperWraps = async (
+  client: SupabaseClient,
+  wrapIds: readonly string[]
+): Promise<void> => {
+  if (wrapIds.length === 0) return;
+  const { error } = await client
+    .from("keeper_wraps")
+    .delete()
+    .in("wrap_id", wrapIds);
+  if (error)
+    throw new Error(`Could not remove the old passkey routes: ${error.message}`);
+};

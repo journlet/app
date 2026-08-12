@@ -20,10 +20,17 @@ import { CredentialRefusedError, PrfUnsupportedError } from "../../src/lib/prf";
 let routes = 0;
 let enrol: () => Promise<void> = async () => {};
 let usable = true;
+/** Ids the store was told to delete, and what replacing does when it is called. */
+let replaced = 0;
+let replace: () => Promise<void> = async () => {
+  replaced++;
+  routes = 1;
+};
 
 vi.mock("../../src/store/sync", () => ({
   countPasskeyRoutes: async () => routes,
   enrolPasskey: () => enrol(),
+  replaceAllPasskeys: () => replace(),
 }));
 
 vi.mock("../../src/lib/prf", async (importOriginal) => ({
@@ -68,6 +75,11 @@ beforeEach(() => {
   routes = 0;
   usable = true;
   enrol = async () => {};
+  replaced = 0;
+  replace = async () => {
+    replaced++;
+    routes = 1;
+  };
   servedFrom("app.journlet.com");
 });
 afterEach(cleanup);
@@ -153,6 +165,80 @@ describe("an account that already has one", () => {
 
     expect(button()).toBeTruthy();
     expect(screen.queryByText(/can open this journal/i)).toBeNull();
+  });
+});
+
+describe("starting again with one passkey (spec §11 Q13, phase 6)", () => {
+  test("is offered only once there is something to replace", async () => {
+    await show();
+    expect(screen.queryByRole("button", { name: /start again/i })).toBeNull();
+
+    cleanup();
+    routes = 2;
+    await show();
+
+    expect(screen.getByRole("button", { name: /start again/i })).toBeTruthy();
+  });
+
+  test("says what it does not do, before it does anything", async () => {
+    // The sentence Q13 turns on. Removing rows withdraws stored routes and takes
+    // nothing back, and saying so afterwards would be the lost-device feature of
+    // 28 July over again.
+    routes = 2;
+    await show();
+
+    fireEvent.click(screen.getByRole("button", { name: /start again/i }));
+
+    expect(replaced).toBe(0);
+    expect(screen.getByText(/does\s+not take the key back from a device/i))
+      .toBeTruthy();
+    expect(screen.getByText(/journal key does not change/i)).toBeTruthy();
+    expect(screen.getByText(/set one up twice in the same password manager/i))
+      .toBeTruthy();
+  });
+
+  test("and only then replaces, saying that the old routes went", async () => {
+    routes = 2;
+    await show();
+    fireEvent.click(screen.getByRole("button", { name: /start again/i }));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /start again with one passkey/i })
+    );
+
+    await waitFor(() => expect(replaced).toBe(1));
+    expect(screen.getByText(/older routes removed/i)).toBeTruthy();
+    expect(screen.getByText(/1 passkey can open this journal/i)).toBeTruthy();
+  });
+
+  test("a failure there says the same three things as any other enrolment", async () => {
+    // It goes through the same wording, because from the person's side it is the
+    // same two sheets. Nothing is deleted when they do not complete.
+    routes = 2;
+    replace = async () => {
+      throw new CredentialRefusedError();
+    };
+    await show();
+    fireEvent.click(screen.getByRole("button", { name: /start again/i }));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /start again with one passkey/i })
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/nothing has changed/i)).toBeTruthy()
+    );
+  });
+
+  test("cancelling leaves the account alone", async () => {
+    routes = 2;
+    await show();
+    fireEvent.click(screen.getByRole("button", { name: /start again/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(replaced).toBe(0);
+    expect(screen.getByRole("button", { name: /start again/i })).toBeTruthy();
   });
 });
 
