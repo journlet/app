@@ -101,12 +101,11 @@ describe("what it says before anything is pressed", () => {
     expect(screen.getByText(/keep your journal key too/i)).toBeTruthy();
   });
 
-  test("how many routes exist, and that the server cannot tell them apart", async () => {
+  test("how many routes exist, once there are any", async () => {
     routes = 2;
     await show();
 
     expect(screen.getByText(/2 passkeys can open this journal/i)).toBeTruthy();
-    expect(screen.getByText(/not recorded on the server/i)).toBeTruthy();
   });
 
   test("nothing about a count on an account that has none", async () => {
@@ -131,12 +130,18 @@ describe("an account that already has one", () => {
     expect(button()).toBeNull();
   });
 
-  test("says how to use it on a device that cannot open the journal yet", async () => {
+  test("keeps the explaining behind a labelled control, not on the screen", async () => {
+    // Gary, third pass: with a passkey set up, none of the prose is answering a
+    // question anybody is asking. One line, and the rest on request.
     routes = 1;
     await show();
 
+    expect(screen.queryByText(/sign in with the same email/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /what this means/i }));
+
     expect(screen.getByText(/sign in with the same email/i)).toBeTruthy();
     expect(screen.getByText(/Unlock with a passkey/i)).toBeTruthy();
+    expect(screen.getByText(/not recorded on\s+the server/i)).toBeTruthy();
   });
 
   test("but a count it could not read is not treated as a passkey", async () => {
@@ -258,10 +263,12 @@ describe("the two failures that are not faults", () => {
 });
 
 describe("when it works", () => {
-  test("it says what to do on the other device, in the words that screen uses", async () => {
-    // Asserted after the count has moved, because that is what makes the sentence
-    // durable: `done` is component state and a reload clears it, which is how the
-    // pitch came back in front of somebody who had already enrolled.
+  test("it confirms, and the count says the rest from then on", async () => {
+    // The confirmation used to carry the "on another device, choose Unlock with a
+    // passkey" sentence, and it was the wrong place for it: `done` is component state
+    // and a reload clears it, which is how the pitch came back in front of somebody
+    // who had already enrolled. The count is durable, and the how-to sits behind
+    // "what this means" for whoever wants it.
     enrol = async () => {
       routes = 1;
     };
@@ -270,6 +277,8 @@ describe("when it works", () => {
     fireEvent.click(button() as HTMLElement);
 
     await waitFor(() => expect(screen.getByText(/Passkey set up/i)).toBeTruthy());
+    expect(screen.getByText(/1 passkey can open this journal/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /what this means/i }));
     expect(screen.getByText(/Unlock with a passkey/i)).toBeTruthy();
   });
 
@@ -289,11 +298,8 @@ describe("when it works", () => {
     expect(again.className).toBe("miniBtn");
   });
 
-  test("and says where another one helps, and where it would replace instead", async () => {
-    // The account id is the WebAuthn user handle, so enrolling again in the same
-    // password manager replaces the credential rather than adding one — and leaves
-    // the row already written as a route nothing can open. §6.5 forbids the
-    // credential id that would let the client tidy up, so this is wording or nothing.
+  test("and the box collapses back to one line rather than staying open", async () => {
+    // What the confirmation used to have to say, the count now says permanently.
     enrol = async () => {
       routes = 1;
     };
@@ -302,10 +308,44 @@ describe("when it works", () => {
     fireEvent.click(button() as HTMLElement);
 
     await waitFor(() =>
-      expect(screen.getByText(/replaces it rather than adding a way in/i))
-        .toBeTruthy()
+      expect(screen.getByText(/1 passkey can open this journal/i)).toBeTruthy()
     );
-    expect(screen.getByText(/another device,\s+or another password manager/i))
+    expect(screen.queryByText(/two prompts/i)).toBeNull();
+  });
+
+  test("adding another asks first, and raises no prompt on that tap", async () => {
+    // The warnings have to arrive before the platform sheets do, and keeping them on
+    // screen for ever is what made this box a wall. So the first tap explains and the
+    // second acts — and the first must not reach the authenticator.
+    let calls = 0;
+    enrol = async () => {
+      calls++;
+    };
+    routes = 1;
+    await show();
+
+    fireEvent.click(screen.getByRole("button", { name: /add another passkey/i }));
+
+    expect(calls).toBe(0);
+    expect(screen.getByText(/two prompts/i)).toBeTruthy();
+    expect(screen.getByText(/replaces it rather than adding a way in/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /set up another passkey/i }));
+    await waitFor(() => expect(calls).toBe(1));
+  });
+
+  test("and says where another one helps, and where it would replace instead", async () => {
+    // The account id is the WebAuthn user handle, so enrolling again in the same
+    // password manager replaces the credential rather than adding one — and leaves
+    // the row already written as a route nothing can open. §6.5 forbids the
+    // credential id that would let the client tidy up, so this is wording or nothing.
+    routes = 1;
+    await show();
+
+    fireEvent.click(screen.getByRole("button", { name: /add another passkey/i }));
+
+    expect(screen.getByText(/replaces it rather than adding a way in/i)).toBeTruthy();
+    expect(screen.getByText(/another\s+device, or another password manager/i))
       .toBeTruthy();
   });
 

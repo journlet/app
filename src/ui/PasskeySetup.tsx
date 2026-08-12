@@ -73,6 +73,10 @@ export default function PasskeySetup({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  /** Whether the explanation is showing, on an account that has a passkey. */
+  const [details, setDetails] = useState(false);
+  /** Whether the add-another step is open, which is where its warnings live. */
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     void probeCredentialSupport().then(setCapability);
@@ -95,6 +99,8 @@ export default function PasskeySetup({
       // Short, because the box now says the rest of it for as long as the passkey
       // exists rather than only until the next reload.
       setDone("Passkey set up.");
+      // Back to the one-line state, which the new count will now describe.
+      setAdding(false);
       refreshCount();
     } catch (e) {
       if (e instanceof PrfUnsupportedError)
@@ -144,23 +150,29 @@ export default function PasskeySetup({
 
       {enrolled ? (
         <>
-          {/* The state first, and in the only terms §6.5 allows: a count. Which
-              device or password manager holds each one is not on the server, so this
-              cannot say whether one of them is the passkey in this browser, and it
-              says that rather than implying either way. */}
-          <p style={{ ...textStyle, marginTop: 0, fontWeight: 600 }}>
+          {/* One line by default. Everything this box explained on the way to the
+              first passkey is answering a question nobody is asking any more, and
+              the Journal key box directly below already carries the keep-it-safe
+              warning in stronger terms. So the state, and the rest on request. */}
+          <p style={{ ...textStyle, marginTop: 0, marginBottom: 0, fontWeight: 600 }}>
             {routeCount(routes)}
           </p>
-          <p style={textStyle}>
-            On a device that cannot open the journal yet: sign in with the same
-            email, then choose “Unlock with a passkey”.
-          </p>
-          <p style={textStyle}>
-            Which device or password manager holds each one is not recorded on the
-            server, so this cannot tell you whether one of them is in this browser.
-            Keep your journal key too: it is what opens the journal if a passkey is
-            lost.
-          </p>
+          {details && (
+            <>
+              <p style={textStyle}>
+                On a device that cannot open the journal yet: sign in with the same
+                email, then choose “Unlock with a passkey”.
+              </p>
+              {/* The honest limit, and the reason the line above is a count rather
+                  than "this device is set up": §6.5 keeps which device or password
+                  manager holds each one off the server deliberately. */}
+              <p style={{ ...textStyle, marginBottom: 0 }}>
+                Which device or password manager holds each one is not recorded on
+                the server, so this cannot tell you whether one of them is in this
+                browser.
+              </p>
+            </>
+          )}
         </>
       ) : (
         <>
@@ -201,41 +213,61 @@ export default function PasskeySetup({
       ) : (
         <>
           {done && <p style={{ ...textStyle, fontWeight: 600 }}>{done}</p>}
-          {/* Before the button, not after the second sheet appears. Two prompts
-              read as one having failed unless somebody has been told to expect
-              them (found while building phase 3a, spec §6.1e). */}
-          {/* Smaller once a passkey exists, because it belongs to an action that is
-              no longer the point of the box — but still above the button, since a
-              warning about the second sheet is no use after it has appeared. */}
-          <p style={{ ...textStyle, ...(enrolled ? { fontSize: 13 } : {}) }}>
-            Two prompts follow: one to create the passkey, one to use it. Both
-            are needed — the second is not a sign the first failed.
-          </p>
-          {/* Secondary once the account has one, and never removed: a second
-              passkey is the thing §6.1e wants somebody to add, for the device or
-              password manager the first cannot reach. */}
-          <button
-            className={enrolled ? "miniBtn" : "addBtn"}
-            disabled={busy}
-            onClick={setUp}
-          >
-            {busy
-              ? "setting up…"
-              : enrolled
-                ? "add another passkey"
-                : "Set up a passkey on this device"}
-          </button>
-          {/* The account id is the WebAuthn user handle, so a second enrolment in
-              the same password manager replaces the credential rather than adding
-              one — and leaves the row already written as a route nothing can open.
-              §6.5 forbids the credential id that would let the client tidy that up,
-              so the honest move is to say where another one helps. */}
-          {enrolled && (
-            <p style={{ ...textStyle, marginBottom: 0, fontSize: 13 }}>
-              Worth adding where the ones you have cannot reach — another device,
-              or another password manager. Setting one up again in the same
-              password manager replaces it rather than adding a way in.
-            </p>
+
+          {/* On an account with a passkey, adding another is two taps: the first
+              reveals what to expect, the second does it. The warnings have to come
+              before the platform sheets — one about the two prompts, one about
+              re-using the same password manager — and putting them on screen
+              permanently is what made this box a wall of text. */}
+          {enrolled && !adding ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              <button className="miniBtn" onClick={() => setAdding(true)}>
+                add another passkey
+              </button>
+              <button className="miniBtn" onClick={() => setDetails(!details)}>
+                {details ? "hide details" : "what this means"}
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Before the button, not after the second sheet appears. Two prompts
+                  read as one having failed unless somebody has been told to expect
+                  them (found while building phase 3a, spec §6.1e). */}
+              <p style={{ ...textStyle, ...(enrolled ? { fontSize: 13 } : {}) }}>
+                Two prompts follow: one to create the passkey, one to use it. Both
+                are needed — the second is not a sign the first failed.
+              </p>
+              {/* The account id is the WebAuthn user handle, so a second enrolment
+                  in the same password manager replaces the credential rather than
+                  adding one — and leaves the row already written as a route nothing
+                  can open. §6.5 forbids the credential id that would let the client
+                  tidy that up, so saying so is the whole of the remedy. */}
+              {enrolled && (
+                <p style={{ ...textStyle, fontSize: 13 }}>
+                  Worth adding where the ones you have cannot reach — another
+                  device, or another password manager. Setting one up again in the
+                  same password manager replaces it rather than adding a way in.
+                </p>
+              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className={enrolled ? "miniBtn" : "addBtn"}
+                  disabled={busy}
+                  onClick={setUp}
+                >
+                  {busy
+                    ? "setting up…"
+                    : enrolled
+                      ? "set up another passkey"
+                      : "Set up a passkey on this device"}
+                </button>
+                {enrolled && !busy && (
+                  <button className="miniBtn" onClick={() => setAdding(false)}>
+                    cancel
+                  </button>
+                )}
+              </div>
+            </>
           )}
         </>
       )}
