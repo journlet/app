@@ -106,12 +106,47 @@ describe("what it says before anything is pressed", () => {
     await show();
 
     expect(screen.getByText(/2 passkeys can open this journal/i)).toBeTruthy();
-    expect(screen.getByText(/cannot tell them apart/i)).toBeTruthy();
+    expect(screen.getByText(/not recorded on the server/i)).toBeTruthy();
   });
 
   test("nothing about a count on an account that has none", async () => {
     await show();
 
+    expect(screen.queryByText(/can open this journal/i)).toBeNull();
+  });
+});
+
+describe("an account that already has one", () => {
+  test("leads with that, rather than explaining what a passkey is", async () => {
+    // The second hardware report: a reload put the pitch and a full-strength setup
+    // button back in front of somebody who had just enrolled, which reads as it not
+    // having worked. The count is the durable signal — `done` does not survive a
+    // reload — so the box changes shape on the count rather than on the click.
+    routes = 1;
+    await show();
+
+    expect(screen.getByText(/1 passkey can open this journal/i)).toBeTruthy();
+    expect(screen.queryByText(/A passkey opens this journal after a Face ID/i))
+      .toBeNull();
+    expect(button()).toBeNull();
+  });
+
+  test("says how to use it on a device that cannot open the journal yet", async () => {
+    routes = 1;
+    await show();
+
+    expect(screen.getByText(/sign in with the same email/i)).toBeTruthy();
+    expect(screen.getByText(/Unlock with a passkey/i)).toBeTruthy();
+  });
+
+  test("but a count it could not read is not treated as a passkey", async () => {
+    // countPasskeyRoutes answers null offline or signed out. Claiming a passkey
+    // exists on that basis would be the interface asserting something it does not
+    // know, which is the failure §6.1b is the account of.
+    routes = null as unknown as number;
+    await show();
+
+    expect(button()).toBeTruthy();
     expect(screen.queryByText(/can open this journal/i)).toBeNull();
   });
 });
@@ -224,6 +259,12 @@ describe("the two failures that are not faults", () => {
 
 describe("when it works", () => {
   test("it says what to do on the other device, in the words that screen uses", async () => {
+    // Asserted after the count has moved, because that is what makes the sentence
+    // durable: `done` is component state and a reload clears it, which is how the
+    // pitch came back in front of somebody who had already enrolled.
+    enrol = async () => {
+      routes = 1;
+    };
     await show();
 
     fireEvent.click(button() as HTMLElement);
@@ -232,34 +273,39 @@ describe("when it works", () => {
     expect(screen.getByText(/Unlock with a passkey/i)).toBeTruthy();
   });
 
-  test("the button stops being the primary action once it has been used", async () => {
+  test("the offer becomes secondary rather than staying the loudest thing", async () => {
     // Reported on the first hardware run: a full-strength "Set up a passkey on this
-    // device" sitting under "Passkey set up" reads as the setup not having taken.
-    // The offer stays, because a second passkey is what §6.1e wants somebody to add,
-    // but it becomes the secondary thing on the screen.
+    // device" under "Passkey set up" reads as the setup not having taken. The offer
+    // stays, because a second passkey is what §6.1e wants somebody to add.
+    enrol = async () => {
+      routes = 1;
+    };
     await show();
 
     fireEvent.click(button() as HTMLElement);
 
-    await waitFor(() => expect(screen.getByText(/Passkey set up/i)).toBeTruthy());
-    expect(button()).toBeNull();
-    const again = screen.getByRole("button", { name: /set up another passkey/i });
+    await waitFor(() => expect(button()).toBeNull());
+    const again = screen.getByRole("button", { name: /add another passkey/i });
     expect(again.className).toBe("miniBtn");
   });
 
-  test("and says where a second one is worth adding, and where it is not", async () => {
-    // The account id is the user handle, so enrolling again on the same password
-    // manager replaces the credential rather than adding one — and leaves the row it
-    // wrote behind as a route nothing can open. Saying so is cheaper than the
-    // support conversation, and §6.5 forbids the row that would let us clean up.
+  test("and says where another one helps, and where it would replace instead", async () => {
+    // The account id is the WebAuthn user handle, so enrolling again in the same
+    // password manager replaces the credential rather than adding one — and leaves
+    // the row already written as a route nothing can open. §6.5 forbids the
+    // credential id that would let the client tidy up, so this is wording or nothing.
+    enrol = async () => {
+      routes = 1;
+    };
     await show();
 
     fireEvent.click(button() as HTMLElement);
 
     await waitFor(() =>
-      expect(screen.getByText(/would replace the one just made/i)).toBeTruthy()
+      expect(screen.getByText(/replaces it rather than adding a way in/i))
+        .toBeTruthy()
     );
-    expect(screen.getByText(/another device, or\s+another password manager/i))
+    expect(screen.getByText(/another device,\s+or another password manager/i))
       .toBeTruthy();
   });
 
