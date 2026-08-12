@@ -422,3 +422,85 @@ describe("a device that was removed and then approved again", () => {
     expect(other.get("removedAt")).toBeGreaterThan(0);
   });
 });
+
+// Taking a row out altogether (12 August 2026). Marking rather than deleting was
+// right while removal was rare — the row kept its name and its date, so the list
+// could answer "what happened to that laptop" months later. Unlocking with a passkey
+// changed the arithmetic: every fresh browser context that unlocks registers itself,
+// so an afternoon of testing left six removed rows above the two devices in use, and
+// a list that is mostly wreckage answers nothing at all.
+//
+// The rule is what these pin: only a row that has already gone, and never this
+// device's own — that one is rewritten on the next sync, so forgetting it would be a
+// control that undoes itself.
+describe("forgetting a row", () => {
+  const rowFor = (id: string, fields: Record<string, unknown>) => {
+    const rec = new Y.Map<unknown>();
+    doc.getMap("devices").set(id, rec);
+    Object.entries(fields).forEach(([k, v]) => rec.set(k, v));
+  };
+
+  test("a removed device goes, and the list loses it", async () => {
+    const devicesStore = await load();
+    devicesStore.touchThisDevice();
+    rowFor("gone", { name: "Chrome (macOS)", removedAt: Date.now() });
+
+    expect(devicesStore.forgetDevice("gone")).toBe(true);
+
+    expect(devicesStore.listDevices().map((d) => d.id)).not.toContain("gone");
+  });
+
+  test("so does one that signed out, which is the same kind of row", async () => {
+    const devicesStore = await load();
+    devicesStore.touchThisDevice();
+    rowFor("left", { name: "Installed app (iOS)", signedOutAt: Date.now() });
+
+    expect(devicesStore.forgetDevice("left")).toBe(true);
+    expect(devicesStore.listDevices().map((d) => d.id)).not.toContain("left");
+  });
+
+  test("a device still in use stays, whatever it is asked", async () => {
+    // The row would be rewritten by that device on its next sync, so this would be a
+    // control that undoes itself within the hour — and looks broken while it does.
+    const devicesStore = await load();
+    devicesStore.touchThisDevice();
+    rowFor("live", { name: "Chrome (macOS)", lastSeen: Date.now() });
+
+    expect(devicesStore.forgetDevice("live")).toBe(false);
+    expect(devicesStore.listDevices().map((d) => d.id)).toContain("live");
+  });
+
+  test("and this device cannot forget itself, even marked", async () => {
+    // Reachable: a device marks itself signed out on the way out, and could be asked
+    // to forget its own row before the teardown finishes.
+    const devicesStore = await load();
+    devicesStore.touchThisDevice();
+    devicesStore.markThisDeviceSignedOut();
+    const here = devicesStore.thisDeviceId();
+
+    expect(devicesStore.forgetDevice(here)).toBe(false);
+    expect(devicesStore.listDevices().map((d) => d.id)).toContain(here);
+  });
+
+  test("a row that is not there is not an error", async () => {
+    const devicesStore = await load();
+
+    expect(devicesStore.forgetDevice("never-existed")).toBe(false);
+  });
+
+  test("all the gone rows at once, and only those", async () => {
+    const devicesStore = await load();
+    devicesStore.touchThisDevice();
+    rowFor("gone-1", { name: "Chrome (macOS)", removedAt: Date.now() });
+    rowFor("gone-2", { name: "Safari (macOS)", removedAt: Date.now() });
+    rowFor("left", { name: "Installed app (iOS)", signedOutAt: Date.now() });
+    rowFor("live", { name: "Chrome (macOS)", lastSeen: Date.now() });
+
+    expect(devicesStore.forgetGoneDevices()).toBe(3);
+
+    const ids = devicesStore.listDevices().map((d) => d.id);
+    expect(ids).toContain("live");
+    expect(ids).toContain(devicesStore.thisDeviceId());
+    expect(ids).toHaveLength(2);
+  });
+});

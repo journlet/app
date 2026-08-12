@@ -314,6 +314,49 @@ export const markDeviceRemoved = (id: string): void => {
   rec.set("removedAt", Date.now());
 };
 
+/**
+ * Take a row out of the register altogether (12 August 2026, Gary).
+ *
+ * Marking rather than deleting was right while removal was rare: the row kept its
+ * name and its date, so the list could still answer "what happened to that laptop"
+ * months later. Unlocking with a passkey changed the arithmetic — every fresh
+ * browser context that unlocks registers itself, so an afternoon of testing left six
+ * removed rows above the two devices actually in use, and a list that is mostly
+ * wreckage answers nothing at all.
+ *
+ * Only a row that has already gone: removed, or signed out. A live device's row is
+ * rewritten by that device on its next sync, so "forgetting" one would be a control
+ * that undoes itself within the hour, and this device's own row would come back
+ * before the screen had finished redrawing.
+ *
+ * Deleting the key is safe in the CRDT sense as well as the honest one. The register
+ * is informational and never a security boundary (see above), a removed device holds
+ * no current key and so writes nothing that could resurrect its row, and a device
+ * that is ever added back registers itself from scratch.
+ */
+export const forgetDevice = (id: string): boolean => {
+  if (id === thisDeviceId()) return false;
+  const rec = devices.get(id);
+  if (!rec) return false;
+  if (!rec.get("removedAt") && !rec.get("signedOutAt")) return false;
+  devices.delete(id);
+  return true;
+};
+
+/** Every row that has already gone, in one action. Returns how many went. */
+export const forgetGoneDevices = (): number => {
+  const gone: string[] = [];
+  devices.forEach((rec, id) => {
+    if (id === thisDeviceId()) return;
+    if (!(rec instanceof Y.Map)) return;
+    if (rec.get("removedAt") || rec.get("signedOutAt")) gone.push(id);
+  });
+  // Deleted after the walk rather than inside it: mutating a Y.Map while iterating it
+  // is the kind of thing that works until the day it does not.
+  gone.forEach((id) => devices.delete(id));
+  return gone.length;
+};
+
 export const onDevicesChange = (fn: () => void): (() => void) => {
   devices.observeDeep(fn);
   return () => devices.unobserveDeep(fn);
