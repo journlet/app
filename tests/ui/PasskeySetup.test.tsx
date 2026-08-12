@@ -232,6 +232,37 @@ describe("when it works", () => {
     expect(screen.getByText(/Unlock with a passkey/i)).toBeTruthy();
   });
 
+  test("the button stops being the primary action once it has been used", async () => {
+    // Reported on the first hardware run: a full-strength "Set up a passkey on this
+    // device" sitting under "Passkey set up" reads as the setup not having taken.
+    // The offer stays, because a second passkey is what §6.1e wants somebody to add,
+    // but it becomes the secondary thing on the screen.
+    await show();
+
+    fireEvent.click(button() as HTMLElement);
+
+    await waitFor(() => expect(screen.getByText(/Passkey set up/i)).toBeTruthy());
+    expect(button()).toBeNull();
+    const again = screen.getByRole("button", { name: /set up another passkey/i });
+    expect(again.className).toBe("miniBtn");
+  });
+
+  test("and says where a second one is worth adding, and where it is not", async () => {
+    // The account id is the user handle, so enrolling again on the same password
+    // manager replaces the credential rather than adding one — and leaves the row it
+    // wrote behind as a route nothing can open. Saying so is cheaper than the
+    // support conversation, and §6.5 forbids the row that would let us clean up.
+    await show();
+
+    fireEvent.click(button() as HTMLElement);
+
+    await waitFor(() =>
+      expect(screen.getByText(/would replace the one just made/i)).toBeTruthy()
+    );
+    expect(screen.getByText(/another device, or\s+another password manager/i))
+      .toBeTruthy();
+  });
+
   test("and counts again, so the screen shows the route it just added", async () => {
     // Read back rather than incremented locally: the count is the server's answer,
     // and a number this screen maintained itself would drift from the table the
