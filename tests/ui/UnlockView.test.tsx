@@ -157,6 +157,39 @@ describe("a device whose request was refused", () => {
     expect(screen.queryByText(/waiting to be added/i)).toBeNull();
   });
 
+  test("but they do go while the journal is being opened", () => {
+    // The one reason the routes are ever hidden, and now the only one: offering
+    // another way in at the moment approval has landed invites somebody to start over
+    // on top of a fetch and a decrypt already underway.
+    renderView({ linkStage: "opening" });
+
+    expect(screen.queryByText(/Unlock this device below/i)).toBeNull();
+    expect(screen.getByText(/Opening your journal/i)).toBeTruthy();
+  });
+
+  test("keeps the ways in that do not need anybody's permission", () => {
+    // Reported 12 August: pressing "do not add it" on the other device replaced this
+    // whole screen with the refusal, so the person was left choosing between asking
+    // again and signing out — with a passkey and their journal key both a tap away
+    // and no longer on screen. A refusal is one route failing, not the screen ending.
+    renderView({ removed: true, linkStage: "declined" });
+
+    expect(screen.getByText(/key entry/i)).toBeTruthy();
+    expect(screen.getByText(/Unlock this device below/i)).toBeTruthy();
+    expect(screen.getByText(/two ways in above still work/i)).toBeTruthy();
+  });
+
+  test("and does not offer to ask twice over", () => {
+    // The refusal card carries "ask again", so the ordinary offer stands down rather
+    // than sitting under it saying the same thing in different words.
+    renderView({ linkStage: "declined" });
+
+    expect(
+      screen.queryByRole("button", { name: /ask a device you already use/i })
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: /ask again/i })).toBeTruthy();
+  });
+
   test("offers both ways out: ask again, or sign out", () => {
     // Gary asked for exactly these two. Signing out is the only thing that erases
     // the copy held here, so it says so.
