@@ -18,13 +18,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { countPasskeyRoutes, enrolPasskey } from "../store/sync";
-import {
-  CredentialRefusedError,
-  PrfUnsupportedError,
-  probeCredentialSupport,
-  relyingPartyId,
-} from "../lib/prf";
+import { probeCredentialSupport, relyingPartyId } from "../lib/prf";
 import type { PrfCapability } from "../lib/prf";
+import { enrolFailureMessage } from "../lib/passkeyMessages";
 
 /**
  * Why this browser cannot offer a passkey, or null when it can.
@@ -103,18 +99,8 @@ export default function PasskeySetup({
       setAdding(false);
       refreshCount();
     } catch (e) {
-      if (e instanceof PrfUnsupportedError)
-        setProblem(
-          "That passkey was created, but this password manager cannot produce the secret Journlet needs, so nothing was saved. A limit of the password manager rather than a fault, and retrying will not change it. Delete the passkey it just made; your journal key still opens this journal, and a passkey in a different password manager would too."
-        );
-      else if (e instanceof CredentialRefusedError)
-        setProblem(
-          "Nothing was set up and nothing has changed. That is what you see if the prompt was cancelled or timed out — or, in Safari on a Mac, if iCloud Keychain is switched off, which stops one being created at all. The system does not say which, on purpose."
-        );
-      else
-        setProblem(
-          e instanceof Error ? e.message : "The passkey was not set up."
-        );
+      // Shared with the first-run screen, which says the same three things.
+      setProblem(enrolFailureMessage(e));
     } finally {
       setBusy(false);
     }

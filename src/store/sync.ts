@@ -71,6 +71,7 @@ import {
   stashKey,
   stashKeyFromUrl,
 } from "../lib/pendingKey";
+import { markKeySaved } from "../lib/keySaved";
 import { markRecoveryPending } from "../lib/recoveryAck";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import {
@@ -1111,6 +1112,10 @@ const adoptJournalKey = async (code: string): Promise<void> => {
   const keeperKey = await importJournalKeyCode(code);
   try {
     await adoptKeeperKey(keeperKey);
+    // Somebody who has just typed or scanned the code plainly has it, so the
+    // reminder on the Sync screen has nothing to ask this device (§12.1 phase 5).
+    // Only on this path: a passkey unlock proves nothing about where the code is.
+    markKeySaved();
   } catch (e) {
     // The wording for someone who has just typed sixteen characters, and the only
     // thing this path adds over the shared one. SyncView shows the message.

@@ -583,3 +583,56 @@ describe("a device that does not hold the journal key", () => {
     ).toBeNull();
   });
 });
+
+// The nag (spec §6.1e, §12.1 phase 5). First run forces neither the passkey nor the
+// code, and this line is what makes that safe: it stays until the key has been
+// saved once. The wording is the load-bearing part, because a reminder that reads
+// like a check somebody has failed sends them looking for the setting that turns it
+// off — and there is none, since nothing here can see where a code has been put.
+describe("the reminder to save the journal key", () => {
+  beforeEach(() => {
+    canEnrol = true;
+    localStorage.clear();
+  });
+
+  test("shows on a device that holds the key and has not saved it", () => {
+    render(<SyncView />);
+
+    expect(screen.getByText(/not saved yet, as far as this device can tell/i))
+      .toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /I have saved it/i })
+    ).toBeTruthy();
+  });
+
+  test("says why it cannot know, and that another device does not clear it", () => {
+    // Both halves are honest limits rather than manners: the flag is local because
+    // §6.5 forbids the server holding it and the journal doc is per volume, so a
+    // save on the Mac genuinely cannot silence the phone.
+    render(<SyncView />);
+
+    expect(screen.getByText(/Nothing here can see where you keep it/i)).toBeTruthy();
+    expect(screen.getByText(/saving it from another device does not clear/i))
+      .toBeTruthy();
+  });
+
+  test("goes when told it is done, and stays gone", () => {
+    render(<SyncView />);
+
+    fireEvent.click(screen.getByRole("button", { name: /I have saved it/i }));
+
+    expect(screen.queryByText(/not saved yet/i)).toBeNull();
+    cleanup();
+    render(<SyncView />);
+    expect(screen.queryByText(/not saved yet/i)).toBeNull();
+  });
+
+  test("never appears on a device that cannot produce the key", () => {
+    // A device linked by approval has nothing to save, so reminding it to save
+    // something would be an instruction it cannot follow.
+    canEnrol = false;
+    render(<SyncView />);
+
+    expect(screen.queryByText(/not saved yet/i)).toBeNull();
+  });
+});
