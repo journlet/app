@@ -80,8 +80,13 @@ export default function UnlockView({
         </p>
       )}
 
-      {/* Hidden while opening: offering another way in at the moment one has
-          succeeded invites someone to start over on top of work already underway.
+      {/* Hidden while opening, and only then: offering another way in at the moment
+          one has succeeded invites someone to start over on top of work already
+          underway. A refusal used to hide them too, which was the wrong way round —
+          somebody whose approval request was turned down is left with the two routes
+          that do not need anybody's permission, and taking them off the screen at
+          exactly that moment left a card offering to ask again or to sign out and
+          erase (Gary, 12 August).
 
           The ways in, in the order they are worth trying, and the order is the
           point of this screen since 12 August 2026 (Gary, on the first unlock run).
@@ -90,7 +95,7 @@ export default function UnlockView({
           somebody to press a button on it. Approval used to be first, and to have
           happened already before anybody read a word of this, which is why it moved
           and why it waits to be asked for. */}
-      {!opening && !declined && (
+      {!opening && (
         <>
           <p style={S.onboardLede}>
             Unlock this device below: with a passkey, if you set one up, or with your
@@ -121,7 +126,8 @@ export default function UnlockView({
           </div>
           <p style={{ ...S.onboardLede, marginTop: 4 }}>
             The request was turned down, or it ran out of time. Nothing was shared
-            with this device. You can ask again, or sign out and leave it.
+            with this device. The two ways in above still work; you can also ask
+            again, or sign out and leave it.
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="miniBtn" disabled={asking} onClick={onAskAgain}>
