@@ -89,14 +89,29 @@ interface PrfExtensionResults {
 export const relyingPartyId = (hostname: string): string | undefined =>
   /(^|\.)journlet\.com$/.test(hostname) ? "journlet.com" : undefined;
 
-/** Whether enrolment is worth offering at all, before anything is created. */
+/** Whether a passkey is worth offering at all, before anything is created. */
 export interface PrfCapability {
   /** WebAuthn refuses outside a secure context, and says so unhelpfully. */
   secureContext: boolean;
   webauthn: boolean;
-  /** A built-in authenticator, which is what makes this a Face ID affordance. */
+  /**
+   * A built-in authenticator — Touch ID, Face ID, Windows Hello, a device PIN.
+   *
+   * Reported because it changes what to *say*, and deliberately not part of
+   * `usable`: a device without one can still use a passkey held on a phone, by
+   * scanning a QR code when the platform offers it. Requiring this was a real
+   * mistake, found on a Mac with no Touch ID that was offered no passkey route at
+   * all while a passkey that would have opened it sat on the phone in the same room
+   * (Gary, 12 August 2026). It removed the one route the design exists for.
+   */
   platformAuthenticator: boolean;
-  /** True only if all three above hold. PRF itself cannot be probed; see below. */
+  /**
+   * Worth offering: a secure context and WebAuthn.
+   *
+   * Not PRF, which cannot be probed at all, and not a built-in authenticator, which
+   * is a matter of which sheet the platform shows rather than whether to offer the
+   * route.
+   */
   usable: boolean;
 }
 
@@ -104,7 +119,10 @@ export interface PrfCapability {
  * What can be known without creating anything.
  *
  * Deliberately not called "prfSupported", because PRF support is exactly the
- * thing this cannot answer. Chrome reports `prf.enabled` at creation and Safari
+ * thing this cannot answer, and it does not answer "is there a fingerprint reader"
+ * either: a device with no built-in check can still reach a passkey on a phone
+ * through the platform's own cross-device flow, so that fact is reported for the
+ * wording and kept out of the decision. Chrome reports `prf.enabled` at creation and Safari
  * does not, so the only reliable test is to create a credential and try to derive
  * from it. This answers the cheaper question of whether it is worth asking the
  * person at all, so a browser that cannot do any of it is never offered a button
@@ -128,7 +146,7 @@ export const probeCredentialSupport = async (): Promise<PrfCapability> => {
     secureContext,
     webauthn,
     platformAuthenticator,
-    usable: secureContext && webauthn && platformAuthenticator,
+    usable: secureContext && webauthn,
   };
 };
 

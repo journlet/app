@@ -20,6 +20,8 @@ import { CredentialRefusedError, PrfUnsupportedError } from "../../src/lib/prf";
 let routes = 0;
 let enrol: () => Promise<void> = async () => {};
 let usable = true;
+/** Whether this device has a built-in check. Independent of `usable` since 12 Aug. */
+let localCheck = true;
 /** Ids the store was told to delete, and what replacing does when it is called. */
 let replaced = 0;
 let replace: () => Promise<void> = async () => {
@@ -38,14 +40,16 @@ vi.mock("../../src/lib/prf", async (importOriginal) => ({
   probeCredentialSupport: async () => ({
     secureContext: true,
     webauthn: usable,
-    platformAuthenticator: usable,
+    platformAuthenticator: localCheck,
     usable,
   }),
 }));
 
-const { default: PasskeySetup, capabilityMessage } = await import(
-  "../../src/ui/PasskeySetup"
-);
+const {
+  default: PasskeySetup,
+  capabilityMessage,
+  noLocalCheckNote,
+} = await import("../../src/ui/PasskeySetup");
 
 const show = async (canEnrol = true) => {
   render(
@@ -74,6 +78,7 @@ const servedFrom = (hostname: string): void => {
 beforeEach(() => {
   routes = 0;
   usable = true;
+  localCheck = true;
   enrol = async () => {};
   replaced = 0;
   replace = async () => {
@@ -264,6 +269,14 @@ describe("when it must not offer the button", () => {
     expect(screen.getByText(/only be set up on journlet.com/i)).toBeTruthy();
   });
 
+  test("but a device with no built-in check is still offered it, with a note", async () => {
+    localCheck = false;
+    await show();
+
+    expect(button()).toBeTruthy();
+    expect(screen.getByText(/use your phone or a security key/i)).toBeTruthy();
+  });
+
   test("a browser that cannot do it at all", async () => {
     usable = false;
     await show();
@@ -272,11 +285,10 @@ describe("when it must not offer the button", () => {
     expect(screen.getByText(/does not support passkeys/i)).toBeTruthy();
   });
 
-  test("and the three reasons are three different sentences", () => {
-    // Different answers for the person: an insecure origin is a deployment
-    // problem, no WebAuthn wants another browser, no platform authenticator wants
-    // another device. One message for all three would send someone after the
-    // wrong fix.
+  test("and the two reasons are two different sentences", () => {
+    // Different answers for the person: an insecure origin is a deployment problem
+    // and no WebAuthn wants another browser. One message for both would send
+    // somebody after the wrong fix.
     const base = {
       secureContext: true,
       webauthn: true,
@@ -287,10 +299,24 @@ describe("when it must not offer the button", () => {
     expect(capabilityMessage({ ...base, webauthn: false })).toMatch(
       /does not support passkeys/i
     );
-    expect(capabilityMessage({ ...base, platformAuthenticator: false })).toMatch(
-      /Face ID, Touch ID, Windows Hello or device PIN/i
-    );
     expect(capabilityMessage(base)).toBeNull();
+  });
+
+  test("and no built-in check is not one of them", () => {
+    // The correction of 12 August. A Mac with no Touch ID was told a passkey "cannot
+    // be set up here" and shown no button, while the passkey that would have opened
+    // it sat on the phone beside it: the platform offers to use that phone, and this
+    // check was refusing the design's central case on its behalf.
+    const base = {
+      secureContext: true,
+      webauthn: true,
+      platformAuthenticator: false,
+      usable: true,
+    };
+
+    expect(capabilityMessage(base)).toBeNull();
+    expect(noLocalCheckNote(base)).toMatch(/use your phone or a security key/i);
+    expect(noLocalCheckNote({ ...base, platformAuthenticator: true })).toBeNull();
   });
 });
 

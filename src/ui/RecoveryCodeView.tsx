@@ -110,8 +110,8 @@ export default function RecoveryCodeView({
           <div style={ST.boxLabel}>The quick way</div>
           <p style={{ ...S.onboardLede, marginTop: 0 }}>
             A passkey opens your journal on any device your password manager
-            reaches, after a Face ID, Touch ID or device PIN check. Nothing to
-            write down.
+            reaches, after a Face ID, Touch ID or device PIN check — or, on a device
+            with none of those, by using your phone. Nothing to write down.
           </p>
           {enrolled ? (
             <p style={{ ...S.onboardLede, marginBottom: 0, fontWeight: 600 }}>

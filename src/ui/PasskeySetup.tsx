@@ -40,10 +40,23 @@ export const capabilityMessage = (c: PrfCapability): string | null => {
     return "Passkeys need a secure (https) connection, and this page is not on one, so none can be set up here.";
   if (!c.webauthn)
     return "This browser does not support passkeys. Your journal key works everywhere, so nothing is lost — and a passkey set up in another browser will not help this one, since passkeys are held by the browser or password manager rather than by Journlet.";
-  if (!c.platformAuthenticator)
-    return "This device has no built-in way to check that it is you — no Face ID, Touch ID, Windows Hello or device PIN — so a passkey cannot be set up here.";
   return null;
 };
+
+/**
+ * What to add when a passkey here will mean using something else, or null.
+ *
+ * A note rather than a refusal, which is the correction (Gary, 12 August 2026). This
+ * device having no fingerprint reader says nothing about whether a passkey can be used
+ * here: the platform offers a phone or a security key instead, and on an account whose
+ * passkey already lives on a phone that is exactly the route wanted. It used to say "a
+ * passkey cannot be set up here" and hide the button, which left a Mac with no Touch ID
+ * unable to reach a credential sitting in the same room.
+ */
+export const noLocalCheckNote = (c: PrfCapability): string | null =>
+  c.usable && !c.platformAuthenticator
+    ? "This device has no built-in way to check that it is you — no Face ID, Touch ID, Windows Hello or device PIN — so you will be asked to use your phone or a security key instead."
+    : null;
 
 const routeCount = (n: number): string =>
   n === 1 ? "1 passkey can open this journal." : `${n} passkeys can open this journal.`;
@@ -125,6 +138,7 @@ export default function PasskeySetup({
   };
 
   const cannot = capability ? capabilityMessage(capability) : null;
+  const noLocalCheck = capability ? noLocalCheckNote(capability) : null;
   /**
    * Anywhere but journlet.com, enrolment is disabled rather than pointed somewhere
    * else — the Relying Party ID cannot be changed later, and §12.1 makes this
@@ -273,6 +287,9 @@ export default function PasskeySetup({
               {/* Before the button, not after the second sheet appears. Two prompts
                   read as one having failed unless somebody has been told to expect
                   them (found while building phase 3a, spec §6.1e). */}
+              {noLocalCheck && (
+                <p style={{ ...textStyle, fontSize: 13 }}>{noLocalCheck}</p>
+              )}
               <p style={{ ...textStyle, ...(enrolled ? { fontSize: 13 } : {}) }}>
                 Two prompts follow: one to create the passkey, one to use it. Both
                 are needed — the second is not a sign the first failed.

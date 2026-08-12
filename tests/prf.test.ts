@@ -72,7 +72,12 @@ describe("what can be known before creating anything", () => {
     });
   });
 
-  test("unusable with no platform authenticator", async () => {
+  test("no built-in authenticator is reported, and does not make it unusable", async () => {
+    // Corrected 12 August 2026. A Mac with no Touch ID was offered no passkey route
+    // at all, while the passkey that would have opened it sat on the phone beside it:
+    // the platform offers to use that phone, and this check was refusing the design's
+    // central case on its behalf. So the fact is reported, for the wording, and kept
+    // out of the decision.
     vi.stubGlobal("isSecureContext", true);
     vi.stubGlobal("PublicKeyCredential", {
       isUserVerifyingPlatformAuthenticatorAvailable: async () => false,
@@ -81,14 +86,15 @@ describe("what can be known before creating anything", () => {
     await expect(probeCredentialSupport()).resolves.toMatchObject({
       webauthn: true,
       platformAuthenticator: false,
-      usable: false,
+      usable: true,
     });
   });
 
   test("a probe that throws is an answer, not an error", async () => {
     // Some builds reject rather than resolving false, and a screen that cannot
     // render because a capability check threw is worse than one that offers
-    // nothing.
+    // nothing. Treated as "no built-in check" rather than "no passkeys": the same
+    // correction as above, and the same reason.
     vi.stubGlobal("isSecureContext", true);
     vi.stubGlobal("PublicKeyCredential", {
       isUserVerifyingPlatformAuthenticatorAvailable: async () => {
@@ -97,6 +103,17 @@ describe("what can be known before creating anything", () => {
     });
 
     await expect(probeCredentialSupport()).resolves.toMatchObject({
+      platformAuthenticator: false,
+      usable: true,
+    });
+  });
+
+  test("and unusable without WebAuthn at all, which is a different thing", async () => {
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("PublicKeyCredential", undefined);
+
+    await expect(probeCredentialSupport()).resolves.toMatchObject({
+      webauthn: false,
       usable: false,
     });
   });
