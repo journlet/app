@@ -73,6 +73,10 @@ export default function PasskeySetup({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  /** Whether the explanation is showing, on an account that has a passkey. */
+  const [details, setDetails] = useState(false);
+  /** Whether the add-another step is open, which is where its warnings live. */
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     void probeCredentialSupport().then(setCapability);
@@ -92,9 +96,11 @@ export default function PasskeySetup({
     setBusy(true);
     try {
       await enrolPasskey();
-      setDone(
-        "Passkey set up. On another device: sign in with the same email, then choose “Unlock with a passkey”."
-      );
+      // Short, because the box now says the rest of it for as long as the passkey
+      // exists rather than only until the next reload.
+      setDone("Passkey set up.");
+      // Back to the one-line state, which the new count will now describe.
+      setAdding(false);
       refreshCount();
     } catch (e) {
       if (e instanceof PrfUnsupportedError)
@@ -123,27 +129,66 @@ export default function PasskeySetup({
    */
   const wrongHost = relyingPartyId(location.hostname) === undefined;
 
+  /**
+   * Whether this account already has a passkey, which changes what the box is for.
+   *
+   * With none, it is an offer and has to explain itself. With one, explaining is
+   * the wrong thing: a reload put the pitch and a full-strength "Set up a passkey"
+   * back in front of somebody who had just set one up, which reads as it not having
+   * worked (Gary, second hardware run). The `done` message could not fix that on
+   * its own, because it is component state and a reload clears it — the durable
+   * answer is the count, which is the one thing the server can tell us.
+   *
+   * Null means the count could not be read. Treated as "no passkey" so the box
+   * still offers something rather than claiming a state it does not know.
+   */
+  const enrolled = routes !== null && routes > 0;
+
   return (
     <div style={boxStyle}>
       <div style={labelStyle}>Passkey unlock</div>
-      <p style={{ ...textStyle, marginTop: 0 }}>
-        A passkey opens this journal after a Face ID, Touch ID or device PIN
-        check, instead of typing the journal key. Set one up wherever you
-        journal: any single passkey opens it, and none is the main one.
-      </p>
-      {/* Said plainly because it is the cost of the design, not a footnote. The
-          server holds the key wrapped and nothing else, so a passkey cannot be
-          recovered from Journlet if the password manager holding it is lost. */}
-      <p style={textStyle}>
-        Passkeys live in your password manager, not on our server. Keep your
-        journal key too: it is what opens the journal if a passkey is lost.
-      </p>
 
-      {routes !== null && routes > 0 && (
-        <p style={textStyle}>
-          {routeCount(routes)} The server cannot tell them apart, or see what
-          kind they are.
-        </p>
+      {enrolled ? (
+        <>
+          {/* One line by default. Everything this box explained on the way to the
+              first passkey is answering a question nobody is asking any more, and
+              the Journal key box directly below already carries the keep-it-safe
+              warning in stronger terms. So the state, and the rest on request. */}
+          <p style={{ ...textStyle, marginTop: 0, marginBottom: 0, fontWeight: 600 }}>
+            {routeCount(routes)}
+          </p>
+          {details && (
+            <>
+              <p style={textStyle}>
+                On a device that cannot open the journal yet: sign in with the same
+                email, then choose “Unlock with a passkey”.
+              </p>
+              {/* The honest limit, and the reason the line above is a count rather
+                  than "this device is set up": §6.5 keeps which device or password
+                  manager holds each one off the server deliberately. */}
+              <p style={{ ...textStyle, marginBottom: 0 }}>
+                Which device or password manager holds each one is not recorded on
+                the server, so this cannot tell you whether one of them is in this
+                browser.
+              </p>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <p style={{ ...textStyle, marginTop: 0 }}>
+            A passkey opens this journal after a Face ID, Touch ID or device PIN
+            check, instead of typing the journal key. Set one up wherever you
+            journal: any single passkey opens it, and none is the main one.
+          </p>
+          {/* Said plainly because it is the cost of the design, not a footnote. The
+              server holds the key wrapped and nothing else, so a passkey cannot be
+              recovered from Journlet if the password manager holding it is lost. */}
+          <p style={textStyle}>
+            Passkeys live in your password manager, not on our server. Keep your
+            journal key too: it is what opens the journal if a passkey is lost.
+          </p>
+        </>
       )}
 
       {!canEnrol ? (
@@ -167,42 +212,62 @@ export default function PasskeySetup({
         <p style={{ ...textStyle, marginBottom: 0 }}>{cannot}</p>
       ) : (
         <>
-          {/* The confirmation goes above the button, and the button stops being the
-              primary action once it has been used. Left as it was, a full-strength
-              "Set up a passkey on this device" sitting under "Passkey set up" reads
-              as the setup not having taken (Gary, on the first hardware run). */}
-          {done && (
-            <p style={{ ...textStyle, fontWeight: 600 }}>{done}</p>
-          )}
-          {/* Before the button, not after the second sheet appears. Two prompts
-              read as one having failed unless somebody has been told to expect
-              them (found while building phase 3a, spec §6.1e). */}
-          <p style={textStyle}>
-            Two prompts follow: one to create the passkey, one to use it. Both
-            are needed — the second is not a sign the first failed.
-          </p>
-          <button
-            className={done ? "miniBtn" : "addBtn"}
-            disabled={busy}
-            onClick={setUp}
-          >
-            {busy
-              ? "setting up…"
-              : done
-                ? "set up another passkey"
-                : "Set up a passkey on this device"}
-          </button>
-          {/* Kept rather than hidden, because a second passkey is the thing §6.1e
-              wants somebody to add — but only where the first one does not reach.
-              Doing it again here would replace the passkey just made, since the
-              account id is the user handle, and leave behind a saved route that
-              can never be opened again. */}
-          {done && (
-            <p style={{ ...textStyle, marginBottom: 0, fontSize: 13 }}>
-              Worth doing where this passkey cannot reach — another device, or
-              another password manager. Setting one up again here would replace
-              the one just made rather than add a second way in.
-            </p>
+          {done && <p style={{ ...textStyle, fontWeight: 600 }}>{done}</p>}
+
+          {/* On an account with a passkey, adding another is two taps: the first
+              reveals what to expect, the second does it. The warnings have to come
+              before the platform sheets — one about the two prompts, one about
+              re-using the same password manager — and putting them on screen
+              permanently is what made this box a wall of text. */}
+          {enrolled && !adding ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              <button className="miniBtn" onClick={() => setAdding(true)}>
+                add another passkey
+              </button>
+              <button className="miniBtn" onClick={() => setDetails(!details)}>
+                {details ? "hide details" : "what this means"}
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Before the button, not after the second sheet appears. Two prompts
+                  read as one having failed unless somebody has been told to expect
+                  them (found while building phase 3a, spec §6.1e). */}
+              <p style={{ ...textStyle, ...(enrolled ? { fontSize: 13 } : {}) }}>
+                Two prompts follow: one to create the passkey, one to use it. Both
+                are needed — the second is not a sign the first failed.
+              </p>
+              {/* The account id is the WebAuthn user handle, so a second enrolment
+                  in the same password manager replaces the credential rather than
+                  adding one — and leaves the row already written as a route nothing
+                  can open. §6.5 forbids the credential id that would let the client
+                  tidy that up, so saying so is the whole of the remedy. */}
+              {enrolled && (
+                <p style={{ ...textStyle, fontSize: 13 }}>
+                  Worth adding where the ones you have cannot reach — another
+                  device, or another password manager. Setting one up again in the
+                  same password manager replaces it rather than adding a way in.
+                </p>
+              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className={enrolled ? "miniBtn" : "addBtn"}
+                  disabled={busy}
+                  onClick={setUp}
+                >
+                  {busy
+                    ? "setting up…"
+                    : enrolled
+                      ? "set up another passkey"
+                      : "Set up a passkey on this device"}
+                </button>
+                {enrolled && !busy && (
+                  <button className="miniBtn" onClick={() => setAdding(false)}>
+                    cancel
+                  </button>
+                )}
+              </div>
+            </>
           )}
         </>
       )}
