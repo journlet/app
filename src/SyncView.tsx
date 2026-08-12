@@ -32,6 +32,7 @@ import {
 import type { SyncStatus } from "./store/sync";
 import { listDevices, onDevicesChange } from "./store/devices";
 import type { DeviceRecord } from "./store/devices";
+import { keySaved, markKeySaved } from "./lib/keySaved";
 import { pendingJournalKey } from "./lib/pendingKey";
 import {
   looksLikeJournalKey,
@@ -170,6 +171,14 @@ export default function SyncView() {
   };
 
   const [noKeyHere, setNoKeyHere] = useState(false);
+  /**
+   * Whether this device still has to remind somebody to save the journal key.
+   *
+   * Read once at mount and then held, rather than re-read on every render: it is a
+   * localStorage flag this component is also the only writer of, so re-reading
+   * would be doing storage work on every keystroke in the fields above.
+   */
+  const [nagging, setNagging] = useState(() => !keySaved());
   /** Whether the journal key entry is open on a device that does not hold one. */
   const [keyTaking, setKeyTaking] = useState(false);
 
@@ -209,6 +218,11 @@ export default function SyncView() {
     if (!keyCode) return;
     await navigator.clipboard.writeText(keyCode);
     setCopied(true);
+    // The closest thing to evidence available, and better than asking: a copy or a
+    // download is somebody putting the key somewhere, where the button below is
+    // somebody saying so.
+    markKeySaved();
+    setNagging(false);
   };
 
   const downloadKey = () => {
@@ -227,6 +241,8 @@ export default function SyncView() {
     a.download = "journlet-journal-key.txt";
     a.click();
     URL.revokeObjectURL(a.href);
+    markKeySaved();
+    setNagging(false);
   };
 
   const submitKey = async () => {
@@ -582,6 +598,29 @@ export default function SyncView() {
               if you lose every device and this key, your journal cannot be
               recovered by anyone.
             </p>
+            {/* The nag (spec §6.1e, §12.1 phase 5). Not a gate anywhere: first run
+                offers this and the passkey and forces neither, and this line is
+                what makes that safe. It says why it cannot know, because a
+                reminder that looks like a check somebody has failed invites them
+                to look for the setting that turns it off. */}
+            {nagging && !noKey && (
+              <p style={{ ...ST.p, fontWeight: 600 }}>
+                Your journal key is not saved yet, as far as this device can tell.
+                Nothing here can see where you keep it, so this line stays until
+                you say it is done — saving it from another device does not clear
+                it here.{" "}
+                <button
+                  className="miniBtn"
+                  style={{ marginLeft: 4 }}
+                  onClick={() => {
+                    markKeySaved();
+                    setNagging(false);
+                  }}
+                >
+                  I have saved it
+                </button>
+              </p>
+            )}
             {keyCode ? (
               <>
                 {qrUrl && (
