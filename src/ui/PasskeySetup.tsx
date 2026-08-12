@@ -167,6 +167,13 @@ export default function PasskeySetup({
         <p style={{ ...textStyle, marginBottom: 0 }}>{cannot}</p>
       ) : (
         <>
+          {/* The confirmation goes above the button, and the button stops being the
+              primary action once it has been used. Left as it was, a full-strength
+              "Set up a passkey on this device" sitting under "Passkey set up" reads
+              as the setup not having taken (Gary, on the first hardware run). */}
+          {done && (
+            <p style={{ ...textStyle, fontWeight: 600 }}>{done}</p>
+          )}
           {/* Before the button, not after the second sheet appears. Two prompts
               read as one having failed unless somebody has been told to expect
               them (found while building phase 3a, spec §6.1e). */}
@@ -174,15 +181,32 @@ export default function PasskeySetup({
             Two prompts follow: one to create the passkey, one to use it. Both
             are needed — the second is not a sign the first failed.
           </p>
-          <button className="addBtn" disabled={busy} onClick={setUp}>
-            {busy ? "setting up…" : "Set up a passkey on this device"}
+          <button
+            className={done ? "miniBtn" : "addBtn"}
+            disabled={busy}
+            onClick={setUp}
+          >
+            {busy
+              ? "setting up…"
+              : done
+                ? "set up another passkey"
+                : "Set up a passkey on this device"}
           </button>
+          {/* Kept rather than hidden, because a second passkey is the thing §6.1e
+              wants somebody to add — but only where the first one does not reach.
+              Doing it again here would replace the passkey just made, since the
+              account id is the user handle, and leave behind a saved route that
+              can never be opened again. */}
+          {done && (
+            <p style={{ ...textStyle, marginBottom: 0, fontSize: 13 }}>
+              Worth doing where this passkey cannot reach — another device, or
+              another password manager. Setting one up again here would replace
+              the one just made rather than add a second way in.
+            </p>
+          )}
         </>
       )}
 
-      {done && (
-        <p style={{ ...textStyle, marginBottom: 0, fontWeight: 600 }}>{done}</p>
-      )}
       {problem && <p style={{ ...textStyle, marginBottom: 0 }}>{problem}</p>}
     </div>
   );
