@@ -1127,6 +1127,31 @@ export const provideJournalKey = async (code: string): Promise<void> => {
 };
 
 /**
+ * Give the journal key to a device that is already syncing without it.
+ *
+ * A device linked by approval holds a wrapped data key and never held the keeper
+ * key, so it can read and write the journal and cannot do the three things that
+ * need the keeper key: add a passkey, show the key, remove another device. Until
+ * now there was no way to change that — the key entry lives on the unlock screen,
+ * which a working device never sees — so such a device stayed second-class unless
+ * it was signed out and linked again. That gap is what made "this device cannot
+ * set one up" read as a fault with no remedy (Gary, third hardware run).
+ *
+ * Separate from provideJournalKey for one reason, and it is not cosmetic. Adopting
+ * reduces the keyring to epoch 0, because that is all a keeper key proves on its
+ * own, and doConnect early-outs on a device that is already connected — so the
+ * connect that is supposed to collect the later epochs would return immediately
+ * and leave this device holding a key for an epoch the account has moved past.
+ * Dropping the connection first is what makes the reconnect real, and it is the
+ * same move explainMissingKey makes for the same reason.
+ */
+export const takeJournalKey = async (code: string): Promise<void> => {
+  await adoptJournalKey(code);
+  dropConnection();
+  await connect();
+};
+
+/**
  * Take a journal key that has just arrived, from a QR scan or a paste, and do
  * whatever is possible with it now.
  *

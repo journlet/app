@@ -8,7 +8,7 @@
 // not a lock" wording has gone.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const EMAIL = "gary@example.com";
 
@@ -42,6 +42,7 @@ vi.mock("../../src/store/sync", () => ({
   },
   provideJournalKey: vi.fn(),
   canEnrolPasskey: () => canEnrol,
+  takeJournalKey: (...a: unknown[]) => takeJournalKey(...(a as [string])),
   countPasskeyRoutes: async () => passkeyRoutes,
   enrolPasskey: vi.fn(),
   unlockWithPasskey: vi.fn(),
@@ -67,6 +68,8 @@ let canRemove = false;
  * it is separate there: one is about rotating and the other about wrapping.
  */
 let canEnrol = false;
+/** Handing this device the journal key it never had. */
+const takeJournalKey = vi.fn(async (_code: string) => {});
 let passkeyRoutes = 0;
 
 interface Row {
@@ -482,5 +485,101 @@ describe("the device register", () => {
     render(<SyncView />);
 
     expect(screen.getByText(/No devices recorded yet/i)).toBeTruthy();
+  });
+});
+
+// A device linked by approval holds the data key and never held the journal key,
+// so it cannot show the key, add a passkey, or remove another device. Until
+// takeJournalKey there was nothing it could do about that: the key entry lives on
+// the unlock screen, which a working device never sees, so the screen stated a
+// permanent second class and called it an explanation. Reported from a phone in
+// exactly that state, as "I don't understand how to resolve this".
+describe("a device that does not hold the journal key", () => {
+  beforeEach(() => {
+    canEnrol = false;
+  });
+
+  test("says what it cannot do, before anything is pressed", () => {
+    // Not behind "show journal key" any more. The condition is known at render, and
+    // making somebody press a button to be told it does nothing is the no-guessing
+    // rule broken twice over.
+    render(<SyncView />);
+
+    // Two boxes mention it, deliberately: the passkey box points down at the
+    // remedy, and this one carries it.
+    expect(screen.getByText(/what it needs to read your\s+journal and nothing more/i))
+      .toBeTruthy();
+    expect(screen.getByText(/cannot show the key, add a\s+passkey, or remove/i))
+      .toBeTruthy();
+    expect(screen.queryByRole("button", { name: /show journal key/i })).toBeNull();
+  });
+
+  test("and offers the one thing that resolves it", () => {
+    render(<SyncView />);
+
+    expect(
+      screen.getByRole("button", { name: /enter journal key/i })
+    ).toBeTruthy();
+  });
+
+  test("saying where to find the key, and that nothing here is lost", () => {
+    // The old wording named "the device that created the journal" as the only one
+    // that could show it, which stopped being true with §6.1e: any device holding
+    // the key can. And somebody about to type a key into a working device wants to
+    // know it will not wipe what is on it.
+    render(<SyncView />);
+
+    fireEvent.click(screen.getByRole("button", { name: /enter journal key/i }));
+
+    expect(screen.getByText(/Sync → show\s+journal key/i)).toBeTruthy();
+    expect(screen.getByText(/keeps\s+everything it already has/i)).toBeTruthy();
+  });
+
+  test("takes the key it is given, through the path made for a connected device", () => {
+    // takeJournalKey rather than provideJournalKey: this device is already
+    // connected, so the connect that collects the later epochs has to be forced.
+    render(<SyncView />);
+    fireEvent.click(screen.getByRole("button", { name: /enter journal key/i }));
+
+    fireEvent.change(screen.getByLabelText(/journal key/i), {
+      target: { value: "J1-ABCD-EFGH-JKMN" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /give this device the journal key/i })
+    );
+
+    expect(takeJournalKey).toHaveBeenCalledWith("J1-ABCD-EFGH-JKMN");
+  });
+
+  test("a key that does not fit says so and leaves the entry open", () => {
+    takeJournalKey.mockRejectedValueOnce(
+      new Error("That journal key does not match this account's journal")
+    );
+    render(<SyncView />);
+    fireEvent.click(screen.getByRole("button", { name: /enter journal key/i }));
+    fireEvent.change(screen.getByLabelText(/journal key/i), {
+      target: { value: "J1-WRON-GKEY-XXXX" },
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /give this device the journal key/i })
+    );
+
+    return waitFor(() => {
+      expect(screen.getByText(/does not match this account/i)).toBeTruthy();
+      expect(screen.getByLabelText(/journal key/i)).toBeTruthy();
+    });
+  });
+
+  test("a device that does hold the key is offered showing it instead", () => {
+    canEnrol = true;
+    render(<SyncView />);
+
+    expect(
+      screen.getByRole("button", { name: /show journal key/i })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /enter journal key/i })
+    ).toBeNull();
   });
 });

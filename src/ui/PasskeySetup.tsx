@@ -195,11 +195,14 @@ export default function PasskeySetup({
         // A device linked by approval never held the keeper key, and wrapping needs
         // it. Said rather than offered and failed: the button would be an action
         // that cannot work, which is the no-guessing rule broken (§4.1).
+        // Pointing down at the Journal key box rather than explaining it here.
+        // The old wording said what this device could not do and then gave advice
+        // that could not be followed on it, which is the shape of half-truth §6.1b
+        // is the account of. The remedy lives one box below.
         <p style={{ ...textStyle, marginBottom: 0 }}>
-          This device cannot set one up: it does not hold the journal key itself,
-          having been added by another device. Set a passkey up on a device that
-          can show the journal key, and it will open this journal here too if the
-          two share a password manager.
+          This device cannot add one: it does not hold the journal key itself,
+          having been added by another device. You can give it the key under
+          Journal key below, and then it can.
         </p>
       ) : wrongHost ? (
         <p style={{ ...textStyle, marginBottom: 0 }}>
