@@ -42,6 +42,12 @@ export default function PasskeyUnlock({ textStyle }: PasskeyUnlockProps) {
     // all, and can this browser use one. Either answer being no means the button
     // would fail at the tap, and a failure that could have been known beforehand is
     // the kind this project keeps having to apologise for.
+    //
+    // "Can use one" no longer means "has a fingerprint reader" (12 August 2026). A
+    // Mac with no Touch ID was offered nothing here while the passkey that would have
+    // opened it sat on the phone next to it, because the platform's own offer to scan
+    // a QR code was never reached. That was the design's central case, refused by its
+    // own capability check.
     void Promise.all([countPasskeyRoutes(), probeCredentialSupport()]).then(
       ([routes, capability]) => setOffer(Boolean(routes) && capability.usable),
       () => setOffer(false)
@@ -88,8 +94,9 @@ export default function PasskeyUnlock({ textStyle }: PasskeyUnlockProps) {
         {busy ? "waiting for the passkey…" : "Unlock with a passkey"}
       </button>
       <p style={{ ...textStyle, marginTop: 6 }}>
-        Quickest if you set one up on another device: this asks for Face ID,
-        Touch ID or your device PIN, with nothing to type.
+        Quickest if you set one up on another device: this asks for Face ID, Touch ID
+        or your device PIN, and on a device with none of those it offers to use your
+        phone. Nothing to type either way.
       </p>
       {problem && <p style={{ ...textStyle, marginTop: 6 }}>{problem}</p>}
     </div>

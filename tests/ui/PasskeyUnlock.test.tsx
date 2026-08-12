@@ -16,6 +16,8 @@ import { CredentialRefusedError, PrfUnsupportedError } from "../../src/lib/prf";
 
 let routes: number | null = 1;
 let usable = true;
+/** A built-in check, which is no longer what decides whether to offer this. */
+let localCheck = true;
 let unlock: () => Promise<void> = async () => {};
 
 class NoPasskeyRoute extends Error {}
@@ -33,7 +35,7 @@ vi.mock("../../src/lib/prf", async (importOriginal) => ({
   probeCredentialSupport: async () => ({
     secureContext: true,
     webauthn: usable,
-    platformAuthenticator: usable,
+    platformAuthenticator: localCheck,
     usable,
   }),
 }));
@@ -53,6 +55,7 @@ const show = async (): Promise<void> => {
 beforeEach(() => {
   routes = 1;
   usable = true;
+  localCheck = true;
   unlock = async () => {};
 });
 afterEach(cleanup);
@@ -73,6 +76,20 @@ describe("when it offers nothing at all", () => {
     await show();
 
     await waitFor(() => expect(button()).toBeNull());
+  });
+
+  test("but not a device that merely lacks a fingerprint reader", async () => {
+    // The bug this fixes. A Mac with no Touch ID was offered nothing here, while the
+    // passkey that would have opened it sat on the phone next to it — the platform's
+    // own offer to scan a QR code was never reached, because our own capability check
+    // had already refused. Offering it is right even if the sheet then comes back
+    // empty: that failure is a refusal, which this screen already says something
+    // honest about.
+    localCheck = false;
+    await show();
+
+    await waitFor(() => expect(button()).toBeTruthy());
+    expect(screen.getByText(/offers to use your\s+phone/i)).toBeTruthy();
   });
 
   test("a count that could not be read, which is not the same as zero", async () => {
