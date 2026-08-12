@@ -30,7 +30,12 @@ import {
   verifyEmailCode,
 } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
-import { listDevices, onDevicesChange } from "./store/devices";
+import {
+  forgetDevice,
+  forgetGoneDevices,
+  listDevices,
+  onDevicesChange,
+} from "./store/devices";
 import type { DeviceRecord } from "./store/devices";
 import { keySaved, markKeySaved } from "./lib/keySaved";
 import { pendingJournalKey } from "./lib/pendingKey";
@@ -386,6 +391,17 @@ export default function SyncView() {
    * — `noKeyHere`, which is that button's answer, stays as belt and braces.
    */
   const noKey = !canEnrolPasskey() || noKeyHere;
+
+  /**
+   * How many rows describe a device that has already gone.
+   *
+   * Counted from the rendered list rather than the store so the two cannot disagree,
+   * and excluding this device, whose row is rewritten on every sync and so cannot be
+   * forgotten in any meaningful sense.
+   */
+  const goneCount = deviceList.filter(
+    (d) => !d.isThisDevice && (d.removedAt || d.signedOutAt)
+  ).length;
 
   /**
    * Might this device be holding writing the server has never seen?
@@ -825,10 +841,48 @@ export default function SyncView() {
                           </button>
                         )
                       )}
+                      {/* A row for a device that has already gone. Forgetting it is
+                          about the record and nothing else, and the label has to keep
+                          that separate from removal, which is about access. */}
+                      {!d.isThisDevice && (d.removedAt || d.signedOutAt) && (
+                        <button
+                          className="miniBtn"
+                          style={{ marginTop: 6 }}
+                          onClick={() => {
+                            forgetDevice(d.id);
+                            setDeviceList(listDevices());
+                          }}
+                        >
+                          forget this row
+                        </button>
+                      )}
                     </div>
                   </li>
                 ))}
               </ul>
+            )}
+            {/* Worth having because the count is what makes the list useless: six
+                removed rows above the two devices in use is a list nobody reads. Two
+                or more, so it never appears for a single row that already has its own
+                control. */}
+            {goneCount >= 2 && (
+              <>
+                <p style={ST.p}>
+                  {goneCount} rows are for devices that have already gone — removed,
+                  or signed out. Forgetting them clears the record here and nothing
+                  else: they have no access either way, and any that come back will
+                  list themselves again.
+                </p>
+                <button
+                  className="miniBtn"
+                  onClick={() => {
+                    forgetGoneDevices();
+                    setDeviceList(listDevices());
+                  }}
+                >
+                  forget all {goneCount} rows
+                </button>
+              </>
             )}
           </div>
           <div style={ST.keyBox}>

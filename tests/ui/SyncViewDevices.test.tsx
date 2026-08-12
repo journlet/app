@@ -108,7 +108,21 @@ vi.mock("../../src/store/devices", () => ({
   onDevicesChange: () => () => {},
   thisDeviceId: () => "a",
   touchThisDevice: vi.fn(),
+  forgetDevice: (id: string) => {
+    forgotten.push(id);
+    deviceRows = deviceRows.filter((r) => r.id !== id);
+    return true;
+  },
+  forgetGoneDevices: () => {
+    const gone = deviceRows.filter((r) => !r.isThisDevice && (r.removedAt || r.signedOutAt));
+    gone.forEach((r) => forgotten.push(r.id));
+    deviceRows = deviceRows.filter((r) => !gone.includes(r));
+    return gone.length;
+  },
 }));
+
+/** Rows the screen asked the store to forget. */
+let forgotten: string[] = [];
 
 import SyncView from "../../src/SyncView";
 
@@ -634,5 +648,67 @@ describe("the reminder to save the journal key", () => {
     render(<SyncView />);
 
     expect(screen.queryByText(/not saved yet/i)).toBeNull();
+  });
+});
+
+// Taking rows out of the register (12 August 2026, Gary, looking at a list with six
+// removed rows above the two devices he uses). Forgetting is about the record; removal
+// is about access. The screen has to keep those apart, because conflating them is how
+// somebody comes to believe they have cut a device off when they have tidied a list.
+describe("forgetting rows for devices that have gone", () => {
+  beforeEach(() => {
+    forgotten = [];
+    canRemove = true;
+    deviceRows = [
+      { id: "a", name: "Installed app, Safari and Chrome (macOS)", firstSeen: 1, lastSeen: Date.now(), isThisDevice: true },
+      { id: "b", name: "Installed app (iOS)", firstSeen: 2, lastSeen: Date.now(), isThisDevice: false },
+      { id: "c", name: "Chrome (macOS)", firstSeen: 3, lastSeen: 3, removedAt: Date.now(), isThisDevice: false },
+      { id: "d", name: "Safari (macOS)", firstSeen: 4, lastSeen: 4, removedAt: Date.now(), isThisDevice: false },
+    ];
+  });
+
+  test("offers it on a row that has gone, and not on one still in use", () => {
+    render(<SyncView />);
+
+    // Two gone rows, so two of these; the live devices get "remove this device".
+    expect(screen.getAllByRole("button", { name: /forget this row/i })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /remove this device/i })).toBeTruthy();
+  });
+
+  test("forgetting one takes that row and leaves the rest", () => {
+    render(<SyncView />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /forget this row/i })[0]);
+
+    expect(forgotten).toEqual(["c"]);
+    expect(screen.getByText("Installed app (iOS)")).toBeTruthy();
+  });
+
+  test("and offers to clear them together once there are two", () => {
+    render(<SyncView />);
+
+    expect(screen.getByText(/2 rows are for devices that have already gone/i))
+      .toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /forget all 2 rows/i }));
+
+    expect(forgotten.sort()).toEqual(["c", "d"]);
+  });
+
+  test("saying what forgetting does and does not do", () => {
+    // The distinction that matters: these devices have no access either way, and one
+    // that is ever added back will list itself again. Neither is obvious from the word.
+    render(<SyncView />);
+
+    expect(screen.getByText(/clears the record here and nothing\s+else/i)).toBeTruthy();
+    expect(screen.getByText(/no access either way/i)).toBeTruthy();
+    expect(screen.getByText(/list themselves again/i)).toBeTruthy();
+  });
+
+  test("no bulk control for a single gone row, which has its own", () => {
+    deviceRows = deviceRows.filter((r) => r.id !== "d");
+    render(<SyncView />);
+
+    expect(screen.queryByText(/rows are for devices/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /forget this row/i })).toBeTruthy();
   });
 });
