@@ -350,7 +350,7 @@ describe("the removed device's own view", () => {
     const sync = await bootAsRemovedPhone();
     await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
 
-    await sync.askToBeAddedBack();
+    await sync.askForApproval();
 
     expect(tables.device_link_requests?.[0]?.device_id).toBe("phone");
     expect(sync.getLinkCode()).not.toBeNull();
@@ -573,7 +573,7 @@ describe("the removed device's own view", () => {
       },
     });
     await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
-    await sync.askToBeAddedBack();
+    await sync.askForApproval();
 
     // Approved: the current epoch's key, wrapped to this device.
     tables.device_wrapped_keys = [
@@ -658,7 +658,7 @@ describe("the removed device's own view", () => {
     // mean not added, and ask again if you want in.
     const sync = await bootAsRemovedPhone();
     await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
-    await sync.askToBeAddedBack();
+    await sync.askForApproval();
     expect(sync.getLinkStage()).toBe("waiting");
 
     // Refused on the other device: the request row goes, no key appears.
@@ -677,7 +677,7 @@ describe("the removed device's own view", () => {
     // went on waiting for an answer to a question it had taken back.
     const sync = await bootAsRemovedPhone();
     await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
-    await sync.askToBeAddedBack();
+    await sync.askForApproval();
     const code = sync.getLinkCode();
 
     await sync.retryConnect();
@@ -694,7 +694,7 @@ describe("the removed device's own view", () => {
     // first would report a successful approval as a refusal.
     const sync = await bootAsRemovedPhone();
     await vi.waitFor(() => expect(sync.wasRemoved()).toBe(true));
-    await sync.askToBeAddedBack();
+    await sync.askForApproval();
 
     const rotated = await generateDataKey();
     tables.journal_keys = [

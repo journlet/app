@@ -531,6 +531,21 @@ export const hasPendingRequest = async (
 };
 
 /**
+ * The code this device would show, computed without writing anything.
+ *
+ * Needed since asking became a deliberate act rather than something a connect did
+ * on its own: a device that has already asked and been reloaded has a request
+ * sitting on the server, and re-publishing to learn the code again would reset its
+ * half hour and rewrite a row for no reason. The code is a fingerprint of this
+ * device's public key, so it can be recomputed locally and matches exactly what was
+ * published.
+ */
+export const thisDeviceCode = async (): Promise<string> => {
+  const pair = await ensureDeviceKeyPair();
+  return verificationCode(await exportDevicePublicKey(pair.publicKey));
+};
+
+/**
  * Is this device still one of the account's, or has it been removed?
  *
  * The distinction the app previously could not draw. A device that is merely

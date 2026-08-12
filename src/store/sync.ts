@@ -31,6 +31,7 @@ import {
   readKeeperWrappedEpochs,
   rejectLinkRequest,
   revokeDevice,
+  thisDeviceCode,
   shareDataKeyWithDevices,
   surrenderDeviceKeys,
 } from "./deviceLink";
@@ -544,8 +545,10 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   }
 
   if (keys.size === 0) {
-    // Nothing at all: this device has never been let in. Ask, and show the code.
-    await askToBeAdded();
+    // Nothing at all: this device has never been let in. It is not asked for on its
+    // behalf — the screen offers a passkey, the journal key and a button for this —
+    // but a request it made before a reload is picked up again.
+    await resumeAskIfPending();
     setStatus("needs-key");
     return false;
   }
@@ -601,6 +604,14 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     if (standing === "unproven") {
       // Holds rows, but nothing another device will accept as proof, so waiting
       // would be waiting forever. Ask, and say which of the two things this is.
+      //
+      // Still automatic, unlike a new device signing in (12 August 2026). The two
+      // cases differ in who started it: a new device is on a screen listing three
+      // ways in and can be handed a button, where this one is mid-journal behind a
+      // banner it did not ask for, and approval is the remedy its message names. A
+      // request nobody asked for is the lesser evil against telling somebody to wait
+      // for something that cannot arrive, which is the failure §6.1d exists to
+      // prevent.
       await askToBeAdded();
       setError(NEEDS_REAPPROVAL);
       setStatus(navigator.onLine ? "pending" : "offline");
@@ -753,12 +764,27 @@ const enterRemovedState = (): void => {
 };
 
 /**
- * Ask to be let back in, from the removed device, because someone there chose to.
+ * Ask a device that already holds the journal to add this one.
  *
- * The same request a new device makes. Separate from entering the removed state so
- * that nothing automatic ever produces it.
+ * Public and deliberate since 12 August 2026, and that is the change: a device
+ * reaching needs-key used to publish this request on its own, so signing in on a new
+ * device put a prompt on another one's screen whether or not anybody wanted approval
+ * to be the route. With a passkey and the journal key code both on that screen, most
+ * of those requests were for nothing — and the same reasoning already applied to a
+ * removed device asking again, where automatic asking put a prompt on the device that
+ * had just removed it (Gary, 3 August). One rule now covers both: nothing asks for
+ * approval unless somebody presses the button.
+ *
+ * Writing a row is not free either: a request carries this device's public key and
+ * sits on the server for half an hour, so not writing one for somebody who is about
+ * to use a passkey is the right default under §6.5's spirit as well.
+ *
+ * One case still asks on its own, and the difference is who started it: a device that
+ * has been left unproven by a rotation is mid-journal behind a banner it did not ask
+ * for, with approval as the remedy its message names, so ensureJournalKeys asks there
+ * rather than leaving somebody waiting for something that cannot arrive.
  */
-export const askToBeAddedBack = async (): Promise<void> => {
+export const askForApproval = async (): Promise<void> => {
   await askToBeAdded();
 };
 
@@ -834,6 +860,27 @@ const explainMissingKey = async (): Promise<void> => {
  * route in, so a device that cannot publish a request falls back to the screen
  * it had before this feature existed rather than to a dead end.
  */
+/**
+ * Pick up a request this device has already made, without making one.
+ *
+ * A reload loses the link state but not the row: the request lasts half an hour, and
+ * an approval landing while nothing was watching would leave this device waiting for
+ * an event it had stopped listening for. So the state is restored — the code
+ * recomputed locally, the watch restarted — and nothing is written. Silent when no
+ * request exists, which is the ordinary case now that asking is a button.
+ */
+const resumeAskIfPending = async (): Promise<void> => {
+  if (!supabase || !session) return;
+  try {
+    if (!(await hasPendingRequest(supabase, deviceBinding()))) return;
+    setLinkState({ linkCode: await thisDeviceCode(), linkStage: "waiting" });
+    watchForGrant();
+  } catch (e) {
+    // Not knowing costs a tap on a button that is on the screen anyway.
+    console.warn("[devices] could not check for an outstanding request", e);
+  }
+};
+
 const askToBeAdded = async (): Promise<void> => {
   if (!supabase || !session) return;
   try {

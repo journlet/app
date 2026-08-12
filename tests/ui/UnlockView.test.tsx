@@ -98,9 +98,52 @@ describe("a device that was removed", () => {
   test("offers to ask again rather than asking on its own", () => {
     const { onAskAgain } = renderView({ removed: true });
 
-    fireEvent.click(screen.getByText(/ask to be added again/i));
+    fireEvent.click(screen.getByRole("button", { name: /ask to be added again/i }));
 
     expect(onAskAgain).toHaveBeenCalled();
+  });
+});
+
+// Changed 12 August 2026 (Gary, watching the first real unlock): a passkey and the
+// journal key are both quicker than approval and neither needs another device in your
+// hands, so approval goes last — and it waits to be asked for, because the automatic
+// version put a prompt on another screen before anybody had read what was on offer.
+describe("the order the ways in are offered", () => {
+  test("the routes that need nothing else come before the one that does", () => {
+    renderView();
+
+    const body = document.body.textContent ?? "";
+    expect(body.indexOf("Unlock this device below")).toBeLessThan(
+      body.indexOf("ask a device you already use")
+    );
+  });
+
+  test("a new device asks nobody until it is told to", () => {
+    const { onAskAgain } = renderView();
+
+    // No code, because nothing has been published: the button is the whole trigger.
+    expect(screen.queryByText(/Waiting to be added/i)).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: /ask a device you already use/i })
+    );
+
+    expect(onAskAgain).toHaveBeenCalled();
+  });
+
+  test("and says what pressing it does on the other device", () => {
+    renderView();
+
+    expect(screen.getByText(/show a prompt there for you to approve/i)).toBeTruthy();
+    expect(screen.getByText(/code to compare/i)).toBeTruthy();
+  });
+
+  test("once it has asked, the offer becomes the code to compare", () => {
+    renderView({ linkCode: "5NFT NJCF H3GA S9M4" });
+
+    expect(screen.getByText("5NFT NJCF H3GA S9M4")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /ask a device you already use/i })
+    ).toBeNull();
   });
 });
 
