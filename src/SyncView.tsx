@@ -26,6 +26,7 @@ import {
   removeDevice,
   signIn,
   signOutAndWipe,
+  takeJournalKey,
   verifyEmailCode,
 } from "./store/sync";
 import type { SyncStatus } from "./store/sync";
@@ -169,6 +170,30 @@ export default function SyncView() {
   };
 
   const [noKeyHere, setNoKeyHere] = useState(false);
+  /** Whether the journal key entry is open on a device that does not hold one. */
+  const [keyTaking, setKeyTaking] = useState(false);
+
+  /**
+   * Hand this device the journal key it never had.
+   *
+   * Reuses the same entry the unlock screen uses, and the same wording on failure.
+   * takeJournalKey rather than provideJournalKey, because this device is already
+   * connected: see the store for why that difference is load-bearing.
+   */
+  const giveKeyToThisDevice = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await takeJournalKey(keyEntry);
+      setKeyEntry("");
+      setKeyTaking(false);
+      setNoKeyHere(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That key did not work");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const showKey = async () => {
     const code = await getJournalKeyCode();
@@ -334,6 +359,17 @@ export default function SyncView() {
 
   const signedIn =
     status !== "signed-out" && status !== "disabled" && getSessionEmail();
+
+  /**
+   * Whether this device holds the journal key, which decides what the Journal key
+   * box is for.
+   *
+   * The same condition the store uses to decide whether a passkey can be enrolled,
+   * because it is the same key. Known before anything is pressed, so a device that
+   * cannot show the key says so rather than offering a button and then explaining
+   * — `noKeyHere`, which is that button's answer, stays as belt and braces.
+   */
+  const noKey = !canEnrolPasskey() || noKeyHere;
 
   /**
    * Might this device be holding writing the server has never seen?
@@ -574,14 +610,65 @@ export default function SyncView() {
                   </button>
                 </div>
               </>
-            ) : noKeyHere ? (
-              <p style={{ ...ST.p, marginBottom: 0 }}>
-                This device does not hold the journal key. It was added by
-                another device, which gave it what it needs to read your journal
-                and nothing more — that is what makes it possible to remove this
-                device on its own later. The key can be shown on the device that
-                created the journal.
-              </p>
+            ) : noKey ? (
+              // A device linked by approval, which holds the data key and never
+              // held the journal key. Said without waiting for a button press
+              // now, and with a way out of it: until takeJournalKey existed this
+              // was a statement about a device's permanent second class, and the
+              // old wording made it worse by naming "the device that created the
+              // journal" as the only one that could show the key — untrue since
+              // §6.1e, where any device holding the key can.
+              <>
+                <p style={ST.p}>
+                  This device does not hold the journal key. It was added by
+                  another device, which gave it what it needs to read your
+                  journal and nothing more. So it cannot show the key, add a
+                  passkey, or remove another device.
+                </p>
+                {keyTaking ? (
+                  <>
+                    <p style={ST.p}>
+                      Show the key on a device that holds it — Sync → show
+                      journal key — then enter it here. This device keeps
+                      everything it already has.
+                    </p>
+                    <input
+                      style={{ ...ST.input, width: "100%", marginBottom: 8 }}
+                      value={keyEntry}
+                      placeholder="J1-XXXX-XXXX-…"
+                      onChange={(ev) => setKeyEntry(ev.target.value)}
+                      onKeyDown={(ev) => ev.key === "Enter" && giveKeyToThisDevice()}
+                      aria-label="Journal key"
+                    />
+                    <div style={ST.row}>
+                      <button
+                        className="addBtn"
+                        disabled={busy || keyEntry.trim().length < 10}
+                        onClick={giveKeyToThisDevice}
+                      >
+                        Give this device the journal key
+                      </button>
+                      <button
+                        className="miniBtn"
+                        disabled={busy}
+                        onClick={() => {
+                          setKeyTaking(false);
+                          setKeyEntry("");
+                        }}
+                      >
+                        cancel
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    className="miniBtn"
+                    onClick={() => setKeyTaking(true)}
+                  >
+                    enter journal key
+                  </button>
+                )}
+              </>
             ) : (
               <button className="miniBtn" onClick={showKey}>
                 show journal key

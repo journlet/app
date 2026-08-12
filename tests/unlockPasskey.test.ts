@@ -90,6 +90,8 @@ let signOutMidAdopt = false;
 const CREATED_ID = new Uint8Array([4, 5, 6, 7]);
 let created = 0;
 let askedFor: (Uint8Array | undefined)[] = [];
+/** How many times the journal row has been read, which is once per real connect. */
+let journalReads = 0;
 
 const signIn = (): void => {
   if (!authCallback)
@@ -132,6 +134,7 @@ vi.mock("@supabase/supabase-js", () => ({
           return {
             select: () => ({
               maybeSingle: async () => {
+                journalReads++;
                 if (signOutMidAdopt) {
                   signOutMidAdopt = false;
                   authCallback?.("SIGNED_OUT", null);
@@ -230,6 +233,7 @@ const boot = async (signedIn = true) => {
   derivations = 0;
   created = 0;
   askedFor = [];
+  journalReads = 0;
   ringWrites = [];
   localStorage.setItem("journlet-device-id", "phone-id");
   storedRing = {
@@ -429,6 +433,45 @@ describe("adding a passkey from a device that is already unlocked", () => {
 
     await expect(sync.enrolPasskey()).rejects.toBeInstanceOf(PrfUnsupportedError);
     expect(wrapRows).toHaveLength(1);
+  });
+});
+
+describe("giving the journal key to a device that is already syncing", () => {
+  test("forces a real connect rather than joining the one it already has", async () => {
+    // The reason takeJournalKey exists rather than provideJournalKey. Adopting
+    // reduces the keyring to epoch 0, and doConnect early-outs on a device that is
+    // already connected — so the connect that is meant to collect the later epochs
+    // would return immediately and leave this device holding a key for an epoch the
+    // account has moved past. Reading the journal row again is what proves the
+    // connection was dropped first — and the count has to allow for the adoption's
+    // own read, which happens either way: one read means the adopt alone, two means
+    // a connect followed it.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    const before = journalReads;
+
+    await sync.takeJournalKey(realCode);
+
+    expect(journalReads).toBeGreaterThan(before + 1);
+  });
+
+  test("and leaves the device holding a key it can show", async () => {
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+
+    await sync.takeJournalKey(realCode);
+
+    await expect(sync.getJournalKeyCode()).resolves.toBe(realCode);
+    expect(sync.canEnrolPasskey()).toBe(true);
+  });
+
+  test("a key that does not fit changes nothing", async () => {
+    const sync = await boot();
+    const wrong = await exportJournalKeyCode(await generateKeeperKey());
+
+    await expect(sync.takeJournalKey(wrong)).rejects.toThrow(/journal key/);
+
+    expect(sync.canEnrolPasskey()).toBe(false);
   });
 });
 
