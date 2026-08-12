@@ -42,7 +42,7 @@ import {
   getSyncSnapshot,
   hasSyncedOnce,
   isConfigured,
-  askToBeAddedBack,
+  askForApproval,
   signOutAndWipe,
   subscribeSync,
   retryConnect,
@@ -1302,7 +1302,7 @@ export default function App() {
             onSignOut={() => void signOutAndWipe()}
             onAskAgain={() => {
               setAsking(true);
-              void askToBeAddedBack().finally(() => setAsking(false));
+              void askForApproval().finally(() => setAsking(false));
             }}
           >
             <SyncView />

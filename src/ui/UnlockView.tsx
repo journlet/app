@@ -1,11 +1,17 @@
 // Third first-run stage: signed in, but this device cannot open the account's
 // journal yet.
 //
-// Two routes out, in the order they should be tried. Since step 3 of
-// device-identity-design.md the ordinary route is approval on a device already in
-// use: this device has already asked, and shows a code to compare. The journal
-// key is the fallback for when there is no other device to approve from, and its
-// entry form is SyncView's, passed in as a child.
+// Three routes out, in the order they are worth trying, which changed on 12 August
+// 2026 once a passkey became one of them (Gary, watching the first real unlock).
+//
+// A passkey opens the journal here and now. The journal key does too, at the cost of
+// sixteen characters. Approval needs another device in your hands and somebody to
+// press a button on it, so it goes last — and it now waits to be asked for rather
+// than having happened before anybody read a word of this screen. Automatic asking
+// put a prompt on another device whether or not approval was the route anybody
+// wanted; the same objection had already retired it for a removed device on 3 August.
+//
+// The passkey button and the journal key entry are SyncView's, passed in as a child.
 
 import type { ReactNode } from "react";
 import type { LinkStage } from "../store/sync";
@@ -74,6 +80,27 @@ export default function UnlockView({
         </p>
       )}
 
+      {/* Hidden while opening: offering another way in at the moment one has
+          succeeded invites someone to start over on top of work already underway.
+
+          The ways in, in the order they are worth trying, and the order is the
+          point of this screen since 12 August 2026 (Gary, on the first unlock run).
+          A passkey opens the journal here and now; the journal key does too and
+          costs sixteen characters; approval needs another device in your hands and
+          somebody to press a button on it. Approval used to be first, and to have
+          happened already before anybody read a word of this, which is why it moved
+          and why it waits to be asked for. */}
+      {!opening && !declined && (
+        <>
+          <p style={S.onboardLede}>
+            Unlock this device below: with a passkey, if you set one up, or with your
+            journal key. You will find the key on a device you are already using,
+            under Sync → show journal key, or wherever you saved it when you started.
+          </p>
+          {children}
+        </>
+      )}
+
       {/* The request was answered with "do not add it", or it lapsed. Said rather
           than left as "waiting", which is what it used to do for the full half
           hour after the answer had been given (Gary, 3 August). The two are not
@@ -110,14 +137,27 @@ export default function UnlockView({
         </div>
       )}
 
-      {/* Removed, and not asking yet. The request is a button rather than
-          something that happens on its own: asking automatically put an approval
-          prompt on the device that had just removed this one, seconds after it did
-          so, with no sensible answer available (Gary, 3 August). */}
-      {removed && !linkCode && !opening && !declined && (
+      {/* Not asking yet, and nothing asks on this device's behalf. Automatic asking
+          was removed for a removed device first, because it put a prompt on the
+          device that had just removed this one seconds after it did so, with no
+          sensible answer available (Gary, 3 August). The same reasoning reached the
+          ordinary case on 12 August: with a passkey and the journal key both above,
+          most of those requests were prompts on somebody's other screen for a route
+          they were not going to take. Last of the three, because it is the only one
+          that needs another device in your hands. */}
+      {!linkCode && !opening && !declined && (
         <div style={{ margin: "14px 0" }}>
+          <p style={S.onboardLede}>
+            {removed
+              ? "Or ask to be added again from a device you still use. It will show a prompt for you to approve."
+              : "Or ask a device you already use to add this one. It will show a prompt there for you to approve, with a code to compare."}
+          </p>
           <button className="miniBtn" disabled={asking} onClick={onAskAgain}>
-            {asking ? "asking…" : "ask to be added again"}
+            {asking
+              ? "asking…"
+              : removed
+                ? "ask to be added again"
+                : "ask a device you already use"}
           </button>
         </div>
       )}
@@ -206,25 +246,7 @@ export default function UnlockView({
         </div>
       )}
 
-      {/* The fallback is hidden while opening. Offering a second way in at the
-          moment the first one has succeeded invites someone to start over on top
-          of work that is already underway. */}
-      {!opening && !declined && (
-        <>
-          {/* Worded to cover both routes below without knowing which are on offer.
-              A passkey button appears there only when this account has one and this
-              browser can use one, so "if you set one up" is the honest form: it
-              names the route for whoever has it and reads as information for
-              whoever does not. Since §6.1e the journal key is the belt and braces
-              rather than the only way in. */}
-          <p style={S.onboardLede}>
-            {linkCode
-              ? "No other device to hand? Unlock this one below — with a passkey, if you set one up, or with your journal key. You will find the key under Sync → show journal key on a device that already holds the journal, or wherever you saved it when you started."
-              : "Unlock this device below: with a passkey, if you set one up, or with your journal key. You will find the key on a device you are already using, under Sync → show journal key, or wherever you saved it when you started."}
-          </p>
-          {children}
-        </>
-      )}
+
     </section>
   );
 }

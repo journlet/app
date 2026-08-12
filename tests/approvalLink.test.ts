@@ -250,9 +250,24 @@ beforeEach(async () => {
 });
 
 describe("a device that cannot open the journal", () => {
-  test("asks to be added, rather than only asking for a key", async () => {
+  test("asks nobody until somebody asks it to", async () => {
+    // Changed 12 August 2026 (Gary, on the first real unlock). Reaching this state
+    // used to publish a request, so signing in on a new device put a prompt on
+    // another one's screen before anybody had read the three routes on offer — and
+    // with a passkey and the journal key both above it, most of those prompts were
+    // for a route nobody was going to take.
     const sync = await boot();
     await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+
+    expect(tables.device_link_requests ?? []).toEqual([]);
+    expect(sync.getLinkCode()).toBeNull();
+  });
+
+  test("and asks when it is asked to", async () => {
+    const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+
+    await sync.askForApproval();
 
     await vi.waitFor(() =>
       expect(tables.device_link_requests?.[0]?.device_id).toBe(DEVICE_ID)
@@ -262,8 +277,31 @@ describe("a device that cannot open the journal", () => {
     );
   });
 
-  test("shows a code to compare", async () => {
+  test("picks up a request it made before a reload, without making another", async () => {
+    // The one thing the automatic ask was quietly doing well: a device that had asked
+    // and then been reloaded got its code and its watch back, because it re-asked on
+    // every connect. Asking on a button must not lose that — an approval landing while
+    // nothing was listening would leave this device waiting for an event it had
+    // stopped watching for. So the state is restored and nothing is written: the code
+    // is a fingerprint of this device's key and can be recomputed, where re-publishing
+    // would reset the half hour it has left.
+    const first = await boot();
+    await vi.waitFor(() => expect(first.getSyncStatus()).toBe("needs-key"));
+    await first.askForApproval();
+    const code = first.getLinkCode();
+    const askedAt = tables.device_link_requests?.[0]?.requested_at;
+
+    const second = await boot();
+
+    await vi.waitFor(() => expect(second.getLinkCode()).toBe(code));
+    expect(tables.device_link_requests?.[0]?.requested_at).toBe(askedAt);
+    expect(tables.device_link_requests).toHaveLength(1);
+  });
+
+  test("shows a code to compare, once it has asked", async () => {
     const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+    await sync.askForApproval();
     await vi.waitFor(() => expect(sync.getLinkCode()).not.toBeNull());
 
     // Sixteen Crockford characters in four groups. The screen it appears on is
@@ -292,6 +330,7 @@ describe("noticing the approval", () => {
     // under it.
     const sync = await boot();
     await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+    await sync.askForApproval();
 
     expect(grantHandler).not.toBeNull();
   });
@@ -299,6 +338,7 @@ describe("noticing the approval", () => {
   test("links on the realtime event, without waiting for the poll", async () => {
     const sync = await boot();
     await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+    await sync.askForApproval();
 
     await somebodyApproves();
     grantHandler?.();
@@ -314,6 +354,8 @@ describe("noticing the approval", () => {
     // show there is a fetch and a decrypt, and the screen used to spend it
     // telling him to go and approve something he had just approved.
     const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+    await sync.askForApproval();
     await vi.waitFor(() => expect(sync.getLinkStage()).toBe("waiting"));
 
     await somebodyApproves();
@@ -345,6 +387,8 @@ describe("once another device approves", () => {
 
   test("it withdraws its request", async () => {
     const sync = await boot();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
+    await sync.askForApproval();
     await vi.waitFor(() =>
       expect(tables.device_link_requests).toHaveLength(1)
     );
