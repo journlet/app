@@ -211,10 +211,16 @@ export default function UnlockView({
           of work that is already underway. */}
       {!opening && !declined && (
         <>
+          {/* Worded to cover both routes below without knowing which are on offer.
+              A passkey button appears there only when this account has one and this
+              browser can use one, so "if you set one up" is the honest form: it
+              names the route for whoever has it and reads as information for
+              whoever does not. Since §6.1e the journal key is the belt and braces
+              rather than the only way in. */}
           <p style={S.onboardLede}>
             {linkCode
-              ? "No other device to hand? Enter your journal key instead. You will find it under Sync → show journal key on the device that created the journal, or wherever you saved it when you started."
-              : "Enter your journal key to unlock it. You will find it on a device you are already using, under Sync → show journal key, or wherever you saved it when you started."}
+              ? "No other device to hand? Unlock this one below — with a passkey, if you set one up, or with your journal key. You will find the key under Sync → show journal key on a device that already holds the journal, or wherever you saved it when you started."
+              : "Unlock this device below: with a passkey, if you set one up, or with your journal key. You will find the key on a device you are already using, under Sync → show journal key, or wherever you saved it when you started."}
           </p>
           {children}
         </>

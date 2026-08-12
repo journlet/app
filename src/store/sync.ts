@@ -35,7 +35,11 @@ import {
   surrenderDeviceKeys,
 } from "./deviceLink";
 import type { LinkRequest } from "./deviceLink";
-import { countKeeperWraps, listKeeperWraps } from "./keeperWraps";
+import {
+  countKeeperWraps,
+  listKeeperWraps,
+  publishKeeperWrap,
+} from "./keeperWraps";
 import {
   decryptUpdate,
   encryptUpdate,
@@ -48,8 +52,12 @@ import {
   exportJournalKeyCode,
 } from "../lib/crypto";
 import type { WrappedDataKey } from "../lib/crypto";
-import { unwrapKeeperKeyFromAny } from "../lib/keeperWrap";
-import { deriveSecret, relyingPartyId } from "../lib/prf";
+import {
+  newWrapId,
+  unwrapKeeperKeyFromAny,
+  wrapKeeperKey,
+} from "../lib/keeperWrap";
+import { createCredential, deriveSecret, relyingPartyId } from "../lib/prf";
 import { ensureKeys, replaceKeyRing, wipeKeys } from "../lib/keystore";
 // From keyring, not keystore: pure accessors, so the sync tests that stub
 // storage still exercise the real key selection.
@@ -1199,6 +1207,88 @@ export class UnknownCredentialError extends Error {
 export const countPasskeyRoutes = async (): Promise<number | null> => {
   if (!supabase || !session) return null;
   return countKeeperWraps(supabase);
+};
+
+/**
+ * Whether this device can add a passkey route at all.
+ *
+ * Wrapping needs the keeper key, so enrolment requires already being unlocked —
+ * the same entitlement logic as approving a device (§6.1d), and §6.1e says it
+ * needs no separate rule. The same condition as canRemoveDevices for an unrelated
+ * reason, and kept separate for that reason: one is about rotating, this one is
+ * about wrapping, and a future change to either must not silently move the other.
+ *
+ * A device linked by approval holds no keeper key and so answers false. It is not
+ * offered the button, and the screen says why rather than failing at the tap.
+ */
+export const canEnrolPasskey = (): boolean =>
+  Boolean(ring?.keeperKey && keeperUsable);
+
+/**
+ * Add a passkey route: create a credential, prove it can produce a secret, wrap
+ * the keeper key under it, publish the row.
+ *
+ * Two platform sheets, and the interface has to say so beforehand. Creating is one
+ * prompt and deriving is a second, because the eval cannot be attached to a
+ * creation on Safari — and because the derive is the only way to find out whether
+ * this credential manager implements the extension at all. Writing a wrap without
+ * deriving first would mean storing a route that might not open.
+ *
+ * Nothing is written unless both sheets succeed, so the failures leave the account
+ * exactly as it was. A credential may survive a failure in the person's password
+ * manager with nothing pointing at it, which is untidy rather than harmful, and
+ * the screen says so instead of pretending it cleaned up.
+ */
+export const enrolPasskey = async (): Promise<void> => {
+  if (!supabase) throw new Error("Sync is not configured");
+  const userId = session?.user.id;
+  if (!userId) throw new Error("Sign in before setting up a passkey");
+  // Held once. Everything below is awaits, and the keeper key must not be read
+  // again out of module state that a sign-out can empty underneath it.
+  const held = ring;
+  if (!held?.keeperKey || !keeperUsable)
+    throw new Error(
+      "This device does not hold the journal key, so it cannot set up a passkey"
+    );
+
+  /**
+   * Refused outright anywhere but journlet.com, which §12.1 makes binding on every
+   * phase of this work.
+   *
+   * The Relying Party ID is the one decision in the design that cannot be taken
+   * back: a credential is bound to the domain it was created against, and one
+   * enrolled from the Pages default host or a preview deployment is invisible from
+   * app.journlet.com for ever. Since relyingPartyId answers undefined off
+   * journlet.com, letting enrolment run there would silently create exactly that
+   * credential and report a route the app can never use. Disabled rather than
+   * pointed somewhere else, which is what the rule says.
+   *
+   * The cost is that enrolment cannot be exercised on localhost. That is already
+   * true in practice — it can only be tested on hardware from app.journlet.com —
+   * and a credential made in development would not follow the app anywhere.
+   */
+  const rpId = relyingPartyId(location.hostname);
+  if (!rpId)
+    throw new Error(
+      "Passkeys can only be set up on journlet.com. This copy of the app is served from somewhere else, and a passkey created here could never open your journal on the real one."
+    );
+  const credentialId = await createCredential(
+    { userId, email: session?.user.email ?? "" },
+    rpId
+  );
+  // Naming the credential just created, deliberately: left open, the platform may
+  // answer with an older Journlet passkey and the wrap would belong to that one,
+  // so this enrolment would add no new route while reporting that it had.
+  const secret = await deriveSecret(rpId, credentialId);
+
+  const wrapId = newWrapId();
+  const wrapped = await wrapKeeperKey(held.keeperKey, secret, {
+    userId,
+    wrapId,
+  });
+  if (session?.user.id !== userId)
+    throw new Error("Signed out before the passkey could be saved");
+  await publishKeeperWrap(supabase, userId, wrapId, wrapped);
 };
 
 /**
