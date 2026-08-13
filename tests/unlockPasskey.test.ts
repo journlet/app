@@ -585,6 +585,27 @@ describe("starting again with one passkey (spec §11 Q13, §12.1 phase 6)", () =
     expect(older).not.toContain(wrapRows[0].wrap_id);
   });
 
+  test("and forgets the notes for the routes it removed", async () => {
+    // Otherwise the register describes routes that no longer exist, and the screen
+    // reports them as strays "most likely removed from another device" — which is
+    // wrong in the case that produces them most often (Gary, on hardware, 13 August).
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    const stampedOld = Object.keys(doc.getMap("credentials").toJSON());
+    expect(stampedOld).toHaveLength(1);
+
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    await sync.replaceAllPasskeys();
+
+    const after = Object.keys(doc.getMap("credentials").toJSON());
+    expect(after).toHaveLength(1);
+    expect(after).not.toEqual(stampedOld);
+    const listed = await sync.listPasskeyRoutes();
+    expect(listed.strays).toHaveLength(0);
+    expect(listed.routes).toHaveLength(1);
+    expect(listed.routes[0].note).not.toBeNull();
+  });
+
   test("and deletes nothing at all when the enrolment fails", async () => {
     // Which is the case that matters: somebody cancels the sheet and still has every
     // route they had a moment ago.

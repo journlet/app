@@ -24,7 +24,7 @@ import {
   removePasskeyRoute,
   replaceAllPasskeys,
 } from "../store/sync";
-import { describeRoute } from "../store/credentials";
+import { describeRoute, onCredentialsChange } from "../store/credentials";
 import type { CredentialNote, RouteListing } from "../store/credentials";
 import { probeCredentialSupport, relyingPartyId } from "../lib/prf";
 import type { PrfCapability } from "../lib/prf";
@@ -156,6 +156,17 @@ function RouteList({
       setBusy(false);
     }
   }, []);
+
+  // A register change arriving over sync is the other way this list goes stale, and
+  // the one that cannot be fixed by refreshing after our own actions: another device
+  // unlocking is what fills in a row here, and until this existed you had to close the
+  // list and open it again to see it. Only while something is showing, so a background
+  // sync never costs a round trip nobody asked for.
+  const showing = state !== null;
+  useEffect(() => {
+    if (!showing) return;
+    return onCredentialsChange(() => void load());
+  }, [showing, load]);
 
   // Only when something is already showing: the round trip is deliberate elsewhere,
   // and enrolling should not open a list nobody asked for.
@@ -524,6 +535,18 @@ export default function PasskeySetup({
                 route is still counted. It does not take the key back from a device
                 that already has it, and nothing can. Your journal key does not
                 change.
+              </p>
+              {/* The part that was missing, and the part that cost an evening: the
+                  routes go, the passkeys do not. They stay in the password manager,
+                  they sync to your other devices, and each one is offered again the
+                  next time you unlock there — where it opens nothing, because its
+                  route has been deleted. The app cannot delete a credential; it can
+                  only ask, and only where the browser implements the ask (§6.1f). */}
+              <p style={{ ...textStyle, fontSize: 13 }}>
+                The old passkeys themselves stay in your password manager, on every
+                device it syncs to, and will still be offered when you unlock there.
+                Delete them yourself wherever they are kept, or you will be choosing
+                between passkeys that no longer open this journal.
               </p>
               <p style={{ ...textStyle, fontSize: 13 }}>
                 Two prompts follow, as before.

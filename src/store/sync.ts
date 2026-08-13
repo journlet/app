@@ -1437,6 +1437,12 @@ export const replaceAllPasskeys = async (): Promise<void> => {
   const before = (await listKeeperWraps(supabase)).map((r) => r.wrapId);
   await enrolPasskey();
   await deleteKeeperWraps(supabase, before);
+  // And the notes for them, or the register keeps describing routes that no longer
+  // exist. Reported on hardware the evening §6.1l shipped: every "start again" left a
+  // stray, and the screen's account of a stray — "most likely removed from another
+  // device" — was wrong in the one case that produces them most often. Last, so a
+  // delete that failed leaves the notes with their rows.
+  before.forEach(forgetCredentialNote);
 };
 
 /**
