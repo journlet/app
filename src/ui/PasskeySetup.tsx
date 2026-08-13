@@ -20,8 +20,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
   countPasskeyRoutes,
   enrolPasskey,
+  listPasskeyRoutes,
+  removePasskeyRoute,
   replaceAllPasskeys,
 } from "../store/sync";
+import { describeRoute } from "../store/credentials";
+import type { CredentialNote, RouteListing } from "../store/credentials";
 import { probeCredentialSupport, relyingPartyId } from "../lib/prf";
 import type { PrfCapability } from "../lib/prf";
 import { enrolFailureMessage } from "../lib/passkeyMessages";
@@ -60,6 +64,172 @@ export const noLocalCheckNote = (c: PrfCapability): string | null =>
 
 const routeCount = (n: number): string =>
   n === 1 ? "1 passkey can open this journal." : `${n} passkeys can open this journal.`;
+
+/** "12 Aug", or "today, 14:20" for something that happened today. */
+const when = (at: number): string => {
+  const d = new Date(at);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? `today, ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
+
+/**
+ * The saved routes, laid out to be compared against a password manager.
+ *
+ * Loaded on request rather than with the box: it costs a round trip, it is only
+ * wanted when somebody is actually reconciling, and a list unfurling under a
+ * one-line summary is the wall of text this box was cut back from on 12 August.
+ */
+function RouteList({ textStyle }: { textStyle: React.CSSProperties }) {
+  const [state, setState] = useState<{
+    routes: RouteListing[];
+    strays: CredentialNote[];
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  /** Which row is asking to be removed. One at a time, and never by mistake. */
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setProblem(null);
+    setBusy(true);
+    try {
+      setState(await listPasskeyRoutes());
+    } catch {
+      setProblem(
+        "Could not read the saved passkeys just now. Try again in a moment."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const remove = async (wrapId: string) => {
+    setProblem(null);
+    setBusy(true);
+    try {
+      await removePasskeyRoute(wrapId);
+      setRemoving(null);
+      await load();
+    } catch {
+      setProblem("Could not remove that one. Nothing has changed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!state)
+    return (
+      <div style={{ marginTop: 10 }}>
+        <button className="miniBtn" disabled={busy} onClick={() => void load()}>
+          {busy ? "checking…" : "which passkeys are these?"}
+        </button>
+        {problem && <p style={{ ...textStyle, marginBottom: 0 }}>{problem}</p>}
+      </div>
+    );
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      {state.routes.map((r) => (
+        <div
+          key={r.wrapId}
+          style={{
+            borderTop: "1px solid var(--line)",
+            paddingTop: 8,
+            marginTop: 8,
+          }}
+        >
+          <div
+            style={{
+              ...textStyle,
+              marginTop: 0,
+              marginBottom: 2,
+              fontWeight: 600,
+            }}
+          >
+            {describeRoute(r.note)}
+          </div>
+          <div
+            style={{ ...textStyle, fontSize: 13, marginTop: 0, marginBottom: 0 }}
+          >
+            {r.note?.enrolledAt ? `set up ${when(r.note.enrolledAt)}. ` : ""}
+            {r.note?.lastOpenedAt
+              ? `last opened ${when(r.note.lastOpenedAt)}`
+              : "has not opened this journal on any device yet"}
+            {/* The two measured fields, last and small. They are what settles a
+                disagreement between this list and a password manager, and §6.1k is
+                why the second one is here: the same credential reached two ways
+                derives two secrets, so two rows can share the first and differ in
+                the second. */}
+            {r.note?.credentialId
+              ? ` · passkey ${r.note.credentialId.slice(0, 12)}`
+              : ""}
+            {r.note?.fingerprint ? ` · key ${r.note.fingerprint}` : ""}
+          </div>
+          {removing === r.wrapId ? (
+            <div style={{ marginTop: 6 }}>
+              {/* The caveat before the action, as "start again" has it. This
+                  withdraws a saved way in and takes nothing back, and a screen that
+                  let it read as revocation would be the lost-device feature of 28
+                  July over again (§6.1h). */}
+              <p style={{ ...textStyle, fontSize: 13, marginTop: 0 }}>
+                This removes the saved route only. A device that has already opened
+                your journal with this passkey keeps its copy, and your journal key
+                still works. The passkey itself stays in the password manager holding
+                it, where you can delete it yourself.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="miniBtn"
+                  disabled={busy}
+                  onClick={() => void remove(r.wrapId)}
+                >
+                  {busy ? "removing…" : "remove this route"}
+                </button>
+                {!busy && (
+                  <button className="miniBtn" onClick={() => setRemoving(null)}>
+                    cancel
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <button
+              className="miniBtn"
+              style={{ marginTop: 6 }}
+              onClick={() => setRemoving(r.wrapId)}
+            >
+              remove
+            </button>
+          )}
+        </div>
+      ))}
+
+      {state.routes.length === 0 && (
+        <p style={{ ...textStyle, marginBottom: 0 }}>No saved passkey routes.</p>
+      )}
+
+      {/* A note whose route has gone. Shown rather than hidden: the usual cause is
+          another device having removed it, and the unusual cause is worth seeing. */}
+      {state.strays.length > 0 && (
+        <p style={{ ...textStyle, fontSize: 13, marginBottom: 0 }}>
+          {state.strays.length === 1
+            ? "One passkey this list knew about is no longer a saved route, most likely removed from another device."
+            : `${state.strays.length} passkeys this list knew about are no longer saved routes, most likely removed from another device.`}
+        </p>
+      )}
+
+      <p style={{ ...textStyle, fontSize: 13, marginBottom: 0 }}>
+        A row that says “not recognised” was saved before this list existed, or on a
+        device that has not synced since. Open the journal with it once and it names
+        itself here.
+      </p>
+
+      {problem && <p style={{ ...textStyle, marginBottom: 0 }}>{problem}</p>}
+    </div>
+  );
+}
 
 interface PasskeySetupProps {
   /**
@@ -175,6 +345,10 @@ export default function PasskeySetup({
           <p style={{ ...textStyle, marginTop: 0, marginBottom: 0, fontWeight: 600 }}>
             {routeCount(routes)}
           </p>
+          {/* The list, once there is something to list: the answer to the question
+              the count could only ever raise, which is which of my passkeys these
+              are and whether one of them leads nowhere (§6.1l). */}
+          <RouteList textStyle={textStyle} />
           {details && (
             <>
               <p style={textStyle}>
@@ -185,9 +359,11 @@ export default function PasskeySetup({
                   than "this device is set up": §6.5 keeps which device or password
                   manager holds each one off the server deliberately. */}
               <p style={textStyle}>
-                Which device or password manager holds each one is not recorded on
-                the server, so this cannot tell you whether one of them is in this
-                browser.
+                Nothing about which device or password manager holds each one is
+                recorded on the server. What the list above knows is kept inside your
+                journal instead, so it can describe a route only once a device
+                holding that route has opened the journal — and it still cannot tell
+                you whether one of them is in this browser.
               </p>
               {/* Advice rather than mechanism, and it earns its place: measured on
                   13 August 2026 (spec §6.1k), one credential gives a different secret
