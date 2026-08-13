@@ -108,6 +108,7 @@ import { EMPTY_RESULTS, searchJournal } from "./lib/search";
 import Header from "./ui/Header";
 import CaptureLauncher from "./ui/CaptureLauncher";
 import OnboardingView from "./ui/OnboardingView";
+import SignedOutView from "./ui/SignedOutView";
 import RecoveryCodeView from "./ui/RecoveryCodeView";
 import UnlockView from "./ui/UnlockView";
 import LinkPrompts from "./ui/LinkPrompts";
@@ -119,6 +120,7 @@ import {
   needsJournalKey,
   needsOnboarding,
   needsRecoveryCode,
+  needsSignInChoice,
 } from "./lib/onboarding";
 import { acknowledgeRecovery, recoveryPending } from "./lib/recoveryAck";
 import { buildSpreadData } from "./ui/spreadData";
@@ -693,14 +695,34 @@ export default function App() {
   const stalled = notSyncingReason(syncStatus, sync.error);
 
   // Fresh install with sync configured: sign in before there is a journal at
-  // all (decision 3, spec device-identity-design.md). Deliberately not applied
-  // to a signed-out device that already holds content — see lib/onboarding.
+  // all (decision 3, spec device-identity-design.md). A signed-out device that
+  // already holds content gets the screen below instead — see lib/onboarding.
   const onboarding = needsOnboarding({
     configured: isConfigured(),
     status: syncStatus,
     loaded,
     hasLocalContent,
   });
+
+  // Signed out with a journal already here: offer the three answers rather than
+  // only warning about the state (§6.1b, revised 13 August 2026). Not remembered
+  // between launches on purpose — see ui/SignedOutView — so the dismissal is
+  // component state and nothing durable is written.
+  const [keepWriting, setKeepWriting] = useState(false);
+  const choosing =
+    !keepWriting &&
+    needsSignInChoice({
+      configured: isConfigured(),
+      status: syncStatus,
+      loaded,
+      hasLocalContent,
+    });
+  // Signing back in clears the dismissal, so a session that lapses again asks
+  // again. Without this, one tap here would silence the screen for the lifetime
+  // of the tab however many times sync came and went.
+  useEffect(() => {
+    if (syncStatus !== "signed-out") setKeepWriting(false);
+  }, [syncStatus]);
 
   // Signed in but unable to open the journal: ask for the key rather than
   // rendering an empty spread, which reads as a journal that has lost its
@@ -763,6 +785,17 @@ export default function App() {
     loaded,
     pending: recoveryPend,
   });
+
+  // Whether the journal itself is what is on screen, rather than one of the six
+  // screens that can stand in front of it.
+  //
+  // One name instead of the same five negations repeated at fourteen call sites,
+  // which is how it was written until the sixth gate arrived: any site that missed
+  // a flag would render the journal behind the screen meant to replace it, and the
+  // two that matter most are the capture launcher and the capture form, where the
+  // consequence is an entry written into a journal nobody is looking at.
+  const journalOnScreen =
+    !onboarding && !choosing && !unlocking && !showRecovery && !stuck && !settling;
   useEffect(() => {
     if (!showRecovery || recoveryCode) return;
     // If the code cannot be read there is nothing useful to show, so let the
@@ -1212,29 +1245,17 @@ export default function App() {
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <Header
         showBack={
-          !onboarding &&
-          !unlocking &&
-          !showRecovery &&
-          !stuck &&
-          !settling &&
+          journalOnScreen &&
           view !== "spread"
         }
         showMenu={
-          !onboarding &&
-          !unlocking &&
-          !showRecovery &&
-          !stuck &&
-          !settling &&
+          journalOnScreen &&
           view === "spread"
         }
         onBack={goBack}
         onMenu={() => setView("menu")}
         filter={
-          !onboarding &&
-          !unlocking &&
-          !showRecovery &&
-          !stuck &&
-          !settling &&
+          journalOnScreen &&
           loaded &&
           filterApplies
             ? filter
@@ -1262,7 +1283,7 @@ export default function App() {
             chooses. This is also the deliberate answer to journalling for
             weeks into a device that is not syncing: capture keeps working
             (§6.1b), so the state has to be impossible to miss instead. */}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && stalled && hasLocalContent && view !== "sync" && (
+        {journalOnScreen && stalled && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner reason={stalled} onOpenSync={() => setView("sync")} />
         )}
         {/* A device asking to be added, shown wherever the journal is. Above the
@@ -1270,7 +1291,7 @@ export default function App() {
             journal in front of you is stale, which is the more urgent thing —
             and inside a particular view would mean the prompt disappears when
             you change view while a device sits waiting. */}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && (
+        {journalOnScreen && loaded && (
           <LinkPrompts />
         )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
@@ -1278,6 +1299,23 @@ export default function App() {
           <OnboardingView>
             <SyncView />
           </OnboardingView>
+        )}
+        {/* Signed out with a journal already here. Placed beside the other gates
+            rather than inside one of them, and mutually exclusive with all five by
+            construction: this needs signed-out with content, onboarding needs
+            signed-out without it, and the other four need a session. The predicate
+            test pins that, since a state with no screen renders an empty journal
+            and a state with two renders both. */}
+        {choosing && (
+          <SignedOutView
+            onKeepWriting={() => setKeepWriting(true)}
+            onErase={async () => {
+              await signOutAndWipe();
+              window.location.reload();
+            }}
+          >
+            <SyncView />
+          </SignedOutView>
         )}
         {!onboarding && !unlocking && settling && (
           <div style={S.empty}>opening your journal…</div>
@@ -1332,13 +1370,13 @@ export default function App() {
             the spread takes the row as a prop and places it after its own
             review banner, while the other two pages, which carry no banner,
             take it here. */}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded &&
+        {journalOnScreen && loaded &&
           filterOpen &&
           (view === "future" ||
             (activeCol !== null && activeCol.kind === "list")) && (
           <FilterRow filter={filter} onChange={changeFilter} />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "index" && (
+        {journalOnScreen && loaded && view === "index" && (
           <IndexView
             days={days}
             nowKeys={nowKeys}
@@ -1356,7 +1394,7 @@ export default function App() {
             onNewCollection={() => setNewCol({ name: "", kind: "list" })}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "search" && (
+        {journalOnScreen && loaded && view === "search" && (
           <SearchView
             query={query}
             setQuery={setQuery}
@@ -1365,10 +1403,10 @@ export default function App() {
             onOpenCollection={(id) => setView({ col: id })}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "sync" && (
+        {journalOnScreen && loaded && view === "sync" && (
           <SyncView />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "menu" && (
+        {journalOnScreen && loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
             theme={themePref}
@@ -1417,7 +1455,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && activeCol && (
+        {journalOnScreen && loaded && activeCol && (
           <CollectionView
             collection={activeCol}
             entries={days[colPageKey(activeCol.id)] || []}
@@ -1432,7 +1470,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "spread" && (
+        {journalOnScreen && loaded && view === "spread" && (
           <SpreadView
             renderEntry={renderEntry}
             renderScheduledRow={renderScheduledRow}
@@ -1456,7 +1494,7 @@ export default function App() {
             onOpenFutureLog={() => setView("future")}
           />
         )}
-        {!onboarding && !unlocking && !showRecovery && !stuck && !settling && loaded && view === "future" && (
+        {journalOnScreen && loaded && view === "future" && (
           <FutureLogView
             count={futureLogCount}
             groups={futureLogGroups}
@@ -1472,11 +1510,7 @@ export default function App() {
       {/* No capture during onboarding: the launcher sits outside <main>, so
           without this an entry could be written into a journal that has no
           account behind it yet, which is the very thing sign-in-first removes. */}
-      {!onboarding &&
-        !unlocking &&
-        !showRecovery &&
-        !stuck &&
-        !settling &&
+      {journalOnScreen &&
         view !== "sync" &&
         view !== "menu" &&
         // Search is a screen for finding, not writing: the bar would sit over
@@ -1514,7 +1548,7 @@ export default function App() {
       {/* Also gated: /?capture opens this form on launch without touching the
           launcher, so an app-icon shortcut would otherwise walk straight past
           onboarding into an entry form. */}
-      {!onboarding && !unlocking && !showRecovery && !stuck && !settling && captureOpen && (
+      {journalOnScreen && captureOpen && (
         <CaptureForm
           inputRef={inputRef}
           input={input}
