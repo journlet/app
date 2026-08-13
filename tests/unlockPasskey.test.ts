@@ -94,6 +94,12 @@ let askedFor: (Uint8Array | undefined)[] = [];
 let journalReads = 0;
 /** Wrap ids the client asked the server to delete. */
 let deleted: string[] = [];
+/** Credentials the client asked the platform to forget (Signal API). */
+let forgotten: Uint8Array[] = [];
+/** The credential the stubbed platform says answered the assertion. */
+const ANSWERED_ID = new Uint8Array([4, 4, 4, 4]);
+/** Where the answer came from: this device, or another one over the QR tunnel. */
+let attachment: string | null = "platform";
 
 const signIn = (): void => {
   if (!authCallback)
@@ -112,7 +118,16 @@ vi.mock("../src/lib/prf", async (importOriginal) => ({
   deriveSecret: async (_rpId: string | undefined, credentialId?: Uint8Array) => {
     derivations++;
     askedFor.push(credentialId);
-    return prfAnswer();
+    // The pair the real one answers with: the bytes, plus who produced them, which
+    // is what lets a failed unlock disown the credential.
+    return {
+      secret: await prfAnswer(),
+      credentialId: ANSWERED_ID,
+      attachment,
+    };
+  },
+  forgetCredential: async (_rpId: string | undefined, id: Uint8Array) => {
+    forgotten.push(id);
   },
 }));
 
@@ -244,6 +259,7 @@ const boot = async (signedIn = true) => {
   askedFor = [];
   journalReads = 0;
   deleted = [];
+  forgotten = [];
   ringWrites = [];
   localStorage.setItem("journlet-device-id", "phone-id");
   storedRing = {
@@ -280,6 +296,8 @@ beforeEach(async () => {
   localStorage.clear();
   servedFrom("app.journlet.com");
   prfAnswer = async () => SECRET.buffer;
+  // Reset here rather than in boot(), which the tests call after choosing it.
+  attachment = "platform";
   signOutMidAdopt = false;
   wrapRows = [await aWrapOf(SECRET)];
 });
@@ -563,6 +581,83 @@ describe("the four ways it does not work", () => {
     await expect(sync.unlockWithPasskey()).rejects.toBeInstanceOf(
       sync.UnknownCredentialError
     );
+  });
+
+  test("and asks the provider to forget it, so it stops being offered", async () => {
+    // The Signal API half, added 13 August 2026. A credential that authenticates and
+    // opens nothing is dead for this journal, and until now the password manager went
+    // on offering it with nothing on any screen able to say which of two entries was
+    // the useless one — four failed attempts in one morning on the author's account.
+    // Awaited before the throw, so a provider that acts has acted by the time the
+    // screen explains the failure.
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    const sync = await boot();
+
+    await expect(sync.unlockWithPasskey()).rejects.toThrow();
+
+    expect(forgotten).toHaveLength(1);
+    expect(forgotten[0]).toEqual(ANSWERED_ID);
+  });
+
+  test("but says nothing about one answered over the tunnel, however it failed", async () => {
+    // The restriction that arrived before this shipped. On real hardware a Google
+    // Password Manager credential opens its own wrap when Chrome reaches it locally
+    // and returns a different secret when the same credential is reached through the
+    // phone by QR, while an iCloud Keychain one is consistent (Gary, 13 August). So
+    // over the tunnel, "opens nothing" is as likely to mean the transport as the
+    // credential, and signalling would ask a provider to delete a working way in.
+    attachment = "cross-platform";
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    const sync = await boot();
+
+    await expect(sync.unlockWithPasskey()).rejects.toThrow();
+
+    expect(forgotten).toEqual([]);
+  });
+
+  test("and the error says which it was, since the screen must say different things", async () => {
+    // The link between this file and ui/PasskeyUnlock: locally the message may assert
+    // "not one of the ones set up here", and over the tunnel it must not, because the
+    // same symptom is produced by a password manager deriving differently across that
+    // route. Without this assertion the store could stop reporting it and both
+    // messages would still pass their own tests.
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    attachment = "cross-platform";
+    const overTunnel = await boot();
+
+    await expect(overTunnel.unlockWithPasskey()).rejects.toMatchObject({
+      viaTunnel: true,
+    });
+
+    attachment = "platform";
+    const local = await boot();
+
+    await expect(local.unlockWithPasskey()).rejects.toMatchObject({
+      viaTunnel: false,
+    });
+  });
+
+  test("nor about one whose origin the browser did not report", async () => {
+    // Unreported counts as cross-platform, because the two mistakes are not
+    // equivalent: not signalling leaves a dead entry in a list, and signalling
+    // wrongly deletes a passkey somebody depends on.
+    attachment = null;
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    const sync = await boot();
+
+    await expect(sync.unlockWithPasskey()).rejects.toThrow();
+
+    expect(forgotten).toEqual([]);
+  });
+
+  test("and says nothing about a credential that worked", async () => {
+    // The half that would be a real fault: signalling a live credential asks its
+    // provider to delete the only way into this journal.
+    const sync = await boot();
+
+    await sync.unlockWithPasskey();
+
+    expect(forgotten).toEqual([]);
   });
 
   test("and adopts nothing when it does, rather than half-linking", async () => {
