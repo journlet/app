@@ -1,18 +1,27 @@
-// Signed out, with a journal already on the device: the three things somebody
-// might reasonably want, on one screen (Gary, 13 August 2026).
+// Signed out, with a journal already on the device: sign in, or erase this copy
+// (Gary, 13 August 2026).
 //
-// This state used to be reported by a single yellow line on the journal, and the
-// line offered one answer: sign in. §6.1b's decision to keep a signed-out device
-// working is right and stays — it is the second choice here — but two others were
-// missing. Carrying on had to be a decision rather than the absence of one, and
-// there was no way at all to say "I do not want this journal on this device", which
-// is the ordinary want on a borrowed laptop or a second browser opened once.
+// This state used to be a single yellow line on the journal, and the journal stayed
+// readable and writable behind it for as long as nobody signed in. Reported from
+// Chrome on a phone: a journal being read with no account behind it, on a device that
+// had merely lost its session.
 //
-// It stands in front of the journal rather than sitting on the Sync screen because
-// this state is invisible from the journal: a stale spread looks exactly like a
-// current one, and the person who most needs the third choice is the least likely
-// to go looking for it. Nothing is hidden for good — one of the three choices is
-// to carry on reading, and it is on the same screen as the other two.
+// So decision 3 wins here, and it is worth being precise about which rule gave way.
+// "No use without an account" (device-identity-design.md, 29 July) was written about
+// starting a journal, and §6.1b then allowed a signed-out device to keep capturing,
+// on the reasoning that entries merge on the next sign-in "exactly as after a
+// flight". That conflated two states. A device that is offline still has a session
+// and still captures, so the flight case is untouched by this screen: an aeroplane
+// does not sign anybody out. A device with no session at all is the different thing,
+// and letting it keep a readable journal indefinitely is the part that could not be
+// defended (Gary, 13 August: "I thought we had already agreed that all journals need
+// to be logged in first").
+//
+// What that costs, stated rather than hidden: a session that lapses while there is no
+// network cannot be signed back in until there is one, and until then this device
+// shows this screen instead of its journal. Nothing is lost by waiting. Nothing here
+// is erased except by the button that says so, and everything comes back on sign-in,
+// including entries that never reached the server.
 //
 // The sign-in form is SyncView's, passed in as a child, for the same reason
 // OnboardingView takes it that way: the email and code flow, the resend and the
@@ -33,8 +42,6 @@ import type { ReactNode } from "react";
 import { S } from "./styles";
 
 interface SignedOutViewProps {
-  /** Carry on reading and writing here, unsynced. Not remembered; see below. */
-  onKeepWriting: () => void;
   /**
    * Erase this device's copy. Resolves when the wipe is done, and the caller
    * reloads; rejects with something worth showing if it could not finish.
@@ -44,7 +51,6 @@ interface SignedOutViewProps {
 }
 
 export default function SignedOutView({
-  onKeepWriting,
   onErase,
   children,
 }: SignedOutViewProps) {
@@ -76,9 +82,9 @@ export default function SignedOutView({
       </p>
 
       <p style={S.onboardLede}>
-        Sign in with the same email and it picks up where it left off. Nothing is
-        lost by signing in: anything written here since it stopped syncing merges
-        into your journal.
+        Sign in with the same email and it picks up where it left off. Nothing here is
+        lost in the meantime: anything written since it stopped syncing is still on
+        this device, and merges into your journal when you sign in.
       </p>
       {children}
 
@@ -89,26 +95,11 @@ export default function SignedOutView({
           paddingTop: 14,
         }}
       >
-        {/* The §6.1b choice, and it is a choice rather than a default now. It is
-            not remembered on purpose: a device whose entries reach nothing must
-            not be able to look ordinary for weeks, and one tap per launch is the
-            cheapest way to say so that cannot be missed. */}
-        <p style={{ ...S.onboardLede, marginBottom: 6 }}>
-          Or carry on here. Entries stay on this device and merge into your journal
-          the next time you sign in, exactly as after a flight.
-        </p>
-        <p style={{ ...S.onboardNote, marginBottom: 10 }}>
-          This screen comes back the next time the app opens, and the journal
-          carries a line saying it is not syncing.
-        </p>
-        <button className="miniBtn" onClick={onKeepWriting}>
-          keep writing on this device only
-        </button>
-
-        {/* The third choice, which nothing offered anywhere before today. A device
-            that is not yours, or is not yours any more, held a readable journal for
-            as long as it sat there, and the only way to clear it was to sign back
-            in first. */}
+        {/* The other way forward, which nothing offered anywhere before today. A
+            device that is not yours, or is not yours any more, held a readable
+            journal for as long as it sat there, and the only way to clear it was to
+            sign back in first — the opposite of what somebody handing a laptop back
+            wants to do. */}
         {eraseOpen ? (
           <div style={{ marginTop: 16 }}>
             <p style={{ ...S.onboardLede, marginBottom: 6 }}>

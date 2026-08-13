@@ -3,11 +3,14 @@
 // The screen a device gets when its session has lapsed and the journal is still
 // here.
 //
-// Two rules govern the assertions. It must not read as data loss, because the
-// first question somebody asks at this screen is whether their journal is gone,
-// and the answer is no. And erasing has to be hard to do by accident and honest
-// about what it costs, because it is the only irreversible thing on the screen
-// and the device cannot check what reached the server before doing it.
+// Three rules govern the assertions. It must not read as data loss, because the
+// first question somebody asks here is whether their journal is gone, and the
+// answer is no. Erasing has to be hard to do by accident and honest about what it
+// costs, because it is the only irreversible thing on the screen and the device
+// cannot check what reached the server before doing it. And there is no way past
+// it: decision 3 says a journal is not used without an account, and the screen
+// that used to offer "keep writing on this device only" was the hole in that
+// (Gary, 13 August).
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -16,14 +19,13 @@ import SignedOutView from "../../src/ui/SignedOutView";
 const show = (
   props: Partial<React.ComponentProps<typeof SignedOutView>> = {}
 ) => {
-  const onKeepWriting = props.onKeepWriting ?? vi.fn();
   const onErase = props.onErase ?? vi.fn(async () => {});
   render(
-    <SignedOutView onKeepWriting={onKeepWriting} onErase={onErase}>
+    <SignedOutView onErase={onErase}>
       <div>sign-in form</div>
     </SignedOutView>
   );
-  return { onKeepWriting, onErase };
+  return { onErase };
 };
 
 const reveal = () =>
@@ -50,8 +52,11 @@ describe("what it says before it asks anything", () => {
   });
 
   test("that signing in loses nothing, which is the reason to lead with it", () => {
+    // And that waiting loses nothing either, which is what this screen owes anybody
+    // it has locked out with no signal: the entries are still on the device.
     show();
 
+    expect(screen.getByText(/still on\s+this device/i)).toBeTruthy();
     expect(screen.getByText(/merges into your journal/i)).toBeTruthy();
   });
 
@@ -64,25 +69,21 @@ describe("what it says before it asks anything", () => {
   });
 });
 
-describe("carrying on, which is the §6.1b choice", () => {
-  test("is offered, and says what happens to what is written", () => {
-    const { onKeepWriting } = show();
-
-    fireEvent.click(
-      screen.getByRole("button", { name: /keep writing on this device only/i })
-    );
-
-    expect(onKeepWriting).toHaveBeenCalled();
-    expect(screen.getByText(/merge into your journal/i)).toBeTruthy();
-  });
-
-  test("and says it will ask again, rather than pretending to remember", () => {
-    // Deliberately not durable: a device whose entries reach nothing must not be
-    // able to look ordinary for weeks. Saying so is what stops the reappearance
-    // reading as a bug.
+describe("what it does not offer", () => {
+  test("no way past it, which is the whole point of dropping that option", () => {
+    // It shipped with "keep writing on this device only" and that was wrong:
+    // decision 3 says a journal is not used without an account, and one tap per
+    // launch bought an indefinitely readable journal on a device nobody was signed
+    // in to. §6.1b's flight case is untouched — an offline device still has a
+    // session and never reaches this screen.
     show();
 
-    expect(screen.getByText(/comes back the next time the app opens/i)).toBeTruthy();
+    for (const label of [/keep writing/i, /carry on/i, /continue anyway/i, /not now/i])
+      expect(screen.queryByRole("button", { name: label })).toBeNull();
+    // Exactly one button of its own — the reveal for erasing — with sign-in coming
+    // from the child. A count rather than a list of names, so a dismissal added
+    // later under any wording fails here.
+    expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 });
 

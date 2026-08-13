@@ -704,25 +704,16 @@ export default function App() {
     hasLocalContent,
   });
 
-  // Signed out with a journal already here: offer the three answers rather than
-  // only warning about the state (§6.1b, revised 13 August 2026). Not remembered
-  // between launches on purpose — see ui/SignedOutView — so the dismissal is
-  // component state and nothing durable is written.
-  const [keepWriting, setKeepWriting] = useState(false);
-  const choosing =
-    !keepWriting &&
-    needsSignInChoice({
-      configured: isConfigured(),
-      status: syncStatus,
-      loaded,
-      hasLocalContent,
-    });
-  // Signing back in clears the dismissal, so a session that lapses again asks
-  // again. Without this, one tap here would silence the screen for the lifetime
-  // of the tab however many times sync came and went.
-  useEffect(() => {
-    if (syncStatus !== "signed-out") setKeepWriting(false);
-  }, [syncStatus]);
+  // Signed out with a journal already here: sign in, or erase this copy (decision
+  // 3, applied to a lapsed session on 13 August 2026 — see ui/SignedOutView for
+  // which part of §6.1b gave way and what it costs). No way past it, on purpose:
+  // a journal must not be readable on a device with nobody signed in.
+  const choosing = needsSignInChoice({
+    configured: isConfigured(),
+    status: syncStatus,
+    loaded,
+    hasLocalContent,
+  });
 
   // Signed in but unable to open the journal: ask for the key rather than
   // rendering an empty spread, which reads as a journal that has lost its
@@ -1308,7 +1299,6 @@ export default function App() {
             and a state with two renders both. */}
         {choosing && (
           <SignedOutView
-            onKeepWriting={() => setKeepWriting(true)}
             onErase={async () => {
               await signOutAndWipe();
               window.location.reload();

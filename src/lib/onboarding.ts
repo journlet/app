@@ -30,10 +30,10 @@ export interface OnboardingInput {
  * loaded, and holding nothing.
  *
  * The `hasLocalContent` condition is the load-bearing one. A signed-out device
- * that already holds a journal must never have it hidden behind a sign-in
- * screen: sessions expire, and someone whose journal vanished behind a login
- * would reasonably conclude they had lost it. That device goes to
- * `needsSignInChoice` instead, which offers rather than gates.
+ * that already holds a journal is a different case and gets a different screen:
+ * it is offered sign-in or erasure by `needsSignInChoice`, and is never sent back
+ * to "start your journal", which would describe the wrong thing to somebody who
+ * has one.
  *
  * `loaded` matters for the same reason. IndexedDB resolves asynchronously, so
  * for the first moments of every launch a device with years of journal in it
@@ -47,24 +47,23 @@ export const needsOnboarding = (i: OnboardingInput): boolean =>
 
 /**
  * The same state with a journal already on the device: signed out, configured,
- * loaded, holding content. Offer the choices rather than only warning.
+ * loaded, holding content. Sign in, or erase this copy.
  *
- * The exact complement of `needsOnboarding` within the signed-out state, and
- * added 13 August 2026 because the banner alone turned out to be too little. A
- * browser whose session had lapsed was reading its own journal indefinitely with
- * one yellow line about it, and that line only ever offered one thing to do:
- * sign in. Two other answers were reasonable and neither was reachable. Someone
- * may want to keep capturing on a device that is not syncing, which §6.1b is
- * explicit about protecting, and someone may not want the journal on that device
- * at all — a borrowed laptop, a second browser opened once — which nothing
- * offered anywhere (Gary, 13 August).
+ * The exact complement of `needsOnboarding` within the signed-out state, added 13
+ * August 2026, and the one gate here that took something away rather than adding
+ * a screen. A browser whose session had lapsed was reading its own journal
+ * indefinitely behind one yellow line, which is what decision 3 exists to
+ * prevent — "no use without an account" — while §6.1b's allowance for a
+ * signed-out device to keep capturing is what let it happen.
  *
- * Deliberately not a gate in the sense the other four are. Nothing here is
- * hidden for good: one of the three choices is to carry on, and it is on the
- * same screen as the other two. The reason it stands in front of the journal
- * rather than living on the Sync screen is that this state is invisible from the
- * journal — nothing about a stale spread looks stale — and the person who most
- * needs the erase option is the one least likely to go looking for it.
+ * Those two are reconciled by separating states §6.1b had run together. An
+ * offline device still has a session and still captures, so the flight §6.1b was
+ * written for is untouched: nothing about an aeroplane signs anybody out. A
+ * device with no session is the different case, and it now shows the screen
+ * instead of the journal. The cost, which is real, is that a session lapsing with
+ * no network cannot be signed back in until there is one; nothing is erased by
+ * waiting, and everything comes back on sign-in, including entries that never
+ * reached the server.
  *
  * `hasLocalContent` divides the two screens rather than suppressing either, so
  * exactly one of this and `needsOnboarding` is true whenever a configured,

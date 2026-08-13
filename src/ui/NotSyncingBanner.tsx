@@ -21,6 +21,14 @@ import type { SyncStatus } from "../store/sync";
  * expected, "needs-key" and "disabled" have their own explanations on the Sync
  * screen, and "disabled" is a build without sync at all, where a warning would
  * be noise on every launch forever.
+ *
+ * "signed-out" stays true and is, as of 13 August 2026, unreachable from the
+ * journal: a signed-out device holding content now gets ui/SignedOutView instead
+ * of the journal, and one holding nothing gets onboarding, so this banner has no
+ * journal to sit on in that state. Kept rather than flipped to false, because it
+ * is true — writing there would reach nothing — and because if that gate is ever
+ * relaxed the warning should come back with it rather than having to be
+ * remembered.
  */
 const WARNS: Record<SyncStatus, boolean> = {
   disabled: false,
