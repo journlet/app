@@ -1437,12 +1437,31 @@ export const replaceAllPasskeys = async (): Promise<void> => {
   const before = (await listKeeperWraps(supabase)).map((r) => r.wrapId);
   await enrolPasskey();
   await deleteKeeperWraps(supabase, before);
-  // And the notes for them, or the register keeps describing routes that no longer
-  // exist. Reported on hardware the evening §6.1l shipped: every "start again" left a
-  // stray, and the screen's account of a stray — "most likely removed from another
-  // device" — was wrong in the one case that produces them most often. Last, so a
-  // delete that failed leaves the notes with their rows.
-  before.forEach(forgetCredentialNote);
+  // And every note no route answers, not merely the ones this call removed (Gary, 13
+  // August 2026: "surely if I click start again every reference should be removed").
+  // He is right, and the first version of this was scoped wrongly: forgetting only
+  // `before` left anything orphaned by an earlier restart in the register for good,
+  // so an action whose whole promise is one passkey and a clean list delivered a list
+  // with wreckage on it.
+  //
+  // Computed from a fresh read rather than from `before`, which is what keeps §6.1h's
+  // ordering discipline intact: a wrap another device published while this was running
+  // is in that read, so its note is not swept, and only notes with no route at all go.
+  //
+  // The cost, stated because it is real: a stray can be the trace of a route somebody
+  // else removed, and sweeping loses it. Acceptable only here, in an action that
+  // replaces every route on the account anyway, and never on its own.
+  //
+  // Tidying must not fail a reset that has already happened, so a read that throws
+  // leaves the notes rather than the caller believing the passkey was not set up.
+  try {
+    const live = new Set((await listKeeperWraps(supabase)).map((r) => r.wrapId));
+    listCredentialNotes()
+      .filter((n) => !live.has(n.wrapId))
+      .forEach((n) => forgetCredentialNote(n.wrapId));
+  } catch {
+    // Left as it was: the routes are correct, and the list can be tidied by hand.
+  }
 };
 
 /**
