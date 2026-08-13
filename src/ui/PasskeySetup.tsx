@@ -75,13 +75,65 @@ const when = (at: number): string => {
 };
 
 /**
+ * When a route last opened the journal, and from where.
+ *
+ * The changing half of a row, and the half that answers "was that me": the register
+ * has held `lastOpenedOn` and `lastOpenedRoute` since it was written and the screen
+ * showed neither, so a phone unlocking a wrap enrolled on the Mac read as a bare
+ * timestamp. Reported on hardware by Gary on 13 August 2026, the same evening it
+ * shipped.
+ *
+ * The route is named because §6.1k makes it the interesting part: a credential
+ * reached locally and the same credential reached through the tunnel derive different
+ * secrets, so "opened from the phone" and "opened by the phone on behalf of this
+ * machine" are different events and only one of them says the phone holds a working
+ * passkey. Where is omitted when the title already names it, which happens on a row
+ * the register knows only from an unlock.
+ */
+const lastOpenedSentence = (
+  note: CredentialNote | null,
+  titleNamesEnrolment: boolean
+): string => {
+  if (!note?.lastOpenedAt)
+    return "has not opened this journal on any device yet";
+  const where =
+    titleNamesEnrolment && note.lastOpenedOn ? ` on ${note.lastOpenedOn}` : "";
+  const how =
+    note.lastOpenedRoute === "this device"
+      ? ", with a passkey on that device"
+      : note.lastOpenedRoute === "another device"
+        ? ", with a passkey from another device"
+        : "";
+  return `last opened ${when(note.lastOpenedAt)}${where}${how}`;
+};
+
+/**
  * The saved routes, laid out to be compared against a password manager.
  *
  * Loaded on request rather than with the box: it costs a round trip, it is only
  * wanted when somebody is actually reconciling, and a list unfurling under a
  * one-line summary is the wall of text this box was cut back from on 12 August.
  */
-function RouteList({ textStyle }: { textStyle: React.CSSProperties }) {
+function RouteList({
+  textStyle,
+  version,
+  onChanged,
+}: {
+  textStyle: React.CSSProperties;
+  /**
+   * Bumped by the box whenever it enrols or starts again.
+   *
+   * Without it this list kept whatever it had loaded, so "start again" left the wrap
+   * it had just deleted on the screen — described as "not recognised", since that
+   * wrap predated the register, and offering a remove that would have deleted
+   * nothing and reported success. Found on hardware within minutes of shipping
+   * (Gary, 13 August 2026), which is the second time a two-part screen has gone
+   * stale in one direction: §6.1c's register had the same shape of bug.
+   */
+  version: number;
+  /** Told when a removal happened, so the count above can stop being wrong too. */
+  onChanged: () => void;
+}) {
   const [state, setState] = useState<{
     routes: RouteListing[];
     strays: CredentialNote[];
@@ -105,6 +157,15 @@ function RouteList({ textStyle }: { textStyle: React.CSSProperties }) {
     }
   }, []);
 
+  // Only when something is already showing: the round trip is deliberate elsewhere,
+  // and enrolling should not open a list nobody asked for.
+  useEffect(() => {
+    if (version > 0 && state) void load();
+    // `state` is deliberately not a dependency: including it would reload on the
+    // reload's own result, for ever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, load]);
+
   const remove = async (wrapId: string) => {
     setProblem(null);
     setBusy(true);
@@ -112,6 +173,7 @@ function RouteList({ textStyle }: { textStyle: React.CSSProperties }) {
       await removePasskeyRoute(wrapId);
       setRemoving(null);
       await load();
+      onChanged();
     } catch {
       setProblem("Could not remove that one. Nothing has changed.");
     } finally {
@@ -154,9 +216,10 @@ function RouteList({ textStyle }: { textStyle: React.CSSProperties }) {
             style={{ ...textStyle, fontSize: 13, marginTop: 0, marginBottom: 0 }}
           >
             {r.note?.enrolledAt ? `set up ${when(r.note.enrolledAt)}. ` : ""}
-            {r.note?.lastOpenedAt
-              ? `last opened ${when(r.note.lastOpenedAt)}`
-              : "has not opened this journal on any device yet"}
+            {lastOpenedSentence(
+              r.note,
+              !!(r.note?.enrolledAt && r.note?.enrolledOn)
+            )}
             {/* The two measured fields, last and small. They are what settles a
                 disagreement between this list and a password manager, and §6.1k is
                 why the second one is here: the same credential reached two ways
@@ -262,6 +325,8 @@ export default function PasskeySetup({
   const [adding, setAdding] = useState(false);
   /** Whether the start-again step is open. Same reason: its caveat comes first. */
   const [replacing, setReplacing] = useState(false);
+  /** Bumped when the routes change, so the list below reloads rather than going stale. */
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     void probeCredentialSupport().then(setCapability);
@@ -299,6 +364,7 @@ export default function PasskeySetup({
       setAdding(false);
       setReplacing(false);
       refreshCount();
+      setVersion((v) => v + 1);
     } catch (e) {
       // Shared with the first-run screen, which says the same three things.
       setProblem(enrolFailureMessage(e));
@@ -345,10 +411,22 @@ export default function PasskeySetup({
           <p style={{ ...textStyle, marginTop: 0, marginBottom: 0, fontWeight: 600 }}>
             {routeCount(routes)}
           </p>
+          {/* Above the list rather than below it, which is where it was and which
+              read as a description of the top row: after "start again" the line
+              "Passkey set up, and the older routes removed" sat under a stale row
+              saying "not recognised", so the two together said the new passkey was
+              unrecognised (Gary, on hardware, 13 August 2026). */}
+          {done && (
+            <p style={{ ...textStyle, fontWeight: 600, marginBottom: 0 }}>{done}</p>
+          )}
           {/* The list, once there is something to list: the answer to the question
               the count could only ever raise, which is which of my passkeys these
               are and whether one of them leads nowhere (§6.1l). */}
-          <RouteList textStyle={textStyle} />
+          <RouteList
+            textStyle={textStyle}
+            version={version}
+            onChanged={refreshCount}
+          />
           {details && (
             <>
               <p style={textStyle}>
@@ -423,7 +501,11 @@ export default function PasskeySetup({
         <p style={{ ...textStyle, marginBottom: 0 }}>{cannot}</p>
       ) : (
         <>
-          {done && <p style={{ ...textStyle, fontWeight: 600 }}>{done}</p>}
+          {/* Still here for the first passkey, where there is no list above to put
+              it over and `enrolled` is false until the count comes back. */}
+          {done && !enrolled && (
+            <p style={{ ...textStyle, fontWeight: 600 }}>{done}</p>
+          )}
 
           {/* On an account with a passkey, adding another is two taps: the first
               reveals what to expect, the second does it. The warnings have to come
