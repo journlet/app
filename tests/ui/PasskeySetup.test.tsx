@@ -618,6 +618,43 @@ describe("the list of saved routes (§6.1l)", () => {
     ).toBeTruthy();
   });
 
+  test("lists every device that has opened the route, not just the last", async () => {
+    // "It does not acknowledge that I used it on my phone" (Gary, 13 August 2026):
+    // last-opened is overwritten by whichever device unlocked most recently, so the
+    // phone's use disappeared as soon as the Mac unlocked again.
+    routes = 1;
+    routeRows = [
+      {
+        wrapId: "w1",
+        note: {
+          ...NAMED.note,
+          openedBy: ["Installed app (iOS)", "Installed app (macOS)"],
+        },
+      },
+    ];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText(
+        /opened on Installed app \(iOS\) and Installed app \(macOS\), most recently/i
+      )
+    ).toBeTruthy();
+  });
+
+  test("names the password manager in the title when it is known", async () => {
+    routes = 1;
+    routeRows = [
+      { wrapId: "w1", note: { ...NAMED.note, provider: "iCloud Keychain" } },
+    ];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText("Set up on Installed app (macOS), in iCloud Keychain")
+    ).toBeTruthy();
+  });
+
   test("a route that has never opened the journal says exactly that", async () => {
     routes = 1;
     routeRows = [{ wrapId: "w1", note: null }];

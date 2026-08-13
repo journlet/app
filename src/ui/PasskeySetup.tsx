@@ -94,21 +94,37 @@ const when = (at: number): string => {
  * passkey. Where is omitted when the title already names it, which happens on a row
  * the register knows only from an unlock.
  */
+/** "Chrome", "Chrome and the installed app", "Chrome, Safari and the installed app". */
+const listSentence = (parts: readonly string[]): string =>
+  parts.length <= 1
+    ? (parts[0] ?? "")
+    : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+
 const lastOpenedSentence = (
   note: CredentialNote | null,
   titleNamesEnrolment: boolean
 ): string => {
   if (!note?.lastOpenedAt)
     return "has not opened this journal on any device yet";
+  // Every client that has used it, not only the most recent one. Last-opened alone is
+  // overwritten by whichever device unlocked last, so a phone's use vanished the next
+  // time the Mac unlocked and the row stopped acknowledging it happened.
+  const clients = note.openedBy ?? [];
   const where =
-    titleNamesEnrolment && note.lastOpenedOn ? ` on ${note.lastOpenedOn}` : "";
+    clients.length > 1
+      ? ` on ${listSentence(clients)}`
+      : titleNamesEnrolment && note.lastOpenedOn
+        ? ` on ${note.lastOpenedOn}`
+        : "";
   const how =
     note.lastOpenedRoute === "this device"
       ? ", with a passkey on that device"
       : note.lastOpenedRoute === "another device"
         ? ", with a passkey from another device"
         : "";
-  return `last opened ${when(note.lastOpenedAt)}${where}${how}`;
+  return clients.length > 1
+    ? `opened${where}, most recently ${when(note.lastOpenedAt)}${how}`
+    : `last opened ${when(note.lastOpenedAt)}${where}${how}`;
 };
 
 /**

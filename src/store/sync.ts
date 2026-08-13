@@ -1380,7 +1380,7 @@ export const enrolPasskey = async (): Promise<void> => {
     throw new Error(
       "Passkeys can only be set up on journlet.com. This copy of the app is served from somewhere else, and a passkey created here could never open your journal on the real one."
     );
-  const credentialId = await createCredential(
+  const { id: credentialId, provider } = await createCredential(
     { email: session?.user.email ?? "" },
     rpId
   );
@@ -1406,6 +1406,9 @@ export const enrolPasskey = async (): Promise<void> => {
     wrapId,
     credentialId: credentialIdText(credentialId),
     fingerprint: await secretFingerprint(secret),
+    // Where the platform named it: an AAGUID this build does not know, or one the
+    // client anonymised, leaves the row without a provider rather than with a guess.
+    provider,
     attachment,
   });
 };

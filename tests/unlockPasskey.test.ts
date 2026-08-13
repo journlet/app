@@ -113,7 +113,9 @@ vi.mock("../src/lib/prf", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/prf")>()),
   createCredential: async () => {
     created++;
-    return CREATED_ID;
+    // The provider comes from the AAGUID and the platform is free to withhold it, so
+    // null is the ordinary answer rather than a degraded one (§6.1l).
+    return { id: CREATED_ID, provider: null };
   },
   deriveSecret: async (_rpId: string | undefined, credentialId?: Uint8Array) => {
     derivations++;
