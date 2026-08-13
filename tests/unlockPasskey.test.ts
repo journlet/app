@@ -224,6 +224,9 @@ vi.mock("../src/store/journal", () => ({
   get devices() {
     return doc.getMap("devices");
   },
+  get credentials() {
+    return doc.getMap("credentials");
+  },
   REMOTE_ORIGIN: "remote",
   wipeLocalJournal: async () => {},
 }));
@@ -335,6 +338,42 @@ describe("a device unlocking from a passkey", () => {
     expect(Object.keys(doc.getMap("devices").toJSON())).toContain("phone-id");
   });
 
+  test("records which wrap opened, so the route can be named later (§6.1l)", async () => {
+    // The one fact the app can state about a saved route, and it is measured rather
+    // than inferred: unwrapKeeperKeyFromAny reports the row that authenticated. On an
+    // account whose wraps predate the register this is also the migration — a row
+    // appears the first time its route is used, and one that never appears is the
+    // candidate for a wrap nothing can open (§6.1f).
+    const sync = await boot();
+
+    await sync.unlockWithPasskey();
+
+    const notes = doc.getMap("credentials").toJSON() as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const [wrapId] = Object.keys(notes);
+    expect(wrapId).toBe(wrapRows[0].wrap_id);
+    expect(notes[wrapId].lastOpenedAt).toBeGreaterThan(0);
+    // Not an enrolment this device saw, so it must not claim one: a made-up setup
+    // date is exactly the plausible falsehood §6.1b is the account of.
+    expect(notes[wrapId].enrolledAt).toBe(0);
+  });
+
+  test("and the route it names is the one the server still has", async () => {
+    // Reconciliation is one-way by design: the rows come from keeper_wraps and the
+    // notes only decorate them, so a note can never hide a route from the screen.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+
+    const listed = await sync.listPasskeyRoutes();
+    expect(listed.routes.map((r) => r.wrapId)).toEqual(
+      wrapRows.map((r) => r.wrap_id)
+    );
+    expect(listed.routes[0].note).not.toBeNull();
+    expect(listed.strays).toHaveLength(0);
+  });
+
   test("tries every wrap, so the newest credential is not the only one that works", async () => {
     // No wrap is privileged and the rows cannot say which credential they belong to
     // (§6.5), so the one that opens may be anywhere in the list. Two decoys in
@@ -403,6 +442,32 @@ describe("adding a passkey from a device that is already unlocked", () => {
     await sync.enrolPasskey();
 
     expect(wrapRows).toHaveLength(2);
+  });
+
+  test("and the enrolment is recorded against the wrap it wrote", async () => {
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    const before = new Set(Object.keys(doc.getMap("credentials").toJSON()));
+
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    await sync.enrolPasskey();
+
+    const notes = doc.getMap("credentials").toJSON() as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const added = Object.keys(notes).filter((id) => !before.has(id));
+    expect(added).toHaveLength(1);
+    const note = notes[added[0]];
+    expect(note.enrolledAt).toBeGreaterThan(0);
+    expect(note.enrolledOn).toBeTruthy();
+    // The route is part of what a wrap is (§6.1k): the same credential reached
+    // through the phone derives a different secret, so a wrap written locally is
+    // known to work locally and nowhere else is promised.
+    expect(note.enrolledRoute).toBeTruthy();
+    // Eight hex characters of the secret, which is what tells two rows apart when
+    // everything else about them matches (IDR-017).
+    expect(note.fingerprint).toMatch(/^[0-9A-F]{8}$/);
   });
 
   test("and the wrap it wrote opens on the credential it enrolled", async () => {

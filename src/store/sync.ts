@@ -19,6 +19,14 @@ import {
   touchThisDevice,
 } from "./devices";
 import {
+  forgetCredentialNote,
+  listCredentialNotes,
+  noteEnrolment,
+  noteUnlock,
+  reconcileRoutes,
+} from "./credentials";
+import type { RouteListing } from "./credentials";
+import {
   approveLinkRequest,
   claimWrappedDataKeys,
   listLinkRequests,
@@ -61,7 +69,9 @@ import {
 } from "../lib/keeperWrap";
 import {
   createCredential,
+  credentialIdText,
   deriveSecret,
+  secretFingerprint,
   forgetCredential,
   relyingPartyId,
 } from "../lib/prf";
@@ -1377,7 +1387,7 @@ export const enrolPasskey = async (): Promise<void> => {
   // Naming the credential just created, deliberately: left open, the platform may
   // answer with an older Journlet passkey and the wrap would belong to that one,
   // so this enrolment would add no new route while reporting that it had.
-  const { secret } = await deriveSecret(rpId, credentialId);
+  const { secret, attachment } = await deriveSecret(rpId, credentialId);
 
   const wrapId = newWrapId();
   const wrapped = await wrapKeeperKey(held.keeperKey, secret, {
@@ -1387,6 +1397,17 @@ export const enrolPasskey = async (): Promise<void> => {
   if (session?.user.id !== userId)
     throw new Error("Signed out before the passkey could be saved");
   await publishKeeperWrap(supabase, userId, wrapId, wrapped);
+  // Recorded only once the route exists, so a failed publish leaves no note
+  // describing something that was never saved (§6.1l). The route is kept because a
+  // wrap belongs to a credential *and* a transport: §6.1k measured the same
+  // credential deriving a different secret through the phone, so a wrap written
+  // over one route keeps working over that route and not necessarily the other.
+  noteEnrolment({
+    wrapId,
+    credentialId: credentialIdText(credentialId),
+    fingerprint: await secretFingerprint(secret),
+    attachment,
+  });
 };
 
 /**
@@ -1416,6 +1437,46 @@ export const replaceAllPasskeys = async (): Promise<void> => {
   const before = (await listKeeperWraps(supabase)).map((r) => r.wrapId);
   await enrolPasskey();
   await deleteKeeperWraps(supabase, before);
+};
+
+/**
+ * Every saved route, with what the register knows about each (§6.1l).
+ *
+ * Built from the server's rows and decorated with the notes, never the other way
+ * round: a note that is missing, stale or tampered with must leave an unlabelled
+ * route on the screen rather than a route missing from it. `strays` are notes whose
+ * wrap has gone, usually because another device removed it.
+ *
+ * The reason this exists is reconciliation — laying this list beside what is actually
+ * in a password manager and finding the row that matches nothing. It cannot be shown
+ * before the journal is open, because the register is inside it (§6.5), and no
+ * arrangement of this code will change that.
+ */
+export const listPasskeyRoutes = async (): Promise<{
+  routes: RouteListing[];
+  strays: ReturnType<typeof listCredentialNotes>;
+}> => {
+  if (!supabase) throw new Error("Sync is not configured");
+  const wrapIds = (await listKeeperWraps(supabase)).map((r) => r.wrapId);
+  return reconcileRoutes(wrapIds, listCredentialNotes());
+};
+
+/**
+ * Remove one saved route, named by the id the server gave us.
+ *
+ * What §6.1h ruled out and this makes possible, so its limit has to travel with it:
+ * this is not revocation. It withdraws a stored route, and a credential that has
+ * already unwrapped the keeper key keeps it, as does anyone holding the journal key
+ * code. The interface says so at the point of the action.
+ *
+ * The id comes from `listPasskeyRoutes`, which read it from `keeper_wraps`, so a
+ * corrupted register can misdescribe a route and cannot aim a delete at a different
+ * one. The note goes after the row, and only if the row went.
+ */
+export const removePasskeyRoute = async (wrapId: string): Promise<void> => {
+  if (!supabase) throw new Error("Sync is not configured");
+  await deleteKeeperWraps(supabase, [wrapId]);
+  forgetCredentialNote(wrapId);
 };
 
 /**
@@ -1471,6 +1532,19 @@ export const unlockWithPasskey = async (): Promise<void> => {
 
   await adoptKeeperKey(opened.keeperKey);
   await connect();
+  // After the connect rather than before it, which is the ordering §6.1c had to
+  // correct in the device register: this device's journal arrives during that call,
+  // and writing first meant the write raced the merge instead of riding it.
+  //
+  // The wrap is known rather than guessed — `unwrapKeeperKeyFromAny` reports which
+  // row authenticated — so this is the one place the app can say a particular saved
+  // route works, which is what makes a row that never fills in meaningful.
+  noteUnlock({
+    wrapId: opened.wrapId,
+    credentialId: credentialId ? credentialIdText(credentialId) : undefined,
+    fingerprint: await secretFingerprint(secret),
+    attachment,
+  });
 };
 
 /**

@@ -158,7 +158,15 @@ describe("an account that already has one", () => {
 
     expect(screen.getByText(/sign in with the same email/i)).toBeTruthy();
     expect(screen.getByText(/Unlock with a passkey/i)).toBeTruthy();
-    expect(screen.getByText(/not recorded on\s+the server/i)).toBeTruthy();
+    // The limit narrowed on 13 August 2026 rather than going away: the register
+    // (§6.1l) can now say what a route is, and still nothing about it is on the
+    // server, and it still cannot say whether a route lives in this browser.
+    expect(
+      screen.getByText(/is\s+recorded on the server/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/cannot tell you whether one of them is in this\s+browser/i)
+    ).toBeTruthy();
   });
 
   test("and the explaining includes which manager covers a borrowed computer", async () => {
