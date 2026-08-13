@@ -151,13 +151,13 @@ describe("a signed-in device that cannot open the journal", () => {
 });
 
 describe("signed out with a journal already on the device", () => {
-  /** The lapsed session: content here, nothing reaching the server. */
+  /** The lapsed session: content here, no session, nothing reaching the server. */
   const lapsed: OnboardingInput = { ...fresh, hasLocalContent: true };
 
-  test("is offered the three choices", () => {
-    // Added 13 August 2026. The yellow banner was the whole answer before, and it
-    // only ever offered one thing to do — sign in — while two other reasonable
-    // answers, carrying on unsynced and erasing this copy, were unreachable.
+  test("is asked to sign in or to erase this copy", () => {
+    // Added 13 August 2026. The yellow banner was the whole answer before, and the
+    // journal stayed readable behind it indefinitely, which is what decision 3
+    // forbids: no use without an account.
     expect(needsSignInChoice(lapsed)).toBe(true);
   });
 

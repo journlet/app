@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
 // The one thing the predicate tests cannot check: that App actually puts the
-// screen in front of the journal, and takes it away again when somebody chooses
-// to carry on.
+// screen in front of the journal, and that nothing gets past it.
 //
 // Worth a mounted test rather than another unit one, because the failure it
 // guards is a wiring failure. Six screens are rendered as six independent
@@ -12,7 +11,7 @@
 // passes every component test. This is the assertion that would not.
 
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 
 const snapshot = {
   status: "signed-out" as const,
@@ -109,30 +108,32 @@ describe("a signed-out device holding a journal", () => {
     expect(launcher()).toBeNull();
   });
 
-  test("and gets it back the moment it chooses to carry on", () => {
-    // The escape hatch is the whole reason this is allowed to stand in front of
-    // a journal that exists. If it did not work, §6.1b would be broken rather
-    // than served.
+  test("and there is no way through to it", () => {
+    // The version that shipped first had "keep writing on this device only" here,
+    // which meant a journal readable and writable on a device with nobody signed
+    // in, for as long as somebody kept tapping past this. Decision 3 says
+    // otherwise, and this is the assertion that keeps it that way: the only
+    // buttons on screen belong to signing in or erasing.
     render(<App />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /keep writing on this device only/i })
-    );
-
-    expect(screen.getByText(/a task from before the session lapsed/i)).toBeTruthy();
-    expect(launcher()).toBeTruthy();
-    expect(screen.queryByText(/This device is signed out/i)).toBeNull();
+    for (const label of [/keep writing/i, /carry on/i, /continue/i, /not now/i, /skip/i])
+      expect(screen.queryByRole("button", { name: label })).toBeNull();
+    expect(screen.queryByText(/a task from before the session lapsed/i)).toBeNull();
+    expect(launcher()).toBeNull();
   });
 
-  test("with the not-syncing line still on the journal it goes back to", () => {
-    // Carrying on is a choice about a bad state, not a fix for it, so the
-    // warning §6.1b put on the journal has to survive the choice.
+  test("the capture form cannot be opened behind it either", () => {
+    // /?capture opens the form on launch without touching the launcher, which is
+    // how an app-icon shortcut walks past a gate. An entry logged there would go
+    // into a journal on a device with no account behind it.
+    window.history.replaceState(null, "", "/?capture");
     render(<App />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /keep writing on this device only/i })
-    );
-
-    expect(screen.getByText(/Not syncing/i)).toBeTruthy();
+    // The dialog itself, by role and name, rather than a placeholder string: the
+    // placeholder varies with what is being captured, and an assertion pointed at
+    // it passed while the form was on screen.
+    expect(screen.queryByRole("dialog", { name: /new entry/i })).toBeNull();
+    expect(screen.getByText(/This device is signed out/i)).toBeTruthy();
+    window.history.replaceState(null, "", "/");
   });
 });
