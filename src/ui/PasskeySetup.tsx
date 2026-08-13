@@ -184,10 +184,24 @@ export default function PasskeySetup({
               {/* The honest limit, and the reason the line above is a count rather
                   than "this device is set up": §6.5 keeps which device or password
                   manager holds each one off the server deliberately. */}
-              <p style={{ ...textStyle, marginBottom: 0 }}>
+              <p style={textStyle}>
                 Which device or password manager holds each one is not recorded on
                 the server, so this cannot tell you whether one of them is in this
                 browser.
+              </p>
+              {/* Advice rather than mechanism, and it earns its place: measured on
+                  13 August 2026 (spec §6.1k), one credential gives a different secret
+                  when a browser reaches it directly and when the same credential is
+                  reached by scanning a code from another device. On Apple devices the
+                  built-in manager is consistent across both; Google Password Manager
+                  was not. So the way to have one passkey that covers a borrowed
+                  machine is to keep one in the device's own manager, and saying that
+                  is cheaper than every screen having to explain the failure. */}
+              <p style={{ ...textStyle, marginBottom: 0 }}>
+                Worth having one in your device's own manager — iCloud Keychain on an
+                iPhone or Mac. A borrowed computer with none of your passkeys on it
+                unlocks by scanning a code from your phone, and that route is reliable
+                from the device's own manager and not from every other one.
               </p>
             </>
           )}

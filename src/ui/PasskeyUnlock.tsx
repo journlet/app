@@ -73,7 +73,7 @@ export default function PasskeyUnlock({ textStyle }: PasskeyUnlockProps) {
               // 2026 — a Google-held credential opens its own wrap locally and not
               // through the phone, where an iCloud-held one works either way). Saying
               // "not set up here" would send somebody off to delete a working passkey.
-              `That passkey was used from another device by scanning the code, and it did not open this journal. Two things do that: it may not be one of the ones set up here, or the password manager holding it may produce a different secret over that route than it does on the device it lives on. If you have a passkey saved on this device, try that one. ${OTHER_WAYS}`
+              `That passkey was used from another device by scanning the code, and it did not open this journal. Two things do that. It may not be one of the ones set up here. Or the password manager holding it produces a different secret over that route than on the device it lives on, which is measured behaviour for at least one manager rather than a fault — a passkey in your phone's own manager, iCloud Keychain on an iPhone, is the one that works this way. ${OTHER_WAYS} If you come back to this computer often, unlock it with your journal key now and then set up a passkey from it, under Sync: the one it saves will open it by scanning next time.`
             : `That passkey is not one of the ones set up for this journal. Password managers do not share passkeys with each other, so one made in a different manager cannot open it. ${OTHER_WAYS}`
         );
       else if (e instanceof PrfUnsupportedError)

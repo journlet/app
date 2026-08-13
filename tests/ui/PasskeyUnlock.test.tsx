@@ -161,7 +161,11 @@ describe("the four ways it fails, each with a way on", () => {
         .toBeTruthy()
     );
     expect(screen.getByText(/different secret over that route/i)).toBeTruthy();
-    expect(screen.getByText(/passkey saved on this device/i)).toBeTruthy();
+    // Two ways on rather than a dead end: which passkey does work this way, and what
+    // to do if this machine is one you come back to. The second is the only route by
+    // which the scanning path ever starts working here, and no screen said it.
+    expect(screen.getByText(/iCloud Keychain on an iPhone/i)).toBeTruthy();
+    expect(screen.getByText(/set up a passkey from it/i)).toBeTruthy();
     // And it must not assert the local explanation, which is the one that misleads.
     expect(
       screen.queryByText(/not one of the ones set up for this journal/i)

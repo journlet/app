@@ -161,6 +161,23 @@ describe("an account that already has one", () => {
     expect(screen.getByText(/not recorded on\s+the server/i)).toBeTruthy();
   });
 
+  test("and the explaining includes which manager covers a borrowed computer", async () => {
+    // Measured on 13 August 2026 (§6.1k): one credential yields a different secret
+    // when a browser reaches it directly and when it is reached by scanning a code
+    // from another device, and the device's own manager was the one consistent across
+    // both. So this is advice somebody can act on before they are stuck, rather than
+    // another failure message after they are. Behind "what this means", because it is
+    // nuance rather than the one line the box exists to show.
+    routes = 1;
+    await show();
+
+    expect(screen.queryByText(/iCloud Keychain/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /what this means/i }));
+
+    expect(screen.getByText(/device's own manager/i)).toBeTruthy();
+    expect(screen.getByText(/borrowed computer/i)).toBeTruthy();
+  });
+
   test("but a count it could not read is not treated as a passkey", async () => {
     // countPasskeyRoutes answers null offline or signed out. Claiming a passkey
     // exists on that basis would be the interface asserting something it does not
