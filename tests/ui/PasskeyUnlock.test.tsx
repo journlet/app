@@ -95,7 +95,13 @@ describe("when it offers nothing at all", () => {
     await show();
 
     await waitFor(() => expect(button()).toBeTruthy());
-    expect(screen.getByText(/offers to use your\s+phone/i)).toBeTruthy();
+    // And the phone route is named, without being promised. It works for a passkey in
+    // iCloud Keychain and fails for a Google-held one unless the device can reach
+    // Password Manager itself (Gary's hardware, 13 August 2026), so a flat promise
+    // here is how somebody concludes their passkey is broken.
+    expect(screen.getByText(/use the passkey on\s+your phone/i)).toBeTruthy();
+    expect(screen.getByText(/not certain/i)).toBeTruthy();
+    expect(screen.getByText(/journal key works everywhere/i)).toBeTruthy();
   });
 
   test("a count that could not be read, which is not the same as zero", async () => {
