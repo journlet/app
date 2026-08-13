@@ -31,17 +31,30 @@ let replace: () => Promise<void> = async () => {
 
 /** What the register says about each saved route, and what removal did. */
 let routeRows: { wrapId: string; note: Record<string, unknown> | null }[] = [];
+let strayRows: Record<string, unknown>[] = [];
 let removed: string[] = [];
+let forgotten: string[] = [];
 
 vi.mock("../../src/store/sync", () => ({
   countPasskeyRoutes: async () => routes,
   enrolPasskey: () => enrol(),
   replaceAllPasskeys: () => replace(),
-  listPasskeyRoutes: async () => ({ routes: routeRows, strays: [] }),
+  listPasskeyRoutes: async () => ({ routes: routeRows, strays: strayRows }),
   removePasskeyRoute: async (wrapId: string) => {
     removed.push(wrapId);
     routeRows = routeRows.filter((r) => r.wrapId !== wrapId);
     routes = routeRows.length;
+  },
+}));
+
+// Partial, so describeRoute and onCredentialsChange stay real: the wording of a row
+// is the thing under test and forgetting is the only part that touches the document.
+vi.mock("../../src/store/credentials", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/store/credentials")>()),
+  forgetCredentialNote: (wrapId: string) => {
+    forgotten.push(wrapId);
+    strayRows = strayRows.filter((s) => s.wrapId !== wrapId);
+    return true;
   },
 }));
 
@@ -99,7 +112,9 @@ const openList = async () => {
 
 beforeEach(() => {
   routeRows = [];
+  strayRows = [];
   removed = [];
+  forgotten = [];
   routes = 0;
   usable = true;
   localCheck = true;
@@ -668,5 +683,64 @@ describe("the list of saved routes (§6.1l)", () => {
     expect(screen.getByText(/keeps its copy/i)).toBeTruthy();
     expect(screen.getByText(/journal key still works/i)).toBeTruthy();
     expect(removed).toEqual([]);
+  });
+});
+
+describe("notes whose route has gone (§6.1l)", () => {
+  const STRAY = {
+    wrapId: "w-gone",
+    enrolledAt: Date.now(),
+    enrolledOn: "Chrome (macOS)",
+    enrolledRoute: "this device",
+    credentialId: "abcdefghijklmn",
+    fingerprint: "0E6BC7E0",
+  };
+
+  test("is listed with what was known about it, and can be forgotten", async () => {
+    // Forgetting notes with their rows only helps from the day it shipped. Everything
+    // orphaned by an earlier "start again" was in the register with nothing able to
+    // reach it, which is how the device register got its forget on 12 August.
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    strayRows = [STRAY];
+    await show();
+    await openList();
+
+    expect(screen.getByText("No longer a saved route")).toBeTruthy();
+    expect(screen.getByText(/was set up on Chrome \(macOS\)/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /forget this note/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("No longer a saved route")).toBeNull()
+    );
+    expect(forgotten).toEqual(["w-gone"]);
+    // The routes themselves are untouched: forgetting is tidying and nothing else.
+    expect(removed).toEqual([]);
+    expect(screen.getByText("Not recognised")).toBeTruthy();
+  });
+
+  test("does not blame another device for what start again did here", async () => {
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    strayRows = [STRAY];
+    await show();
+    await openList();
+
+    expect(screen.getByText(/Removed here or on another device/i)).toBeTruthy();
+    expect(screen.queryByText(/most likely removed from another device/i)).toBeNull();
+  });
+
+  test("says a row is a passkey rather than a device", async () => {
+    // The count above says passkeys and the rows below read as devices, which is how
+    // one row and two devices came to look like a fault.
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText(/One row for each saved passkey, not for each device/i)
+    ).toBeTruthy();
   });
 });

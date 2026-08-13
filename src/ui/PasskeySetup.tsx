@@ -24,7 +24,11 @@ import {
   removePasskeyRoute,
   replaceAllPasskeys,
 } from "../store/sync";
-import { describeRoute, onCredentialsChange } from "../store/credentials";
+import {
+  describeRoute,
+  forgetCredentialNote,
+  onCredentialsChange,
+} from "../store/credentials";
 import type { CredentialNote, RouteListing } from "../store/credentials";
 import { probeCredentialSupport, relyingPartyId } from "../lib/prf";
 import type { PrfCapability } from "../lib/prf";
@@ -177,6 +181,20 @@ function RouteList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, load]);
 
+  /**
+   * Drop a note whose route has gone, which is tidying and nothing else.
+   *
+   * Needed because the first fix could only forget notes as it deleted their rows, so
+   * every note orphaned by a "start again" before that shipped is in the register for
+   * good with nothing in the interface able to reach it (Gary, on hardware, 13 August
+   * 2026). The device register learned the same lesson on 12 August, from the same
+   * cause: a list that is mostly wreckage answers nothing at all (§6.1c).
+   */
+  const forget = (wrapId: string) => {
+    forgetCredentialNote(wrapId);
+    void load();
+  };
+
   const remove = async (wrapId: string) => {
     setProblem(null);
     setBusy(true);
@@ -204,6 +222,16 @@ function RouteList({
 
   return (
     <div style={{ marginTop: 10 }}>
+      {/* Said before the rows, because the box above counts passkeys and the rows
+          below look like devices. Gary read one row and two devices as a fault, which
+          it is not: a passkey set up on the Mac and used on the phone is one saved
+          route used twice, and the phone gets a row of its own only by being given a
+          passkey of its own. */}
+      <p style={{ ...textStyle, fontSize: 13, marginTop: 0 }}>
+        One row for each saved passkey, not for each device. A passkey set up here and
+        used on your phone stays a single row; “add another passkey” on the phone gives
+        it one of its own, which is worth having.
+      </p>
       {state.routes.map((r) => (
         <div
           key={r.wrapId}
@@ -284,13 +312,54 @@ function RouteList({
         <p style={{ ...textStyle, marginBottom: 0 }}>No saved passkey routes.</p>
       )}
 
-      {/* A note whose route has gone. Shown rather than hidden: the usual cause is
-          another device having removed it, and the unusual cause is worth seeing. */}
+      {/* Notes whose routes have gone. Rows rather than a count, because a count
+          cannot be acted on and these are the ones you want rid of. The cause is not
+          guessed at any more: it used to read "most likely removed from another
+          device", which was wrong for the case that produces them most often, namely
+          a "start again" on this device before notes were forgotten with their
+          rows. */}
+      {state.strays.map((s) => (
+        <div
+          key={s.wrapId}
+          style={{
+            borderTop: "1px solid var(--line)",
+            paddingTop: 8,
+            marginTop: 8,
+          }}
+        >
+          <div
+            style={{
+              ...textStyle,
+              marginTop: 0,
+              marginBottom: 2,
+              fontWeight: 600,
+            }}
+          >
+            No longer a saved route
+          </div>
+          <div
+            style={{ ...textStyle, fontSize: 13, marginTop: 0, marginBottom: 0 }}
+          >
+            {describeRoute(s) === "Not recognised"
+              ? "nothing is known about this one"
+              : describeRoute(s).replace(/^Set up/, "was set up").replace(/^Last used/, "was last used")}
+            {s.credentialId ? ` · passkey ${s.credentialId.slice(0, 12)}` : ""}
+            {s.fingerprint ? ` · key ${s.fingerprint}` : ""}
+          </div>
+          <button
+            className="miniBtn"
+            style={{ marginTop: 6 }}
+            onClick={() => forget(s.wrapId)}
+          >
+            forget this note
+          </button>
+        </div>
+      ))}
+
       {state.strays.length > 0 && (
         <p style={{ ...textStyle, fontSize: 13, marginBottom: 0 }}>
-          {state.strays.length === 1
-            ? "One passkey this list knew about is no longer a saved route, most likely removed from another device."
-            : `${state.strays.length} passkeys this list knew about are no longer saved routes, most likely removed from another device.`}
+          Removed here or on another device: the route is gone and this is only what
+          the list remembered about it. Forgetting clears the record and nothing else.
         </p>
       )}
 
