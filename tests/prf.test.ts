@@ -13,13 +13,21 @@ import {
   PrfUnsupportedError,
   createCredential,
   deriveSecret,
+  enrolmentLabel,
   probeCredentialSupport,
   relyingPartyId,
 } from "../src/lib/prf";
 
-const ACCOUNT = {
-  userId: "11111111-1111-4111-8111-111111111111",
-  email: "someone@example.invalid",
+const ACCOUNT = { email: "someone@example.invalid" };
+
+/** The handle this used to send: the account id as sixteen raw bytes. */
+const ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
+const accountIdBytes = (): string => {
+  const hex = ACCOUNT_ID.replace(/-/g, "");
+  const out = new Uint8Array(16);
+  for (let i = 0; i < out.length; i++)
+    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return String(out);
 };
 
 /** What a platform hands back from create: a credential with an id on it. */
@@ -231,12 +239,10 @@ describe("the three outcomes of asking for a secret", () => {
 });
 
 describe("what is asked of the authenticator", () => {
-  test("a discoverable credential, user verification, and the account id as the handle", async () => {
-    // Each of these is load-bearing. Discoverable, or a device that has never seen
-    // the account cannot find the credential. Verification required, or the
-    // biometric the interface promises is not actually enforced. And the account
-    // id as the user handle, so enrolling twice on one platform replaces rather
-    // than quietly accumulating.
+  test("a discoverable credential, and user verification", async () => {
+    // Both load-bearing. Discoverable, or a device that has never seen the account
+    // cannot find the credential. Verification required, or the biometric the
+    // interface promises is not actually enforced.
     let seen: PublicKeyCredentialCreationOptions | undefined;
     vi.stubGlobal("navigator", {
       credentials: {
@@ -253,8 +259,62 @@ describe("what is asked of the authenticator", () => {
     expect(seen?.authenticatorSelection?.residentKey).toBe("required");
     expect(seen?.authenticatorSelection?.userVerification).toBe("required");
     expect(seen?.extensions).toHaveProperty("prf");
-    expect(new Uint8Array(seen?.user.id as ArrayBuffer)).toHaveLength(16);
     expect(seen?.user.name).toBe(ACCOUNT.email);
+  });
+
+  test("a handle unique to this enrolment, so nothing already saved is displaced", async () => {
+    // The 13 August 2026 change, and the one line in this file with a scar behind it.
+    // The handle was the account id, which is how WebAuthn is *told* to overwrite an
+    // existing credential for the same relying party — at creation, before the derive
+    // and the publish that follow it. So a second attempt that failed or was
+    // cancelled took away the credential the first one had made, and the wrap written
+    // for it opened nothing afterwards. Found on the author's own account: two wraps,
+    // one credential in each of two managers, and the Chrome one opening neither row.
+    const handles = new Set<string>();
+    vi.stubGlobal("navigator", {
+      credentials: {
+        create: async (o: CredentialCreationOptions) => {
+          handles.add(String(new Uint8Array(o.publicKey?.user.id as ArrayBuffer)));
+          return created();
+        },
+      },
+    });
+
+    await createCredential(ACCOUNT, "journlet.com");
+    await createCredential(ACCOUNT, "journlet.com");
+
+    // Two enrolments, two handles. Equal handles are the instruction to overwrite.
+    expect(handles.size).toBe(2);
+    // Sixteen bytes, so the shape is still what an authenticator expects.
+    for (const h of handles) expect(h.split(",")).toHaveLength(16);
+    // And not the account id, which is what it used to be and what must not come back.
+    expect(handles.has(accountIdBytes())).toBe(false);
+  });
+
+  test("and a label that tells two entries in one manager apart", async () => {
+    // Unique handles mean a manager can hold two Journlet passkeys, and both would
+    // otherwise read as the same email twice.
+    let seen: PublicKeyCredentialCreationOptions | undefined;
+    vi.stubGlobal("navigator", {
+      credentials: {
+        create: async (o: CredentialCreationOptions) => {
+          seen = o.publicKey;
+          return created();
+        },
+      },
+    });
+
+    await createCredential(ACCOUNT, "journlet.com");
+
+    expect(seen?.user.displayName).not.toBe(ACCOUNT.email);
+    expect(seen?.user.displayName).toContain(ACCOUNT.email);
+    expect(seen?.user.displayName).toMatch(/Journlet/);
+  });
+
+  test("the label's format, pinned on a fixed date rather than on the clock", () => {
+    expect(enrolmentLabel("someone@example.invalid", new Date("2026-08-13"))).toBe(
+      "someone@example.invalid (Journlet, 13 Aug)"
+    );
   });
 
   test("no rp id at all when the host cannot claim one", async () => {

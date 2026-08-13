@@ -167,19 +167,27 @@ export type CredentialId = Uint8Array<ArrayBuffer>;
 
 /** Who the credential belongs to, as the person's password manager will show it. */
 export interface CredentialAccount {
-  /** The Supabase user id. Becomes the WebAuthn user handle. */
-  userId: string;
   /** The account email, so the entry is recognisable in a list of passkeys. */
   email: string;
 }
 
-const uuidBytes = (uuid: string): Uint8Array<ArrayBuffer> => {
-  const hex = uuid.replace(/-/g, "");
-  const out = new Uint8Array(16);
-  for (let i = 0; i < out.length; i++)
-    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return out;
-};
+/**
+ * The label a password manager shows for a credential.
+ *
+ * Needed as of 13 August 2026 because handles are unique per enrolment (see
+ * createCredential), so one manager can hold more than one Journlet passkey and both
+ * would otherwise read as the same email twice, with no way to tell which is which.
+ *
+ * Local to the password manager. `name` and `displayName` never reach any server —
+ * §6.5 governs what does, and nothing from here goes near it.
+ *
+ * Takes the date rather than reading the clock, so the format is testable.
+ */
+export const enrolmentLabel = (email: string, on: Date): string =>
+  `${email} (Journlet, ${on.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  })})`;
 
 const random = (n: number): Uint8Array<ArrayBuffer> =>
   crypto.getRandomValues(new Uint8Array(n));
@@ -194,8 +202,11 @@ const random = (n: number): Uint8Array<ArrayBuffer> =>
  * interface promises. No attachment restriction, so a security key or a phone
  * used from a laptop both work.
  *
- * The user handle is the account id rather than something random, so enrolling
- * twice on one platform replaces rather than accumulates.
+ * The user handle is random per enrolment, so enrolling twice on one platform adds
+ * a second credential rather than replacing the first. Observed on Gary's account on
+ * 13 August 2026: two wraps, one credential in each of two managers, and the Chrome
+ * one opening neither row, because an earlier attempt from that Mac had replaced the
+ * credential its predecessor's wrap belonged to.
  *
  * Returns the id of the credential it created, because enrolment has to name it
  * when it asks for the secret a moment later. See deriveSecret for what goes
@@ -215,9 +226,25 @@ export const createCredential = async (
         // bytes, so there is no attestation to trust and no replay to prevent.
         rp: rpId ? { name: "Journlet", id: rpId } : { name: "Journlet" },
         user: {
-          id: uuidBytes(account.userId),
+          // Fresh per enrolment, and this is the line the section above is about.
+          //
+          // It was the account id until 13 August 2026, on §6.1e's reasoning that
+          // enrolling twice on one platform should replace rather than accumulate.
+          // WebAuthn implements that by overwriting any discoverable credential with
+          // the same relying party and user handle — at creation, before this
+          // function knows whether the derive and the publish will succeed. So an
+          // attempt that failed or was cancelled destroyed the credential an earlier
+          // one had made, its wrap opened nothing afterwards, and neither the person
+          // nor the app could see it happen.
+          //
+          // Random means nothing is ever displaced: a failed enrolment costs nothing
+          // and every live credential keeps its own wrap. Legal here precisely
+          // because Journlet never signs anybody in with a passkey — the credential
+          // exists to derive PRF bytes, so nothing ever looks an account up by
+          // handle, and a handle carrying an account id had no reader at all.
+          id: random(16),
           name: account.email,
-          displayName: account.email,
+          displayName: enrolmentLabel(account.email, new Date()),
         },
         pubKeyCredParams: [
           { type: "public-key", alg: -7 },

@@ -1351,7 +1351,7 @@ export const enrolPasskey = async (): Promise<void> => {
       "Passkeys can only be set up on journlet.com. This copy of the app is served from somewhere else, and a passkey created here could never open your journal on the real one."
     );
   const credentialId = await createCredential(
-    { userId, email: session?.user.email ?? "" },
+    { email: session?.user.email ?? "" },
     rpId
   );
   // Naming the credential just created, deliberately: left open, the platform may
