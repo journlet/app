@@ -104,8 +104,19 @@ export default function PasskeyUnlock({ textStyle }: PasskeyUnlockProps) {
       </button>
       <p style={{ ...textStyle, marginTop: 6 }}>
         Quickest if you set one up on another device: this asks for Face ID, Touch ID
-        or your device PIN, and on a device with none of those it offers to use your
-        phone. Nothing to type either way.
+        or your device PIN. Nothing to type.
+      </p>
+      {/* Was one sentence promising that a device with no biometric can scan a code
+          and use the passkey on your phone. Narrowed 13 August 2026 on evidence: that
+          route works for a passkey in iCloud Keychain, and fails for one in Google
+          Password Manager unless the device can reach Password Manager itself, because
+          the code path that carries the secret over the tunnel is not the one the
+          provider uses locally. Promising it flatly is how somebody ends up deciding
+          their passkey is broken, so this says what it is instead. */}
+      <p style={{ ...textStyle, marginTop: 6 }}>
+        A device with none of those may offer to scan a code and use the passkey on
+        your phone. Worth trying, and not certain: whether it works depends on the
+        password manager holding it. Your journal key works everywhere.
       </p>
       {problem && <p style={{ ...textStyle, marginTop: 6 }}>{problem}</p>}
     </div>
