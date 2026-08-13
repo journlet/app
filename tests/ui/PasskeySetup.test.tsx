@@ -29,10 +29,20 @@ let replace: () => Promise<void> = async () => {
   routes = 1;
 };
 
+/** What the register says about each saved route, and what removal did. */
+let routeRows: { wrapId: string; note: Record<string, unknown> | null }[] = [];
+let removed: string[] = [];
+
 vi.mock("../../src/store/sync", () => ({
   countPasskeyRoutes: async () => routes,
   enrolPasskey: () => enrol(),
   replaceAllPasskeys: () => replace(),
+  listPasskeyRoutes: async () => ({ routes: routeRows, strays: [] }),
+  removePasskeyRoute: async (wrapId: string) => {
+    removed.push(wrapId);
+    routeRows = routeRows.filter((r) => r.wrapId !== wrapId);
+    routes = routeRows.length;
+  },
 }));
 
 vi.mock("../../src/lib/prf", async (importOriginal) => ({
@@ -75,7 +85,21 @@ const servedFrom = (hostname: string): void => {
   });
 };
 
+/** Open the list of saved routes, which is loaded on request rather than with the box. */
+const openList = async () => {
+  fireEvent.click(screen.getByRole("button", { name: /which passkeys are these/i }));
+  // All, not one: an account with two routes has two remove buttons, and a query
+  // for a single one throws rather than waiting.
+  await waitFor(() =>
+    expect(
+      screen.queryAllByRole("button", { name: /^remove$/i }).length
+    ).toBeGreaterThan(0)
+  );
+};
+
 beforeEach(() => {
+  routeRows = [];
+  removed = [];
   routes = 0;
   usable = true;
   localCheck = true;
@@ -504,5 +528,125 @@ describe("when it works", () => {
       expect(screen.getByText(/1 passkey can open this journal/i)).toBeTruthy()
     );
     expect(calls).toBe(1);
+  });
+});
+
+describe("the list of saved routes (§6.1l)", () => {
+  const NAMED = {
+    wrapId: "w-new",
+    note: {
+      wrapId: "w-new",
+      enrolledAt: Date.now(),
+      enrolledOn: "Installed app (macOS)",
+      enrolledRoute: "this device",
+      lastOpenedAt: Date.now(),
+      lastOpenedOn: "Safari (iOS)",
+      lastOpenedRoute: "another device",
+    },
+  };
+
+  test("reloads after starting again, rather than keeping the route it removed", async () => {
+    // The bug this exists for, found on hardware within minutes of shipping: the list
+    // held its loaded copy, so after "start again" the wrap that had just been deleted
+    // was still on screen, described as "not recognised" because it predated the
+    // register, with a remove button pointing at a row the server no longer had.
+    routes = 1;
+    routeRows = [{ wrapId: "w-old", note: null }];
+    replace = async () => {
+      routes = 1;
+      routeRows = [NAMED];
+    };
+    await show();
+    await openList();
+    expect(screen.getByText("Not recognised")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^start again$/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /start again with one passkey/i })
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/Set up on Installed app \(macOS\)/i)).toBeTruthy()
+    );
+    // The old row is gone rather than sitting above the new one.
+    expect(screen.queryByText("Not recognised")).toBeNull();
+  });
+
+  test("does not open the list for somebody who never asked for it", async () => {
+    // The reload is for a list already showing. Enrolling must not unfurl one.
+    routes = 1;
+    routeRows = [NAMED];
+    await show();
+
+    fireEvent.click(screen.getByRole("button", { name: /add another passkey/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /set up another passkey/i })
+    );
+
+    await waitFor(() => expect(screen.getByText(/Passkey set up/i)).toBeTruthy());
+    expect(
+      screen.getByRole("button", { name: /which passkeys are these/i })
+    ).toBeTruthy();
+  });
+
+  test("says where and how a route was last opened", async () => {
+    // Both facts were recorded from the first day and neither was shown, so a phone
+    // opening a wrap enrolled on the Mac read as a bare timestamp. The route is the
+    // part §6.1k makes load-bearing.
+    routes = 1;
+    routeRows = [NAMED];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText(/last opened .* on Safari \(iOS\), with a passkey from another device/i)
+    ).toBeTruthy();
+  });
+
+  test("a route that has never opened the journal says exactly that", async () => {
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText(/has not opened this journal on any device yet/i)
+    ).toBeTruthy();
+  });
+
+  test("removing a route corrects the count above it", async () => {
+    // Two halves of one box, and each used to refresh only itself: the list could be
+    // stale after an enrolment and the count stale after a removal.
+    routes = 2;
+    routeRows = [
+      { wrapId: "w1", note: null },
+      NAMED,
+    ];
+    await show();
+    expect(screen.getByText(/2 passkeys can open this journal/i)).toBeTruthy();
+    await openList();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^remove$/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /remove this route/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/1 passkey can open this journal/i)).toBeTruthy()
+    );
+    expect(removed).toEqual(["w1"]);
+  });
+
+  test("and says what removal is not, before it happens", async () => {
+    // §6.1h's limit has to travel with the action: this withdraws a saved route and
+    // takes nothing back from a device that already opened the journal.
+    routes = 1;
+    routeRows = [NAMED];
+    await show();
+    await openList();
+
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+    expect(screen.getByText(/keeps its copy/i)).toBeTruthy();
+    expect(screen.getByText(/journal key still works/i)).toBeTruthy();
+    expect(removed).toEqual([]);
   });
 });
