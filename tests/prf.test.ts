@@ -165,6 +165,27 @@ describe("the three outcomes of asking for a secret", () => {
     await expect(deriveSecret("journlet.com")).resolves.toEqual({
       secret: bytes,
       credentialId: CREATED_ID,
+      attachment: null,
+    });
+  });
+
+  test("and reports where the answer came from, which decides what may be said about it", async () => {
+    // "cross-platform" means another device answered over the tunnel, and the tunnel
+    // does not carry PRF faithfully for every password manager, so a secret that
+    // opens nothing does not prove the credential is dead. The caller uses this to
+    // decide whether disowning it is safe.
+    withCredentials({
+      get: async () => ({
+        rawId: CREATED_ID.buffer,
+        authenticatorAttachment: "cross-platform",
+        getClientExtensionResults: () => ({
+          prf: { results: { first: new Uint8Array(32).buffer } },
+        }),
+      }),
+    });
+
+    await expect(deriveSecret("journlet.com")).resolves.toMatchObject({
+      attachment: "cross-platform",
     });
   });
 
@@ -181,6 +202,7 @@ describe("the three outcomes of asking for a secret", () => {
     await expect(deriveSecret("journlet.com")).resolves.toEqual({
       secret: bytes,
       credentialId: null,
+      attachment: null,
     });
   });
 

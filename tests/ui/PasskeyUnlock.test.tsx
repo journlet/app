@@ -21,7 +21,13 @@ let localCheck = true;
 let unlock: () => Promise<void> = async () => {};
 
 class NoPasskeyRoute extends Error {}
-class UnknownCredential extends Error {}
+class UnknownCredential extends Error {
+  viaTunnel: boolean;
+  constructor(viaTunnel = false) {
+    super("unknown credential");
+    this.viaTunnel = viaTunnel;
+  }
+}
 
 vi.mock("../../src/store/sync", () => ({
   countPasskeyRoutes: async () => routes,
@@ -134,6 +140,27 @@ describe("the four ways it fails, each with a way on", () => {
     await waitFor(() => expect(button()).toBeTruthy());
     fireEvent.click(button() as HTMLElement);
   };
+
+  test("one answered over the QR tunnel, where the cause is genuinely ambiguous", async () => {
+    // Added 13 August 2026 from hardware. A Google Password Manager credential opens
+    // its own wrap when Chrome reaches it locally and returns a different secret when
+    // the same credential is reached through the phone, while an iCloud Keychain one
+    // works either way. So over the tunnel this failure has two causes and the screen
+    // may not pick one: telling somebody their passkey is not set up here would have
+    // them delete a passkey that works.
+    await failWith(new UnknownCredential(true));
+
+    await waitFor(() =>
+      expect(screen.getByText(/used from another device by scanning the code/i))
+        .toBeTruthy()
+    );
+    expect(screen.getByText(/different secret over that route/i)).toBeTruthy();
+    expect(screen.getByText(/passkey saved on this device/i)).toBeTruthy();
+    // And it must not assert the local explanation, which is the one that misleads.
+    expect(
+      screen.queryByText(/not one of the ones set up for this journal/i)
+    ).toBeNull();
+  });
 
   test("a passkey from a different password manager, and why that happens", async () => {
     // The ordinary answer on a device from another ecosystem, and the case §6.1e

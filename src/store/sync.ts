@@ -1274,9 +1274,24 @@ export class NoPasskeyRouteError extends Error {
  * code, and not retrying.
  */
 export class UnknownCredentialError extends Error {
-  constructor() {
+  /**
+   * Whether the credential answered from another device over the platform's QR
+   * tunnel, which changes what this failure most likely means.
+   *
+   * Locally it means what it says: this credential is not one of the enrolled ones.
+   * Over the tunnel it may mean that and it may mean the transport, because PRF is
+   * not carried faithfully across it by every password manager — a Google Password
+   * Manager credential opens its own wrap when Chrome reaches it locally and returns
+   * a different secret when the same credential is reached by QR, while an iCloud
+   * Keychain one is consistent (Gary's hardware, 13 August 2026). The screen has to
+   * say something different in that case, because "not set up here" would send
+   * somebody off to delete a passkey that works.
+   */
+  readonly viaTunnel: boolean;
+  constructor(viaTunnel = false) {
     super("That passkey is not one of the ones set up for this journal");
     this.name = "UnknownCredentialError";
+    this.viaTunnel = viaTunnel;
   }
 }
 
@@ -1434,17 +1449,24 @@ export const unlockWithPasskey = async (): Promise<void> => {
   if (rows.length === 0) throw new NoPasskeyRouteError();
 
   const rpId = relyingPartyId(location.hostname);
-  const { secret, credentialId } = await deriveSecret(rpId);
+  const { secret, credentialId, attachment } = await deriveSecret(rpId);
   const opened = await unwrapKeeperKeyFromAny(rows, secret, userId);
   if (!opened) {
-    // The credential worked and opens nothing here, so it is dead for this journal:
-    // its wrap was deleted by `start again`, or it replaced the credential a wrap
-    // belonged to while handles were the account id. Ask its provider to forget it,
-    // so the person is not offered it again with no way to tell which entry is the
-    // useless one. Advisory, feature-detected and unable to throw — and awaited, so
-    // a provider that does act has done so before the screen says anything.
-    if (credentialId) await forgetCredential(rpId, credentialId);
-    throw new UnknownCredentialError();
+    // A credential held on this device that opens nothing is dead for this journal —
+    // its wrap was deleted by `start again`, say — so ask its provider to forget it
+    // rather than let it be offered for ever with nothing able to say which entry is
+    // the useless one. Advisory, feature-detected, unable to throw, and awaited so a
+    // provider that acts has acted before the screen speaks.
+    //
+    // Never for an answer from another device. The tunnel does not carry PRF
+    // faithfully for every password manager: on the author's hardware a Google
+    // Password Manager credential opens its own wrap locally and returns a different
+    // secret when the same credential is reached by QR, while an iCloud Keychain one
+    // is consistent. Signalling there would delete a working passkey on the strength
+    // of a transport quirk, so an unreported attachment counts as cross-platform.
+    if (credentialId && attachment === "platform")
+      await forgetCredential(rpId, credentialId);
+    throw new UnknownCredentialError(attachment !== "platform");
   }
 
   await adoptKeeperKey(opened.keeperKey);

@@ -65,7 +65,16 @@ export default function PasskeyUnlock({ textStyle }: PasskeyUnlockProps) {
     } catch (e) {
       if (e instanceof UnknownCredentialError)
         setProblem(
-          `That passkey is not one of the ones set up for this journal. Password managers do not share passkeys with each other, so one made in a different manager cannot open it. ${OTHER_WAYS}`
+          e.viaTunnel
+            ? // Answered by another device over the platform's QR tunnel, where this
+              // failure has a second cause that has nothing to do with which passkeys
+              // are enrolled: some password managers produce a different secret over
+              // that route than on the device holding the passkey (Gary, 13 August
+              // 2026 — a Google-held credential opens its own wrap locally and not
+              // through the phone, where an iCloud-held one works either way). Saying
+              // "not set up here" would send somebody off to delete a working passkey.
+              `That passkey was used from another device by scanning the code, and it did not open this journal. Two things do that: it may not be one of the ones set up here, or the password manager holding it may produce a different secret over that route than it does on the device it lives on. If you have a passkey saved on this device, try that one. ${OTHER_WAYS}`
+            : `That passkey is not one of the ones set up for this journal. Password managers do not share passkeys with each other, so one made in a different manager cannot open it. ${OTHER_WAYS}`
         );
       else if (e instanceof PrfUnsupportedError)
         setProblem(

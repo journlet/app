@@ -166,7 +166,7 @@ export const probeCredentialSupport = async (): Promise<PrfCapability> => {
  */
 export type CredentialId = Uint8Array<ArrayBuffer>;
 
-/** What deriveSecret answers with: the bytes, and who produced them. */
+/** What deriveSecret answers with: the bytes, and the circumstances of them. */
 export interface DerivedSecret {
   secret: ArrayBuffer;
   /**
@@ -177,6 +177,24 @@ export interface DerivedSecret {
    * for, and this only enables an optional tidy-up.
    */
   credentialId: CredentialId | null;
+  /**
+   * Whether the answer came from this device or from another one over the platform's
+   * cross-device tunnel ("platform" against "cross-platform"), as WebAuthn reports it.
+   *
+   * Load-bearing as of 13 August 2026, because the tunnel is not transparent to PRF.
+   * On Gary's hardware, one credential held in Google Password Manager returns a
+   * secret that opens its own wrap when Chrome reaches it locally, and a different
+   * one when the same credential is reached through the phone by QR — while a
+   * credential in iCloud Keychain is consistent across both. So a secret that opens
+   * nothing means "this credential is not enrolled here" only when it came from this
+   * device. Over the tunnel it may equally mean "the same credential, mangled in
+   * transit", and nothing in the assertion tells the two apart.
+   *
+   * Null where the browser does not report it, which is treated as cross-platform:
+   * the caller only uses this to decide whether it is safe to ask a provider to
+   * delete something, and guessing wrong in that direction is destructive.
+   */
+  attachment: string | null;
 }
 
 /** base64url, which is the encoding the Signal API asks for. */
@@ -187,12 +205,20 @@ const b64url = (bytes: Uint8Array): string =>
  * Ask the credential provider to forget a credential this journal cannot use
  * (WebAuthn Signal API, added 13 August 2026).
  *
- * The case it exists for: a passkey that authenticates, produces a secret, and
- * opens none of the wraps. That credential is genuinely useless for journlet.com —
- * its wrap was deleted by `start again`, or it replaced the credential a wrap
- * belonged to back when handles were the account id — and without this the manager
- * goes on offering it for ever, with the person having no way to tell which of two
- * entries is the dead one. Gary was offered one four times in a morning.
+ * The case it exists for: a passkey held *on this device* that authenticates,
+ * produces a secret, and opens none of the wraps. That credential is useless for
+ * journlet.com — its wrap was deleted by `start again`, say — and without this the
+ * manager goes on offering it for ever, with the person having no way to tell which
+ * of two entries is the dead one.
+ *
+ * Never called for an answer that arrived over the cross-device tunnel, and that
+ * restriction is the whole reason this function takes an id rather than reading one:
+ * a credential reached through the phone can return a secret that opens nothing and
+ * still be a perfectly good passkey, because the tunnel does not carry PRF faithfully
+ * for every password manager (see DerivedSecret.attachment). Signalling there would
+ * ask a provider to delete a working way into the journal on the strength of a
+ * transport quirk. Found before this shipped, by testing the thing it was built for
+ * (Gary, 13 August).
  *
  * Three properties make it safe to call here. It is advisory: the provider decides
  * whether to remove, hide or ignore. It is unsupported in most browsers today, so
@@ -382,5 +408,6 @@ export const deriveSecret = async (
   return {
     secret: first,
     credentialId: rawId ? new Uint8Array(rawId) : null,
+    attachment: (assertion as PublicKeyCredential).authenticatorAttachment ?? null,
   };
 };
