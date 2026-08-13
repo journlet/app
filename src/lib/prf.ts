@@ -171,24 +171,6 @@ export interface CredentialAccount {
   email: string;
 }
 
-/**
- * The label a password manager shows for a credential.
- *
- * Needed as of 13 August 2026 because handles are unique per enrolment (see
- * createCredential), so one manager can hold more than one Journlet passkey and both
- * would otherwise read as the same email twice, with no way to tell which is which.
- *
- * Local to the password manager. `name` and `displayName` never reach any server —
- * §6.5 governs what does, and nothing from here goes near it.
- *
- * Takes the date rather than reading the clock, so the format is testable.
- */
-export const enrolmentLabel = (email: string, on: Date): string =>
-  `${email} (Journlet, ${on.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  })})`;
-
 const random = (n: number): Uint8Array<ArrayBuffer> =>
   crypto.getRandomValues(new Uint8Array(n));
 
@@ -244,7 +226,13 @@ export const createCredential = async (
           // handle, and a handle carrying an account id had no reader at all.
           id: random(16),
           name: account.email,
-          displayName: enrolmentLabel(account.email, new Date()),
+          // The email alone. A dated label went in alongside the random handle and
+          // came out the same day: it was there so two entries in one manager could
+          // be told apart, and with unique handles every credential is live, so
+          // there is no wrong one to pick. Password managers show the site and the
+          // date they were created anyway, which is the same information from a
+          // source that is not us (Gary, 13 August).
+          displayName: account.email,
         },
         pubKeyCredParams: [
           { type: "public-key", alg: -7 },

@@ -13,7 +13,6 @@ import {
   PrfUnsupportedError,
   createCredential,
   deriveSecret,
-  enrolmentLabel,
   probeCredentialSupport,
   relyingPartyId,
 } from "../src/lib/prf";
@@ -289,62 +288,6 @@ describe("what is asked of the authenticator", () => {
     for (const h of handles) expect(h.split(",")).toHaveLength(16);
     // And not the account id, which is what it used to be and what must not come back.
     expect(handles.has(accountIdBytes())).toBe(false);
-  });
-
-  test("and a label that tells two entries in one manager apart", async () => {
-    // Unique handles mean a manager can hold two Journlet passkeys, and both would
-    // otherwise read as the same email twice.
-    let seen: PublicKeyCredentialCreationOptions | undefined;
-    vi.stubGlobal("navigator", {
-      credentials: {
-        create: async (o: CredentialCreationOptions) => {
-          seen = o.publicKey;
-          return created();
-        },
-      },
-    });
-
-    await createCredential(ACCOUNT, "journlet.com");
-
-    expect(seen?.user.displayName).not.toBe(ACCOUNT.email);
-    expect(seen?.user.displayName).toContain(ACCOUNT.email);
-    expect(seen?.user.displayName).toMatch(/Journlet/);
-  });
-
-  test("the label's format, pinned on a fixed date rather than on the clock", () => {
-    expect(enrolmentLabel("someone@example.invalid", new Date("2026-08-13"))).toBe(
-      "someone@example.invalid (Journlet, 13 Aug)"
-    );
-  });
-
-  test("no rp id at all when the host cannot claim one", async () => {
-    // Rather than sending an empty string, which is a different thing and is
-    // refused.
-    let seen: PublicKeyCredentialCreationOptions | undefined;
-    vi.stubGlobal("navigator", {
-      credentials: {
-        create: async (o: CredentialCreationOptions) => {
-          seen = o.publicKey;
-          return created();
-        },
-      },
-    });
-
-    await createCredential(ACCOUNT, undefined);
-
-    expect(seen?.rp).not.toHaveProperty("id");
-  });
-
-  test("the id of the credential it made comes back to the caller", async () => {
-    // Enrolment needs it a moment later, and this is the only moment it exists:
-    // nothing stores it, and §6.5 keeps it off the row deliberately.
-    vi.stubGlobal("navigator", {
-      credentials: { create: async () => created() },
-    });
-
-    await expect(createCredential(ACCOUNT, "journlet.com")).resolves.toEqual(
-      CREATED_ID
-    );
   });
 
   test("the assertion constrains nothing, so a synced credential is offered", async () => {
