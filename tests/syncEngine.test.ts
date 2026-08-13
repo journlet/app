@@ -154,6 +154,9 @@ vi.mock("../src/store/journal", () => ({
   get devices() {
     return doc.getMap("devices");
   },
+  get credentials() {
+    return doc.getMap("credentials");
+  },
 }));
 
 vi.mock("../src/lib/keystore", () => ({

@@ -197,6 +197,32 @@ export interface DerivedSecret {
   attachment: string | null;
 }
 
+/**
+ * Eight hex characters of a derived secret, for telling routes apart (§6.1k).
+ *
+ * A truncated SHA-256, so it identifies and does not reconstruct: four bytes cannot
+ * be walked back to a 32-byte secret, and the value never leaves the encrypted
+ * document in any case. This is the measurement IDR-017 was taken with, promoted
+ * from a diagnostic to a stored field, because the thing it discriminates — one
+ * credential reached two ways deriving two secrets — is invisible to every other
+ * field the register holds.
+ */
+export const secretFingerprint = async (secret: ArrayBuffer): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", secret);
+  return Array.from(new Uint8Array(digest).slice(0, 4))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+};
+
+/**
+ * A credential id as text, for the encrypted register and nothing else.
+ *
+ * Named to be awkward to misuse: §6.5 keeps this off every column, so a caller that
+ * wants a string is either writing to the journal document or making a mistake.
+ */
+export const credentialIdText = (id: CredentialId): string => b64url(id);
+
 /** base64url, which is the encoding the Signal API asks for. */
 const b64url = (bytes: Uint8Array): string =>
   b64encode(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
