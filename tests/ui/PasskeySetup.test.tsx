@@ -614,6 +614,26 @@ describe("the list of saved routes (§6.1l)", () => {
     ).toBeTruthy();
   });
 
+  test("picks up a row another device filled in, without being reopened", async () => {
+    // The register arrives over sync, so the event that names a row is usually a
+    // *different* device unlocking. Until this was wired the list held whatever it had
+    // fetched, and a phone opening a wrap enrolled here changed nothing on screen.
+    const { noteUnlock } = await import("../../src/store/credentials");
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    await show();
+    await openList();
+    expect(screen.getByText("Not recognised")).toBeTruthy();
+
+    // What a sync delivers: the register changes under the screen.
+    routeRows = [NAMED];
+    noteUnlock({ wrapId: NAMED.wrapId, attachment: "cross-platform" });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Set up on Installed app \(macOS\)/i)).toBeTruthy()
+    );
+  });
+
   test("removing a route corrects the count above it", async () => {
     // Two halves of one box, and each used to refresh only itself: the list could be
     // stale after an enrolment and the count stale after a removal.
