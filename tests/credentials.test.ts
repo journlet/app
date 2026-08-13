@@ -199,3 +199,38 @@ describe("how a row describes itself", () => {
     expect(c.describeRoute(null)).toBe("Not recognised");
   });
 });
+
+describe("what a row can say about the passkey itself", () => {
+  test("keeps every client that has opened the route", async () => {
+    const c = await load();
+    c.noteEnrolment({ wrapId: "w1", attachment: "platform" });
+    c.noteUnlock({ wrapId: "w1", attachment: "platform" });
+
+    expect(c.listCredentialNotes()[0].openedBy).toEqual(["Chrome (macOS)"]);
+  });
+
+  test("names the password manager when the platform named it", async () => {
+    const c = await load();
+    c.noteEnrolment({
+      wrapId: "w1",
+      provider: "iCloud Keychain",
+      attachment: "platform",
+    });
+
+    expect(c.describeRoute(c.listCredentialNotes()[0])).toBe(
+      "Set up on Chrome (macOS), in iCloud Keychain"
+    );
+  });
+
+  test("and says nothing at all when it did not", async () => {
+    // An anonymised AAGUID is the ordinary case, and a row that filled the gap with
+    // "unknown" would read as a fact about the credential rather than about what the
+    // browser was willing to say.
+    const c = await load();
+    c.noteEnrolment({ wrapId: "w1", provider: null, attachment: "platform" });
+
+    const [note] = c.listCredentialNotes();
+    expect(note.provider).toBeUndefined();
+    expect(c.describeRoute(note)).toBe("Set up on Chrome (macOS)");
+  });
+});

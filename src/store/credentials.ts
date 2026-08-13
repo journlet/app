@@ -71,8 +71,27 @@ export interface CredentialNote {
   fingerprint?: string;
   /** "Chrome (macOS)": the client this route was enrolled from. */
   enrolledOn?: string;
+  /**
+   * The password manager holding the credential, where the platform named it.
+   *
+   * The field that answers "which of my passkeys is this", and a browser name cannot:
+   * Chrome on a Mac may hold a Google credential, an iCloud one or its own, and they
+   * behave differently over the tunnel (§6.1k). Read from the AAGUID at enrolment and
+   * absent whenever the client anonymises it, which is common and not an error.
+   */
+  provider?: string;
   enrolledRoute?: EnrolRoute;
   enrolledAt: number;
+  /**
+   * Every client that has opened the journal with this route, most recent first.
+   *
+   * Collected rather than replaced, for the reason the device register collects
+   * clients: last-opened alone is overwritten by whichever device used it most
+   * recently, so a phone's unlock disappeared from the screen the next time the Mac
+   * unlocked, and "it does not acknowledge that I used it on my phone" is the fair
+   * reading of that (Gary, 13 August 2026).
+   */
+  openedBy?: string[];
   /** When this route last opened the journal, which is the evidence it still works. */
   lastOpenedAt?: number;
   lastOpenedOn?: string;
@@ -85,11 +104,22 @@ export interface RouteListing {
   note: CredentialNote | null;
 }
 
+/** The clients that have opened a route, most recently used first. */
+const clientsOf = (rec: Y.Map<unknown>): string[] | undefined => {
+  const map = rec.get("openedBy");
+  if (!(map instanceof Y.Map) || map.size === 0) return undefined;
+  const seen: { name: string; at: number }[] = [];
+  map.forEach((at, name) => seen.push({ name, at: (at as number) || 0 }));
+  return seen.sort((a, b) => b.at - a.at).map((s) => s.name);
+};
+
 const toNote = (wrapId: string, rec: Y.Map<unknown>): CredentialNote => ({
   wrapId,
   credentialId: (rec.get("credentialId") as string) || undefined,
   fingerprint: (rec.get("fingerprint") as string) || undefined,
   enrolledOn: (rec.get("enrolledOn") as string) || undefined,
+  provider: (rec.get("provider") as string) || undefined,
+  openedBy: clientsOf(rec),
   enrolledRoute: (rec.get("enrolledRoute") as EnrolRoute) || undefined,
   enrolledAt: (rec.get("enrolledAt") as number) || 0,
   lastOpenedAt: (rec.get("lastOpenedAt") as number) || undefined,
@@ -108,6 +138,7 @@ export const noteEnrolment = (n: {
   wrapId: string;
   credentialId?: string;
   fingerprint?: string;
+  provider?: string | null;
   attachment: string | null;
 }): void => {
   doc.transact(() => {
@@ -118,6 +149,10 @@ export const noteEnrolment = (n: {
     rec.set("enrolledRoute", routeOf(n.attachment));
     if (n.credentialId) rec.set("credentialId", n.credentialId);
     if (n.fingerprint) rec.set("fingerprint", n.fingerprint);
+    // Only when the platform said so. An anonymised AAGUID is the common case and
+    // must leave the field empty rather than write "unknown", which would read as a
+    // fact about the credential rather than about what the browser would tell us.
+    if (n.provider) rec.set("provider", n.provider);
   });
 };
 
@@ -154,9 +189,17 @@ export const noteUnlock = (n: {
       rec.set("enrolledAt", 0);
     }
     const map = rec as Y.Map<unknown>;
-    map.set("lastOpenedAt", Date.now());
+    const now = Date.now();
+    map.set("lastOpenedAt", now);
     map.set("lastOpenedOn", describeThisClient());
     map.set("lastOpenedRoute", routeOf(n.attachment));
+    // And kept, so the phone's use survives the Mac's next unlock.
+    let openedBy = map.get("openedBy");
+    if (!(openedBy instanceof Y.Map)) {
+      openedBy = new Y.Map<unknown>();
+      map.set("openedBy", openedBy);
+    }
+    (openedBy as Y.Map<unknown>).set(describeThisClient(), now);
     if (n.credentialId && !map.get("credentialId"))
       map.set("credentialId", n.credentialId);
     if (n.fingerprint && !map.get("fingerprint"))
@@ -179,11 +222,15 @@ export const noteUnlock = (n: {
  */
 export const describeRoute = (note: CredentialNote | null): string => {
   if (!note) return "Not recognised";
+  // The provider, where the platform named it, because that is the half a person can
+  // check against a password manager: the client says which app asked, and the
+  // provider says where the passkey actually lives.
+  const held = note.provider ? `, in ${note.provider}` : "";
   if (note.enrolledAt && note.enrolledOn)
     return note.enrolledRoute === "another device"
-      ? `Set up from ${note.enrolledOn}, using another device`
-      : `Set up on ${note.enrolledOn}`;
-  if (note.lastOpenedOn) return `Last used on ${note.lastOpenedOn}`;
+      ? `Set up from ${note.enrolledOn}, using another device${held}`
+      : `Set up on ${note.enrolledOn}${held}`;
+  if (note.lastOpenedOn) return `Last used on ${note.lastOpenedOn}${held}`;
   return "Not recognised";
 };
 
