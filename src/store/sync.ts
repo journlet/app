@@ -59,7 +59,12 @@ import {
   unwrapKeeperKeyFromAny,
   wrapKeeperKey,
 } from "../lib/keeperWrap";
-import { createCredential, deriveSecret, relyingPartyId } from "../lib/prf";
+import {
+  createCredential,
+  deriveSecret,
+  forgetCredential,
+  relyingPartyId,
+} from "../lib/prf";
 import { ensureKeys, replaceKeyRing, wipeKeys } from "../lib/keystore";
 // From keyring, not keystore: pure accessors, so the sync tests that stub
 // storage still exercise the real key selection.
@@ -1357,7 +1362,7 @@ export const enrolPasskey = async (): Promise<void> => {
   // Naming the credential just created, deliberately: left open, the platform may
   // answer with an older Journlet passkey and the wrap would belong to that one,
   // so this enrolment would add no new route while reporting that it had.
-  const secret = await deriveSecret(rpId, credentialId);
+  const { secret } = await deriveSecret(rpId, credentialId);
 
   const wrapId = newWrapId();
   const wrapped = await wrapKeeperKey(held.keeperKey, secret, {
@@ -1428,9 +1433,19 @@ export const unlockWithPasskey = async (): Promise<void> => {
   const rows = await listKeeperWraps(supabase);
   if (rows.length === 0) throw new NoPasskeyRouteError();
 
-  const secret = await deriveSecret(relyingPartyId(location.hostname));
+  const rpId = relyingPartyId(location.hostname);
+  const { secret, credentialId } = await deriveSecret(rpId);
   const opened = await unwrapKeeperKeyFromAny(rows, secret, userId);
-  if (!opened) throw new UnknownCredentialError();
+  if (!opened) {
+    // The credential worked and opens nothing here, so it is dead for this journal:
+    // its wrap was deleted by `start again`, or it replaced the credential a wrap
+    // belonged to while handles were the account id. Ask its provider to forget it,
+    // so the person is not offered it again with no way to tell which entry is the
+    // useless one. Advisory, feature-detected and unable to throw — and awaited, so
+    // a provider that does act has done so before the screen says anything.
+    if (credentialId) await forgetCredential(rpId, credentialId);
+    throw new UnknownCredentialError();
+  }
 
   await adoptKeeperKey(opened.keeperKey);
   await connect();

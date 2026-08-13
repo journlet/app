@@ -94,6 +94,10 @@ let askedFor: (Uint8Array | undefined)[] = [];
 let journalReads = 0;
 /** Wrap ids the client asked the server to delete. */
 let deleted: string[] = [];
+/** Credentials the client asked the platform to forget (Signal API). */
+let forgotten: Uint8Array[] = [];
+/** The credential the stubbed platform says answered the assertion. */
+const ANSWERED_ID = new Uint8Array([4, 4, 4, 4]);
 
 const signIn = (): void => {
   if (!authCallback)
@@ -112,7 +116,12 @@ vi.mock("../src/lib/prf", async (importOriginal) => ({
   deriveSecret: async (_rpId: string | undefined, credentialId?: Uint8Array) => {
     derivations++;
     askedFor.push(credentialId);
-    return prfAnswer();
+    // The pair the real one answers with: the bytes, plus who produced them, which
+    // is what lets a failed unlock disown the credential.
+    return { secret: await prfAnswer(), credentialId: ANSWERED_ID };
+  },
+  forgetCredential: async (_rpId: string | undefined, id: Uint8Array) => {
+    forgotten.push(id);
   },
 }));
 
@@ -244,6 +253,7 @@ const boot = async (signedIn = true) => {
   askedFor = [];
   journalReads = 0;
   deleted = [];
+  forgotten = [];
   ringWrites = [];
   localStorage.setItem("journlet-device-id", "phone-id");
   storedRing = {
@@ -563,6 +573,32 @@ describe("the four ways it does not work", () => {
     await expect(sync.unlockWithPasskey()).rejects.toBeInstanceOf(
       sync.UnknownCredentialError
     );
+  });
+
+  test("and asks the provider to forget it, so it stops being offered", async () => {
+    // The Signal API half, added 13 August 2026. A credential that authenticates and
+    // opens nothing is dead for this journal, and until now the password manager went
+    // on offering it with nothing on any screen able to say which of two entries was
+    // the useless one — four failed attempts in one morning on the author's account.
+    // Awaited before the throw, so a provider that acts has acted by the time the
+    // screen explains the failure.
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    const sync = await boot();
+
+    await expect(sync.unlockWithPasskey()).rejects.toThrow();
+
+    expect(forgotten).toHaveLength(1);
+    expect(forgotten[0]).toEqual(ANSWERED_ID);
+  });
+
+  test("and says nothing about a credential that worked", async () => {
+    // The half that would be a real fault: signalling a live credential asks its
+    // provider to delete the only way into this journal.
+    const sync = await boot();
+
+    await sync.unlockWithPasskey();
+
+    expect(forgotten).toEqual([]);
   });
 
   test("and adopts nothing when it does, rather than half-linking", async () => {

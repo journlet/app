@@ -30,6 +30,7 @@
 
 /** The fixed input the authenticator evaluates. Not a secret; see keeperWrap.ts. */
 import { PRF_SALT } from "./keeperWrap";
+import { b64encode } from "./base64";
 
 /**
  * The credential authenticated and returned no secret.
@@ -165,6 +166,71 @@ export const probeCredentialSupport = async (): Promise<PrfCapability> => {
  */
 export type CredentialId = Uint8Array<ArrayBuffer>;
 
+/** What deriveSecret answers with: the bytes, and who produced them. */
+export interface DerivedSecret {
+  secret: ArrayBuffer;
+  /**
+   * The credential that answered, so a caller that finds it useless can say so.
+   *
+   * Null when the platform hands back no raw id, which should not happen for an
+   * assertion and is not worth throwing over: the secret is the thing being asked
+   * for, and this only enables an optional tidy-up.
+   */
+  credentialId: CredentialId | null;
+}
+
+/** base64url, which is the encoding the Signal API asks for. */
+const b64url = (bytes: Uint8Array): string =>
+  b64encode(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+/**
+ * Ask the credential provider to forget a credential this journal cannot use
+ * (WebAuthn Signal API, added 13 August 2026).
+ *
+ * The case it exists for: a passkey that authenticates, produces a secret, and
+ * opens none of the wraps. That credential is genuinely useless for journlet.com —
+ * its wrap was deleted by `start again`, or it replaced the credential a wrap
+ * belonged to back when handles were the account id — and without this the manager
+ * goes on offering it for ever, with the person having no way to tell which of two
+ * entries is the dead one. Gary was offered one four times in a morning.
+ *
+ * Three properties make it safe to call here. It is advisory: the provider decides
+ * whether to remove, hide or ignore. It is unsupported in most browsers today, so
+ * it must be feature-detected and its absence must cost nothing. And it can only
+ * ever be said about a credential that just failed, which is why the id is passed
+ * in from the assertion and stored nowhere: §6.5 keeps credential ids off the
+ * server, and this needs one for the length of one call.
+ *
+ * Never throws. A tidy-up that breaks an unlock screen would be worse than the mess
+ * it tidies.
+ */
+export const forgetCredential = async (
+  rpId: string | undefined,
+  credentialId: CredentialId
+): Promise<void> => {
+  if (!rpId) return;
+  const api = globalThis.PublicKeyCredential as unknown as
+    | {
+        signalUnknownCredential?: (o: {
+          rpId: string;
+          credentialId: string;
+        }) => Promise<void>;
+      }
+    | undefined;
+  // Intent rather than protection: a browser without the API is the expected case,
+  // not an exceptional one. The catch below would cover it either way, which is why
+  // no test can tell this line from its absence.
+  if (typeof api?.signalUnknownCredential !== "function") return;
+  try {
+    await api.signalUnknownCredential({
+      rpId,
+      credentialId: b64url(credentialId),
+    });
+  } catch {
+    // Providers are free to refuse, and older ones throw on unknown arguments.
+  }
+};
+
 /** Who the credential belongs to, as the person's password manager will show it. */
 export interface CredentialAccount {
   /** The account email, so the entry is recognisable in a list of passkeys. */
@@ -276,11 +342,14 @@ export const createCredential = async (
  * Throws CredentialRefusedError if the sheet was refused and PrfUnsupportedError
  * if it was allowed and produced nothing, because the caller shows different
  * screens for those and must not have to guess which happened.
+ *
+ * Answers with the credential's id as well as the bytes, so a caller that finds the
+ * bytes open nothing can ask the provider to forget it. See forgetCredential.
  */
 export const deriveSecret = async (
   rpId: string | undefined,
   credentialId?: CredentialId
-): Promise<ArrayBuffer> => {
+): Promise<DerivedSecret> => {
   let assertion: Credential | null;
   try {
     assertion = await navigator.credentials.get({
@@ -307,5 +376,11 @@ export const deriveSecret = async (
   ).getClientExtensionResults() as PrfExtensionResults;
   const first = results.prf?.results?.first;
   if (!first) throw new PrfUnsupportedError();
-  return first;
+  // The id comes back alongside, for forgetCredential above. Returned rather than
+  // stored: it lives as long as the call that might need to disown it.
+  const rawId = (assertion as PublicKeyCredential).rawId;
+  return {
+    secret: first,
+    credentialId: rawId ? new Uint8Array(rawId) : null,
+  };
 };

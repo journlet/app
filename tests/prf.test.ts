@@ -13,6 +13,7 @@ import {
   PrfUnsupportedError,
   createCredential,
   deriveSecret,
+  forgetCredential,
   probeCredentialSupport,
   relyingPartyId,
 } from "../src/lib/prf";
@@ -149,15 +150,38 @@ describe("the three outcomes of asking for a secret", () => {
       },
     });
 
-  test("a secret comes back as the bytes it is", async () => {
+  test("a secret comes back as the bytes it is, with who produced them", async () => {
+    // The id is alongside rather than instead: a caller that finds the bytes open
+    // nothing can then ask the provider to forget that credential, and nothing
+    // stores it — §6.5 keeps credential ids off the server.
     const bytes = new Uint8Array([1, 2, 3, 4]).buffer;
+    withCredentials({
+      get: async () => ({
+        rawId: CREATED_ID.buffer,
+        getClientExtensionResults: () => ({ prf: { results: { first: bytes } } }),
+      }),
+    });
+
+    await expect(deriveSecret("journlet.com")).resolves.toEqual({
+      secret: bytes,
+      credentialId: CREATED_ID,
+    });
+  });
+
+  test("and a platform that withholds the id still yields the secret", async () => {
+    // The bytes are what was asked for. Failing here would trade the unlock for a
+    // tidy-up that is optional in the first place.
+    const bytes = new Uint8Array([5, 6]).buffer;
     withCredentials({
       get: async () => ({
         getClientExtensionResults: () => ({ prf: { results: { first: bytes } } }),
       }),
     });
 
-    await expect(deriveSecret("journlet.com")).resolves.toBe(bytes);
+    await expect(deriveSecret("journlet.com")).resolves.toEqual({
+      secret: bytes,
+      credentialId: null,
+    });
   });
 
   test("allowed but no secret is an unsupported credential store", async () => {
@@ -338,5 +362,66 @@ describe("what is asked of the authenticator", () => {
     expect(seen?.allowCredentials).toEqual([
       { type: "public-key", id: CREATED_ID },
     ]);
+  });
+});
+
+describe("disowning a credential that opens nothing", () => {
+  test("asks the provider to forget it, base64url as the Signal API wants", async () => {
+    // 0xFB 0xFF encodes to "+/" in standard base64 and "-_" in base64url, so this
+    // fails if the encoding is the wrong one — which a provider would reject or,
+    // worse, silently apply to a credential id that is not this one.
+    const seen: { rpId: string; credentialId: string }[] = [];
+    vi.stubGlobal("PublicKeyCredential", {
+      signalUnknownCredential: async (o: { rpId: string; credentialId: string }) => {
+        seen.push(o);
+      },
+    });
+
+    await forgetCredential("journlet.com", new Uint8Array([0xfb, 0xff]));
+
+    expect(seen).toEqual([{ rpId: "journlet.com", credentialId: "-_8" }]);
+  });
+
+  test("does nothing where the browser has no such API", async () => {
+    // Chrome and Edge from 132; Firefox not at all; Safari not yet. So absence is the
+    // common case and must cost nothing.
+    //
+    // Worth being honest about what this pins: the outcome, not the mechanism. Two
+    // things in forgetCredential produce it — the typeof check and the catch — and
+    // deleting either still passes, because the other covers this case. The typeof
+    // check stays as the intent (a missing API is expected, not exceptional) rather
+    // than because a test would miss its removal.
+    vi.stubGlobal("PublicKeyCredential", {});
+
+    await expect(
+      forgetCredential("journlet.com", new Uint8Array([1]))
+    ).resolves.toBeUndefined();
+  });
+
+  test("and nothing at all off journlet.com, where there is no rp to name", async () => {
+    let called = false;
+    vi.stubGlobal("PublicKeyCredential", {
+      signalUnknownCredential: async () => {
+        called = true;
+      },
+    });
+
+    await forgetCredential(undefined, new Uint8Array([1]));
+
+    expect(called).toBe(false);
+  });
+
+  test("a provider that throws is not allowed to break the unlock screen", async () => {
+    // This runs on the failure path of an unlock, so anything it throws would replace
+    // an honest explanation with a crash, over a tidy-up nobody asked for.
+    vi.stubGlobal("PublicKeyCredential", {
+      signalUnknownCredential: async () => {
+        throw new Error("provider says no");
+      },
+    });
+
+    await expect(
+      forgetCredential("journlet.com", new Uint8Array([1]))
+    ).resolves.toBeUndefined();
   });
 });
