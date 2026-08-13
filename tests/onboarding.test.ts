@@ -12,6 +12,7 @@ import {
   needsJournalKey,
   needsOnboarding,
   needsRecoveryCode,
+  needsSignInChoice,
 } from "../src/lib/onboarding";
 import type {
   LoadGateInput,
@@ -36,8 +37,8 @@ describe("a fresh install", () => {
 describe("what must never be gated", () => {
   test("a signed-out device that already holds a journal", () => {
     // Sessions expire. Someone whose journal disappeared behind a login screen
-    // would reasonably conclude it was gone. That device keeps working and is
-    // warned by NotSyncingBanner instead (§6.1b).
+    // would reasonably conclude it was gone. That device is offered the choices
+    // instead of being asked to start over (§6.1b, 13 August).
     expect(needsOnboarding({ ...fresh, hasLocalContent: true })).toBe(false);
   });
 
@@ -146,6 +147,82 @@ describe("a signed-in device that cannot open the journal", () => {
       const i = { ...fresh, status };
       expect(needsOnboarding(i) && needsJournalKey(i)).toBe(false);
     }
+  });
+});
+
+describe("signed out with a journal already on the device", () => {
+  /** The lapsed session: content here, nothing reaching the server. */
+  const lapsed: OnboardingInput = { ...fresh, hasLocalContent: true };
+
+  test("is offered the three choices", () => {
+    // Added 13 August 2026. The yellow banner was the whole answer before, and it
+    // only ever offered one thing to do — sign in — while two other reasonable
+    // answers, carrying on unsynced and erasing this copy, were unreachable.
+    expect(needsSignInChoice(lapsed)).toBe(true);
+  });
+
+  test("a fresh install is not, because it has nothing to choose about", () => {
+    // It goes to onboarding: there is no journal to keep and none to erase.
+    expect(needsSignInChoice(fresh)).toBe(false);
+  });
+
+  test("not before the journal has loaded", () => {
+    // Same reason as every other gate here: for the first moments of a launch a
+    // device with years of journal in it is indistinguishable from a new one, and
+    // this screen offers to erase things.
+    expect(needsSignInChoice({ ...lapsed, loaded: false })).toBe(false);
+  });
+
+  test("not in a build without sync, where there is nothing to sign into", () => {
+    expect(needsSignInChoice({ ...lapsed, configured: false })).toBe(false);
+    expect(
+      needsSignInChoice({ ...lapsed, configured: false, status: "disabled" })
+    ).toBe(false);
+  });
+
+  test("and never while there is a session", () => {
+    // Including needs-key, which has its own screen and its own three routes. A
+    // device part-way through unlocking must not be offered "sign in" as though
+    // it were signed out.
+    for (const status of [
+      "connecting",
+      "needs-key",
+      "synced",
+      "pending",
+      "offline",
+      "disabled",
+    ] as const) {
+      expect(needsSignInChoice({ ...lapsed, status })).toBe(false);
+    }
+  });
+
+  test("exactly one screen answers a signed-out device", () => {
+    // The pair divides the signed-out state rather than each testing for it: with
+    // no screen the device renders an empty journal, and with two it renders both
+    // in the same place. Checked in both directions, since one predicate drifting
+    // to `>= 0` content or the other losing its negation both show up here.
+    for (const hasLocalContent of [true, false]) {
+      const i = { ...fresh, hasLocalContent };
+      expect([needsOnboarding(i), needsSignInChoice(i)].filter(Boolean)).toHaveLength(
+        1
+      );
+    }
+  });
+
+  test("and it never collides with the other four screens", () => {
+    // The other four all require a session, so this is a property of the states
+    // rather than of the order they are checked in App. Worth pinning anyway:
+    // App renders them as six independent conditions, so an overlap would render
+    // two screens rather than choose between them.
+    const i: OnboardingInput = lapsed;
+    const gate: LoadGateInput = { ...lapsed, syncedOnce: false };
+    expect(needsSignInChoice(i) && needsJournalKey(i)).toBe(false);
+    expect(needsSignInChoice(i) && isSettling(gate)).toBe(false);
+    expect(needsSignInChoice(i) && cannotLoadYet(gate)).toBe(false);
+    expect(
+      needsSignInChoice(i) &&
+        needsRecoveryCode({ ...lapsed, pending: true })
+    ).toBe(false);
   });
 });
 

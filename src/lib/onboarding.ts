@@ -32,9 +32,8 @@ export interface OnboardingInput {
  * The `hasLocalContent` condition is the load-bearing one. A signed-out device
  * that already holds a journal must never have it hidden behind a sign-in
  * screen: sessions expire, and someone whose journal vanished behind a login
- * would reasonably conclude they had lost it. That device keeps working and is
- * warned by NotSyncingBanner instead, which is the §6.1b decision to let
- * capture continue and make the state impossible to miss.
+ * would reasonably conclude they had lost it. That device goes to
+ * `needsSignInChoice` instead, which offers rather than gates.
  *
  * `loaded` matters for the same reason. IndexedDB resolves asynchronously, so
  * for the first moments of every launch a device with years of journal in it
@@ -45,6 +44,35 @@ export interface OnboardingInput {
  */
 export const needsOnboarding = (i: OnboardingInput): boolean =>
   i.configured && i.loaded && i.status === "signed-out" && !i.hasLocalContent;
+
+/**
+ * The same state with a journal already on the device: signed out, configured,
+ * loaded, holding content. Offer the choices rather than only warning.
+ *
+ * The exact complement of `needsOnboarding` within the signed-out state, and
+ * added 13 August 2026 because the banner alone turned out to be too little. A
+ * browser whose session had lapsed was reading its own journal indefinitely with
+ * one yellow line about it, and that line only ever offered one thing to do:
+ * sign in. Two other answers were reasonable and neither was reachable. Someone
+ * may want to keep capturing on a device that is not syncing, which §6.1b is
+ * explicit about protecting, and someone may not want the journal on that device
+ * at all — a borrowed laptop, a second browser opened once — which nothing
+ * offered anywhere (Gary, 13 August).
+ *
+ * Deliberately not a gate in the sense the other four are. Nothing here is
+ * hidden for good: one of the three choices is to carry on, and it is on the
+ * same screen as the other two. The reason it stands in front of the journal
+ * rather than living on the Sync screen is that this state is invisible from the
+ * journal — nothing about a stale spread looks stale — and the person who most
+ * needs the erase option is the one least likely to go looking for it.
+ *
+ * `hasLocalContent` divides the two screens rather than suppressing either, so
+ * exactly one of this and `needsOnboarding` is true whenever a configured,
+ * loaded device is signed out. The test pins that, because a state with no
+ * screen renders an empty journal and a state with two renders both.
+ */
+export const needsSignInChoice = (i: OnboardingInput): boolean =>
+  i.configured && i.loaded && i.status === "signed-out" && i.hasLocalContent;
 
 /**
  * A device that is signed in, holds nothing, and cannot open the account's
