@@ -198,8 +198,7 @@ describe("starting again with one passkey (spec §11 Q13, phase 6)", () => {
     expect(screen.getByText(/does\s+not take the key back from a device/i))
       .toBeTruthy();
     expect(screen.getByText(/journal key does not change/i)).toBeTruthy();
-    expect(screen.getByText(/set one up twice in the same password manager/i))
-      .toBeTruthy();
+    expect(screen.getByText(/deleted from a password manager/i)).toBeTruthy();
   });
 
   test("and only then replaces, saying that the old routes went", async () => {
@@ -440,25 +439,27 @@ describe("when it works", () => {
 
     expect(calls).toBe(0);
     expect(screen.getByText(/two prompts/i)).toBeTruthy();
-    expect(screen.getByText(/replaces it rather than adding a way in/i)).toBeTruthy();
+    expect(screen.getByText(/never replaces a passkey you\s+already have/i)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /set up another passkey/i }));
     await waitFor(() => expect(calls).toBe(1));
   });
 
-  test("and says where another one helps, and where it would replace instead", async () => {
-    // The account id is the WebAuthn user handle, so enrolling again in the same
-    // password manager replaces the credential rather than adding one — and leaves
-    // the row already written as a route nothing can open. §6.5 forbids the
-    // credential id that would let the client tidy up, so this is wording or nothing.
+  test("and says where another one helps, without a warning that no longer applies", async () => {
+    // It used to say that enrolling again in the same password manager replaced the
+    // credential, which was true while the account id was the user handle. Handles
+    // became unique per enrolment on 13 August 2026 — after that replacement quietly
+    // destroyed a working route — so this asserts the reassurance and the absence of
+    // the old warning, since copy describing an impossible failure is its own fault.
     routes = 1;
     await show();
 
     fireEvent.click(screen.getByRole("button", { name: /add another passkey/i }));
 
-    expect(screen.getByText(/replaces it rather than adding a way in/i)).toBeTruthy();
+    expect(screen.getByText(/never replaces a passkey you\s+already have/i)).toBeTruthy();
     expect(screen.getByText(/another\s+device, or another password manager/i))
       .toBeTruthy();
+    expect(screen.queryByText(/replaces it rather than adding a way in/i)).toBeNull();
   });
 
   test("and counts again, so the screen shows the route it just added", async () => {

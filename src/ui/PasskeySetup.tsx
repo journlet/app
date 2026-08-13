@@ -247,10 +247,11 @@ export default function PasskeySetup({
                   the fact would be the lost-device feature of 28 July again. */}
               <p style={{ ...textStyle, fontSize: 13 }}>
                 This sets up a new passkey here and removes the saved routes that
-                existed before it — useful when you have lost track of how many
-                there are, or set one up twice in the same password manager. It does
-                not take the key back from a device that already has it, and nothing
-                can. Your journal key does not change.
+                existed before it — useful when you have lost track of how many there
+                are, or a passkey has been deleted from a password manager and its
+                route is still counted. It does not take the key back from a device
+                that already has it, and nothing can. Your journal key does not
+                change.
               </p>
               <p style={{ ...textStyle, fontSize: 13 }}>
                 Two prompts follow, as before.
@@ -294,16 +295,18 @@ export default function PasskeySetup({
                 Two prompts follow: one to create the passkey, one to use it. Both
                 are needed — the second is not a sign the first failed.
               </p>
-              {/* The account id is the WebAuthn user handle, so a second enrolment
-                  in the same password manager replaces the credential rather than
-                  adding one — and leaves the row already written as a route nothing
-                  can open. §6.5 forbids the credential id that would let the client
-                  tidy that up, so saying so is the whole of the remedy. */}
+              {/* This used to warn that enrolling again in the same password manager
+                  replaced the credential rather than adding one, which was true while
+                  the account id was the WebAuthn user handle. Handles became unique
+                  per enrolment on 13 August 2026, after that replacement destroyed a
+                  working route on the author's own account, so the warning describes
+                  something that can no longer happen and is gone with it. What is
+                  still true is where a second one is worth having. */}
               {enrolled && (
                 <p style={{ ...textStyle, fontSize: 13 }}>
-                  Worth adding where the ones you have cannot reach — another
-                  device, or another password manager. Setting one up again in the
-                  same password manager replaces it rather than adding a way in.
+                  Worth adding where the ones you have cannot reach — another device,
+                  or another password manager. Adding one never replaces a passkey you
+                  already have.
                 </p>
               )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
