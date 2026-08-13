@@ -598,8 +598,9 @@ export default function PasskeySetup({
                   this removes stored routes and takes nothing back. Saying it after
                   the fact would be the lost-device feature of 28 July again. */}
               <p style={{ ...textStyle, fontSize: 13 }}>
-                This sets up a new passkey here and removes the saved routes that
-                existed before it — useful when you have lost track of how many there
+                This sets up a new passkey here, removes the saved routes that
+                existed before it, and clears the leftover records of routes that
+                have already gone — useful when you have lost track of how many there
                 are, or a passkey has been deleted from a password manager and its
                 route is still counted. It does not take the key back from a device
                 that already has it, and nothing can. Your journal key does not

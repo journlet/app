@@ -606,6 +606,47 @@ describe("starting again with one passkey (spec §11 Q13, §12.1 phase 6)", () =
     expect(listed.routes[0].note).not.toBeNull();
   });
 
+  test("and sweeps notes left behind by earlier restarts", async () => {
+    // The scoping correction: forgetting only the routes this call removed left
+    // anything orphaned earlier in the register for good, so an action promising one
+    // passkey and a clean list delivered a list with wreckage on it.
+    const sync = await boot();
+    doc.getMap("credentials").set("ghost-from-an-earlier-restart", new Y.Map());
+    await sync.unlockWithPasskey();
+
+    prfAnswer = async () => OTHER_SECRET.buffer;
+    await sync.replaceAllPasskeys();
+
+    const listed = await sync.listPasskeyRoutes();
+    expect(listed.strays).toHaveLength(0);
+    expect(Object.keys(doc.getMap("credentials").toJSON())).toEqual([
+      wrapRows[0].wrap_id,
+    ]);
+  });
+
+  test("but never a note whose route another device published meanwhile", async () => {
+    // §6.1h's ordering discipline, applied to the notes: the sweep is computed from a
+    // read taken after the delete, so a wrap that appeared while this was running is
+    // live and keeps its note. Scoping it to "not in `before`" would have swept it.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+
+    // Published during the enrolment, which is the only way it is "meanwhile": after
+    // the ids to delete were read and before the sweep reads what is live.
+    const meanwhile = { wrap_id: "from-another-device", wrapped: wrapRows[0].wrapped };
+    prfAnswer = async () => {
+      wrapRows.push(meanwhile);
+      doc.getMap("credentials").set(meanwhile.wrap_id, new Y.Map());
+      return OTHER_SECRET.buffer;
+    };
+
+    await sync.replaceAllPasskeys();
+
+    expect(Object.keys(doc.getMap("credentials").toJSON())).toContain(
+      meanwhile.wrap_id
+    );
+  });
+
   test("and deletes nothing at all when the enrolment fails", async () => {
     // Which is the case that matters: somebody cancels the sheet and still has every
     // route they had a moment ago.
