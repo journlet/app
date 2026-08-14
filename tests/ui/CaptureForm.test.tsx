@@ -29,6 +29,7 @@ const spies = () => ({
   setCapturePriority: vi.fn(),
   setCaptureInspiration: vi.fn(),
   setCaptureAnchor: vi.fn(),
+  resetCapture: vi.fn(),
 });
 
 // Build props with sensible defaults; each test overrides what it exercises.
@@ -185,6 +186,86 @@ describe("type and signifiers", () => {
     expect(props.setCapturePriority.mock.calls[0][0](false)).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /inspiration/ }));
     expect(props.setCaptureInspiration.mock.calls[0][0](false)).toBe(true);
+  });
+});
+
+// Resetting the sticky choices (14 August 2026). The reset covers the page,
+// the type and the signifiers, and deliberately leaves the typed text alone.
+describe("reset", () => {
+  test("is not offered when the form is already at today, task, no signifiers", () => {
+    // A button that would do nothing on tap is as bad as an unlabelled one
+    setup();
+    expect(screen.queryByRole("button", { name: /^Reset to/ })).toBeNull();
+  });
+
+  test("is offered, and named in full, once a signifier is lit", () => {
+    const props = setup({ capturePriority: true });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reset to today, task, no signifiers" })
+    );
+    expect(props.resetCapture).toHaveBeenCalledTimes(1);
+  });
+
+  test("is offered when the type is not task", () => {
+    setup({ captureType: "note" as const });
+    expect(
+      screen.getByRole("button", { name: "Reset to today, task, no signifiers" })
+    ).toBeTruthy();
+  });
+
+  test("is offered when the page is not today", () => {
+    setup({ captureAnchor: "2026-08-12" });
+    expect(
+      screen.getByRole("button", { name: "Reset to today, task, no signifiers" })
+    ).toBeTruthy();
+  });
+
+  test("is offered when the page is a longer period than a day", () => {
+    setup({ captureScope: "week" as const });
+    expect(
+      screen.getByRole("button", { name: "Reset to today, task, no signifiers" })
+    ).toBeTruthy();
+  });
+
+  test("drops today from the label where the form owns no page choice", () => {
+    // Collection capture has no picker, so promising a move to today would be
+    // naming a choice this form cannot make
+    const activeCol: Collection = {
+      id: "c1",
+      kind: "list",
+      name: "Books",
+      createdAt: 0,
+    };
+    setup({ activeCol, captureInspiration: true });
+    expect(
+      screen.getByRole("button", { name: "Reset to task, no signifiers" })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /Reset to today/ })
+    ).toBeNull();
+  });
+
+  test("a pinned sub-bullet gets the same shortened label", () => {
+    setup({
+      captureParent: null,
+      captureParentPageLabel: "Fri 24 Jul",
+      captureType: "event" as const,
+    });
+    expect(
+      screen.getByRole("button", { name: "Reset to task, no signifiers" })
+    ).toBeTruthy();
+  });
+
+  test("a page away from today alone does not offer a reset in collection mode", () => {
+    // The picker is hidden there, so the stale page is invisible and untouched
+    const activeCol: Collection = {
+      id: "c1",
+      kind: "list",
+      name: "Books",
+      createdAt: 0,
+    };
+    setup({ activeCol, captureAnchor: "2026-08-12" });
+    expect(screen.queryByRole("button", { name: /^Reset to/ })).toBeNull();
   });
 });
 
