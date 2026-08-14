@@ -13,6 +13,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
 import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
 import {
+  listDevices,
+  onDevicesChange,
   markDeviceRemoved,
   markThisDeviceSignedOut,
   thisDeviceId,
@@ -26,24 +28,7 @@ import {
   reconcileRoutes,
 } from "./credentials";
 import type { RouteListing } from "./credentials";
-import {
-  approveLinkRequest,
-  claimWrappedDataKeys,
-  listLinkRequests,
-  publishDeviceKey,
-  publishEpochKey,
-  hasPendingRequest,
-  publishLinkRequest,
-  checkStanding,
-  readCurrentEpoch,
-  readKeeperWrappedEpochs,
-  rejectLinkRequest,
-  revokeDevice,
-  thisDeviceCode,
-  shareDataKeyWithDevices,
-  surrenderDeviceKeys,
-} from "./deviceLink";
-import type { LinkRequest } from "./deviceLink";
+import { readCurrentEpoch, readKeeperWrappedEpochs } from "./deviceLink";
 import {
   countKeeperWraps,
   deleteKeeperWraps,
@@ -53,8 +38,6 @@ import {
 import {
   decryptUpdate,
   encryptUpdate,
-  generateDataKey,
-  wrapDataKey,
   LegacyPayloadError,
   readPayloadEpoch,
   unwrapDataKey,
@@ -93,15 +76,10 @@ import { markRecoveryPending } from "../lib/recoveryAck";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import {
   clearError,
-  getLinkCode,
-  getLinkRequests,
-  getLinkStage,
   getSyncStatus,
   isConfigured,
   resetLinkState,
   setError,
-  setLinkRequests,
-  setLinkState,
   setRemoved,
   setStatus,
   subscribeSync,
@@ -115,11 +93,8 @@ const PAGE = 1000;
 // Status and error live in store/syncStatus.ts now, and are re-exported here so
 // the UI keeps one import surface for the store. See that file for why the
 // listener payload had to stop being the status value.
-export type { LinkStage, SyncStatus, SyncSnapshot } from "./syncStatus";
+export type { SyncStatus, SyncSnapshot } from "./syncStatus";
 export {
-  getLinkCode,
-  getLinkRequests,
-  getLinkStage,
   getSyncError,
   getSyncSnapshot,
   getSyncStatus,
@@ -177,15 +152,6 @@ const wrappedFromJson = (j: WrappedKeyJson): WrappedDataKey => ({
  */
 const MISSING_EPOCH_KEY =
   "This device does not have the newest key for your journal yet. Open Journlet on another of your devices while this one is open, and it will catch up.";
-
-/**
- * The other half of that, and deliberately not a variation on it.
- *
- * MISSING_EPOCH_KEY says wait. This one says act, and names the action, because
- * the two situations look identical from the journal and have opposite remedies.
- */
-const NEEDS_REAPPROVAL =
-  "This device needs approving again before it can be given the newest key for your journal. Open Journlet on another of your devices, approve this one, and check the codes match. What you can already read here is unaffected.";
 
 /** A stored row written under an epoch this device holds no key for. */
 class MissingEpochKeyError extends Error {
@@ -287,7 +253,6 @@ const teardown = () => {
   // grant a device access with a data key this device no longer holds.
   keeperUsable = false;
   resetLinkState();
-  stopWatchingForGrant();
 };
 
 // Writes are serialised. The shadow doc only learns that the server has an
@@ -525,23 +490,10 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   );
   if (keeperKey0) keys.set(0, keeperKey0);
 
-  // Rows another device has left for this one. The ordinary route for a device
-  // added by approval, and the route by which any device catches up on an epoch
-  // it was offline for.
-  try {
-    for (const [epoch, key] of await claimWrappedDataKeys(
-      supabase,
-      deviceBinding()
-    )) {
-      keys.set(epoch, key);
-    }
-  } catch (e) {
-    // A failed check is not a refusal.
-    console.warn("[devices] could not check for granted keys", e);
-  }
-
-
-  // Later epochs under the keeper key, for the device holding the recovery code.
+  // Later epochs under the keeper key. Every device that can read the journal holds
+  // that key since §12.1 phase 7, so this is the only route to an epoch now: the
+  // per-device grants that used to sit above this were the mechanism for devices
+  // admitted by approval, and approval is gone.
   if (keeperUsable && held.keeperKey) {
     try {
       for (const [epoch, wrappedJson] of await readKeeperWrappedEpochs(supabase)) {
@@ -560,10 +512,10 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   }
 
   if (keys.size === 0) {
-    // Nothing at all: this device has never been let in. It is not asked for on its
-    // behalf — the screen offers a passkey, the journal key and a button for this —
-    // but a request it made before a reload is picked up again.
-    await resumeAskIfPending();
+    // Nothing at all: this device cannot open the journal yet. The unlock screen
+    // offers the two routes that remain, and nothing is published on this device's
+    // behalf — there is no longer anything to publish, since §12.1 phase 7 removed
+    // the request table along with approval.
     setStatus("needs-key");
     return false;
   }
@@ -599,501 +551,81 @@ const ensureJournalKeys = async (): Promise<boolean> => {
   await replaceKeyRing(next);
 
   if (!currentDataKey(next)) {
-    // Behind, or removed. Only the server can say which, and the two need
-    // opposite screens. No dropConnection here: this branch is only reached from
-    // inside a connect, which by definition has not set connectedUserId yet, so
-    // there is nothing to drop. Adding it anyway looked prudent and was code no
-    // test could reach.
-    const standing = await checkStanding(
-      supabase,
-      deviceBinding(),
-      next.dataKeys
-    ).catch(() => "behind" as const);
-
-    if (standing === "removed") {
-      enterRemovedState();
-      // It may also have asked and been refused since. Same round trip either way.
-      await noticeIfDeclined();
-      return false;
-    }
-    if (standing === "unproven") {
-      // Holds rows, but nothing another device will accept as proof, so waiting
-      // would be waiting forever. Ask, and say which of the two things this is.
-      //
-      // Still automatic, unlike a new device signing in (12 August 2026). The two
-      // cases differ in who started it: a new device is on a screen listing three
-      // ways in and can be handed a button, where this one is mid-journal behind a
-      // banner it did not ask for, and approval is the remedy its message names. A
-      // request nobody asked for is the lesser evil against telling somebody to wait
-      // for something that cannot arrive, which is the failure §6.1d exists to
-      // prevent.
-      await askToBeAdded();
-      setError(NEEDS_REAPPROVAL);
-      setStatus(navigator.onLine ? "pending" : "offline");
-      return false;
-    }
-    // Entitled, and behind. The journal reads to the last rotation and no
-    // further, which is worth naming rather than reporting as an outage: the fix
-    // is having another device open at the same time as this one.
+    // The account has rotated to an epoch whose key this device cannot read. Before
+    // §12.1 phase 7 that had three possible meanings and only the server could tell
+    // them apart: removed, entitled-but-unproven, or simply behind. Two of those were
+    // properties of the grant tables, and with those gone there is one meaning left —
+    // the row for this epoch is missing or unreadable under the keeper key this device
+    // holds, which is the "behind" case. Removal is now a mark in the register rather
+    // than an entitlement on the server, and is read from the journal itself.
     setError(MISSING_EPOCH_KEY);
     setStatus(navigator.onLine ? "pending" : "offline");
     return false;
   }
-  // Withdrawn only now, having established that this device can actually read the
-  // journal. It used to happen before this check, which meant every reconnect on a
-  // device that was waiting for approval quietly cancelled its own request: the
-  // card vanished from the approving device and this one waited for an answer to a
-  // question it had retracted.
-  await withdrawLinkRequest();
   setRemoved(false);
   return true;
 };
 
-// ---------- being added, and adding others ----------
-
-const deviceBinding = () => ({
-  userId: session?.user.id ?? "",
-  deviceId: thisDeviceId(),
-});
-
-// Whether this device has been removed, the code it is displaying, the stage it
-// has reached and the requests it could approve all live in the snapshot in
-// store/syncStatus.ts, and are re-exported above. They were four module-level
-// variables here, reaching the screen through a notification that said nothing
-// about them (assessment Finding 12, first slice after Finding 2).
+// ---------- what a removed device does, and removing one ----------
+//
+// All that is left of a much larger section. §12.1 phase 7 deleted approval on
+// 14 August 2026: the link requests, the code to compare, the per-device ECDH keys,
+// the wrapped-key grants and the standing check all went, along with three tables.
+// Two ways in remain, a passkey and the journal key, and both hand over the keeper
+// key — so there is no longer any such thing as a device that can read the journal
+// and not manage it, which is what the deleted machinery existed to arrange.
 
 /**
- * The backstop under the realtime subscription below, not the primary path.
+ * This device has been marked removed in the register, so stop showing the journal.
  *
- * It was the primary path until 31 July and the delay was plainly visible:
- * approving on one device left the other saying "waiting" for up to five
- * seconds, which reads as a hang rather than as latency. Kept as a floor because
- * realtime can fail to connect, a channel can drop, and a home-screen PWA gets
- * suspended, so the interval is now longer than it was rather than shorter.
- */
-const LINK_POLL_MS = 8_000;
-let linkPoll: ReturnType<typeof setInterval> | null = null;
-/** Its own channel, since the journal channel does not exist yet. */
-let grantChannel: RealtimeChannel | null = null;
-
-const stopWatchingForGrant = () => {
-  if (linkPoll) {
-    clearInterval(linkPoll);
-    linkPoll = null;
-  }
-  if (grantChannel && supabase) void supabase.removeChannel(grantChannel);
-  grantChannel = null;
-};
-
-const pollForGrant = async (): Promise<void> => {
-  if (!supabase || !session || getSyncStatus() !== "needs-key") {
-    stopWatchingForGrant();
-    return;
-  }
-  try {
-    // Discarding the key is intentional: connect() re-claims and adopts it
-    // properly, and duplicating that here is how the two paths drift apart.
-    if ((await claimWrappedDataKeys(supabase, deviceBinding())).size === 0) {
-      // No key. Is the request even still there? Checked in this order and never
-      // the other way round: approving publishes the wrapped key *before* deleting
-      // the request, so a grant is always visible by the time the request goes. The
-      // reverse order would report a successful approval as a refusal.
-      await noticeIfDeclined();
-      return;
-    }
-    stopWatchingForGrant();
-    // Said before the work rather than after it. Fetching and decrypting the
-    // journal takes a moment, and during that moment the screen would otherwise
-    // still be telling the user to go and approve something they just approved.
-    setLinkState({ linkStage: "opening" });
-    await connect();
-  } catch {
-    // Still waiting. A failed check is not a refusal.
-  }
-};
-
-/**
- * Watch for this device being granted the key.
- *
- * A dedicated realtime channel. My earlier reasoning for polling instead — that
- * a device in this state has never subscribed to anything — was about the journal
- * channel, which is opened after the first successful reconcile. Nothing stops
- * this device subscribing to its own row: it has a session, and RLS scopes the
- * subscription to its own account.
- *
- * Both INSERT and UPDATE. An approval is an upsert, so which one arrives depends
- * on whether a row for this device existed before, and treating that as a detail
- * of the moment is how one of the two cases ends up never firing.
- */
-const watchForGrant = () => {
-  if (!supabase || !session) return;
-  if (!linkPoll) linkPoll = setInterval(() => void pollForGrant(), LINK_POLL_MS);
-  if (grantChannel) return;
-  grantChannel = supabase
-    .channel("device-grant")
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "device_wrapped_keys",
-        filter: `user_id=eq.${session.user.id}`,
-      },
-      // Not read from the payload. The row carries ciphertext this device has to
-      // authenticate against its own binding anyway, so the event is a nudge to
-      // go and look properly, nothing more.
-      () => void pollForGrant()
-    )
-    .subscribe();
-};
-
-/**
- * Fall back to waiting for approval, having been removed.
- *
- * The session is untouched — removal takes keys away, not sign-in — so this is
- * the same state a new device sits in, reached from the other direction. The local
- * journal is deliberately left on disk: hidden behind the waiting screen rather
- * than erased, so nothing written here is destroyed and re-approval brings it
- * straight back, including anything that never managed to sync (Gary's decision,
- * 3 August).
- *
- * It does *not* ask to be added back. Doing that was the obvious thing and it was
- * wrong: removing a device produced an approval prompt for that same device on the
- * device that had just removed it, seconds later, leaving no answer that made
- * sense — "codes are different" is untrue and "not now" invites it to ask again
- * (Gary, 3 August). A new device asking on sign-in is right, because signing in
- * there *is* the request. Here the account holder has just said no, so asking again
- * has to be a fresh decision taken on the removed device.
+ * Cooperative, and that is now the whole of it. Before phase 7, removal also revoked
+ * this device's grant on the server and rotated the data key, which genuinely denied
+ * it future epochs. Every remaining device holds the keeper key, so a rotation would
+ * exclude nobody and is not attempted; what removal does is ask this device to hide
+ * its copy, and it obliges because it is the same application. Nothing enforces it,
+ * §6.1b has always said as much, and the interface says so where the button is.
  */
 const enterRemovedState = (): void => {
   if (wasRemoved()) return;
-  // This device is not synced any more, and saying so here is what lets it
-  // connect again later. Reached mostly from the realtime path, which never runs
-  // ensureJournalKeys, so dropping the connection there alone was not enough —
-  // approving left "Opening your journal…" on screen until a restart. See
-  // dropConnection.
   dropConnection();
   clearError();
   setStatus("needs-key");
   setRemoved(true);
 };
 
-/**
- * Ask a device that already holds the journal to add this one.
- *
- * Public and deliberate since 12 August 2026, and that is the change: a device
- * reaching needs-key used to publish this request on its own, so signing in on a new
- * device put a prompt on another one's screen whether or not anybody wanted approval
- * to be the route. With a passkey and the journal key code both on that screen, most
- * of those requests were for nothing — and the same reasoning already applied to a
- * removed device asking again, where automatic asking put a prompt on the device that
- * had just removed it (Gary, 3 August). One rule now covers both: nothing asks for
- * approval unless somebody presses the button.
- *
- * Writing a row is not free either: a request carries this device's public key and
- * sits on the server for half an hour, so not writing one for somebody who is about
- * to use a passkey is the right default under §6.5's spirit as well.
- *
- * One case still asks on its own, and the difference is who started it: a device that
- * has been left unproven by a rotation is mid-journal behind a banner it did not ask
- * for, with approval as the remedy its message names, so ensureJournalKeys asks there
- * rather than leaving somebody waiting for something that cannot arrive.
- */
-export const askForApproval = async (): Promise<void> => {
-  await askToBeAdded();
-};
-
-/**
- * Has the request this device is waiting on been answered with a refusal?
- *
- * Called from the poll and from a connect, because the two are the only moments
- * this device looks at the server and either can be the first to find out. Doing
- * it in the poll alone meant a foreground or a "try again" learned nothing.
- *
- * Only ever after a grant has been ruled out. Approving deletes the request as its
- * last step, having published the wrapped key first, so a grant is always visible
- * by the time the request disappears — checking in the other order would report a
- * successful approval as a refusal.
- */
-const noticeIfDeclined = async (): Promise<void> => {
-  if (!supabase || !session || getLinkStage() !== "waiting") return;
-  try {
-    if (await hasPendingRequest(supabase, deviceBinding())) return;
-  } catch {
-    // Could not tell. Keep waiting rather than claim a refusal that may not have
-    // happened.
-    return;
-  }
-  stopWatchingForGrant();
-  setLinkState({ linkCode: null, linkStage: "declined" });
-};
-
-/**
- * Decide which of the two "cannot read the newest rows" stories is true, and say
- * that one. Never assumes removal from a failed check.
- */
-const explainMissingKey = async (): Promise<void> => {
-  if (!supabase || !session) return;
-  try {
-    const standing = await checkStanding(
-      supabase,
-      deviceBinding(),
-      ring?.dataKeys ?? new Map()
-    );
-    if (standing === "behind") {
-      setError(MISSING_EPOCH_KEY);
-      // Behind, not removed. Reconnect rather than sitting there: a device whose
-      // realtime rows have stopped decrypting still reads "synced", applies
-      // nothing, and had no way back short of a restart. Dropping the connection
-      // and asking again puts it on the ordinary retry backoff, so it recovers by
-      // itself the moment another device passes the key along.
-      dropConnection();
-      void connect();
-      return;
-    }
-    if (standing === "unproven") {
-      // Same three-way split as the connect path, and the same reason for it.
-      // Reconnecting here would loop: no other device will accept this one's rows,
-      // so the backoff would run for ever against something only an approval
-      // fixes.
-      await askToBeAdded();
-      setError(NEEDS_REAPPROVAL);
-      return;
-    }
-  } catch {
-    // Could not tell. The safe assumption is the recoverable one.
-    setError(MISSING_EPOCH_KEY);
-    return;
-  }
-  enterRemovedState();
-};
-
-/**
- * Ask another device to let this one in, and remember the code to display.
- *
- * Failure is not fatal and is not shown. The journal key remains a complete
- * route in, so a device that cannot publish a request falls back to the screen
- * it had before this feature existed rather than to a dead end.
- */
-/**
- * Pick up a request this device has already made, without making one.
- *
- * A reload loses the link state but not the row: the request lasts half an hour, and
- * an approval landing while nothing was watching would leave this device waiting for
- * an event it had stopped listening for. So the state is restored — the code
- * recomputed locally, the watch restarted — and nothing is written. Silent when no
- * request exists, which is the ordinary case now that asking is a button.
- */
-const resumeAskIfPending = async (): Promise<void> => {
-  if (!supabase || !session) return;
-  try {
-    if (!(await hasPendingRequest(supabase, deviceBinding()))) return;
-    setLinkState({ linkCode: await thisDeviceCode(), linkStage: "waiting" });
-    watchForGrant();
-  } catch (e) {
-    // Not knowing costs a tap on a button that is on the screen anyway.
-    console.warn("[devices] could not check for an outstanding request", e);
-  }
-};
-
-const askToBeAdded = async (): Promise<void> => {
-  if (!supabase || !session) return;
-  try {
-    const code = await publishLinkRequest(supabase, deviceBinding());
-    watchForGrant();
-    setLinkState({ linkCode: code, linkStage: "waiting" });
-  } catch (e) {
-    setLinkState({ linkCode: null, linkStage: null });
-    console.warn("[devices] could not ask to be added", e);
-  }
-};
-
-/** Stop asking, once in or once leaving. */
-const withdrawLinkRequest = async (): Promise<void> => {
-  const wasAsking = getLinkCode() !== null;
-  setLinkState({ linkCode: null, linkStage: null });
-  stopWatchingForGrant();
-  if (!wasAsking || !supabase || !session) return;
-  try {
-    await rejectLinkRequest(supabase, thisDeviceId());
-  } catch {
-    // It expires on its own, and the approving device deletes it too.
-  }
-};
-
-/**
- * Refresh the list of devices asking to be let in.
- *
- * Only on a device that is actually connected and holds the data key: a device
- * that cannot open the journal itself has nothing to grant, and showing it an
- * approval prompt would be offering a decision it cannot carry out.
- */
-const sameRequest = (a: LinkRequest, b: LinkRequest | undefined): boolean =>
-  b !== undefined &&
-  a.deviceId === b.deviceId &&
-  a.code === b.code &&
-  a.requestedAt === b.requestedAt;
-
-const refreshLinkRequests = async (): Promise<void> => {
-  if (!supabase || !session || !connectedUserId || !ring) return;
-  try {
-    const next = await listLinkRequests(supabase, deviceBinding());
-    /**
-     * Compare the code and the timestamp, not just the device id.
-     *
-     * publishLinkRequest upserts on (user_id, device_id) and rewrites
-     * public_key and requested_at in place, so a re-ask changes what the row
-     * says while leaving the id and the list length alone. Comparing ids only
-     * meant this returned early and kept the old row.
-     *
-     * The consequence landed on the one screen that cannot afford it. A device
-     * that signs out and wipes destroys its keypair but keeps its device id in
-     * localStorage, so asking again produces a new public key and therefore a
-     * new verification code. The approving device went on showing the old one.
-     * Two screens, two different codes, and the correct response to that is to
-     * refuse — so the mechanism taught the person to distrust a legitimate
-     * device. Nothing leaked, because approveDevice wraps to the key it is
-     * holding, but a comparison people learn to see fail is a comparison they
-     * stop reading.
-     *
-     * requestedAt is in here for its own reason: it resets on every ask, and
-     * LinkPrompts counts down from the cached copy, so a renewed request was
-     * displaying "expires in 0 minutes".
-     */
-    const held = getLinkRequests();
-    const unchanged =
-      next.length === held.length &&
-      next.every((r, i) => sameRequest(r, held[i]));
-    if (unchanged) return;
-    setLinkRequests(next);
-  } catch (e) {
-    console.warn("[devices] could not read link requests", e);
-  }
-};
-
-/** Grant a request, after the person has compared the codes. */
-export const approveDevice = async (request: LinkRequest): Promise<void> => {
-  const key = ring && currentDataKey(ring);
-  if (!supabase || !session || !ring || !key)
-    throw new Error("This device cannot add another right now");
-  // The current epoch only. A device cannot grant an epoch it does not itself
-  // hold, and the newcomer needs the key that is being written under now.
-  await approveLinkRequest(
-    supabase,
-    key,
-    request,
-    deviceBinding(),
-    ring.epoch
-  );
-  // And every earlier epoch this device holds, now that the row above has made
-  // the newcomer entitled. Without this it could read only what was written since
-  // the last rotation until some later connect happened to fill the gaps in,
-  // which on a re-approved device means its own history missing for a while.
-  //
-  // The row above is what proves the newcomer: it carries a grant at the current
-  // epoch, which this device can verify because it holds that epoch. So no
-  // exemption is needed here for a device that is too new to have registered
-  // itself. The approval is the evidence, and it is written down.
-  for (const epoch of ring.dataKeys.keys()) {
-    if (epoch === ring.epoch) continue;
-    await shareDataKeyWithDevices(
-      supabase,
-      ring.dataKeys,
-      deviceBinding(),
-      epoch
-    );
-  }
-  setLinkRequests(
-    getLinkRequests().filter((r) => r.deviceId !== request.deviceId)
-  );
-};
-
-/**
- * Whether this device is able to remove another.
- *
- * Only a device holding the recovery key can, because removing means rotating,
- * and the new epoch's key has to be published wrapped under that key before any
- * device is given it. Rotating without it would leave content the recovery code
- * cannot reach, which quietly breaks the one promise §6.1 makes about losing every
- * device. So the constraint is real rather than an implementation shortcut, and
- * the Sync screen says so instead of offering an action that would fail.
- */
 export const canRemoveDevices = (): boolean =>
   Boolean(ring?.keeperKey && keeperUsable);
 
 /**
- * Remove another device from this account, and rotate the data key.
+ * Remove another device from this account.
  *
- * The two halves are one operation from the user's point of view and must not be
- * separable in the interface: revoking alone takes away future keys and nothing
- * else, so the removed device would carry on reading and writing under the key it
- * already holds. That is the version of this feature that was built and deleted
- * in July for being dishonest.
+ * A mark in the register inside the encrypted journal, and nothing else. Until
+ * §12.1 phase 7 this also revoked that device's rows and rotated the data key to an
+ * epoch it could not read, which was the honest half of the feature: it denied future
+ * content. That worked because a device admitted by approval held only a wrapped data
+ * key. With approval gone, every device holds the keeper key and can read any epoch
+ * from `journal_keys`, so rotating would cost a new key and exclude nobody — a
+ * ceremony that looks like revocation and is not, which is precisely the version of
+ * this feature built and deleted in July.
  *
- * Order: revoke, publish the new epoch under the keeper key, hand it to the
- * devices that remain, then adopt it here. Every step is safe to fail at — the
- * worst outcome is a device that has lost access while the account has not yet
- * moved on, which is the direction that does not leak.
+ * So what is left is cooperative: the marked device sees the mark in the journal and
+ * hides its copy (see enterRemovedState). It obliges because it is the same
+ * application, not because anything stops it. §6.1b has said from the start that
+ * nothing here can reach a device that simply does not open the app, and the Sync
+ * screen says what this button does rather than implying more.
+ *
+ * Still gated on holding the keeper key, unchanged: a device that cannot read the
+ * register has no business editing it, and every device can now.
  */
 export const removeDevice = async (deviceId: string): Promise<void> => {
   if (!supabase || !session || !ring?.keeperKey || !keeperUsable)
-    throw new Error(
-      "Only the device holding your recovery code can remove another device"
-    );
+    throw new Error("Only a device that can open this journal can remove another");
   if (deviceId === thisDeviceId())
     throw new Error("Use sign out to remove this device");
 
-  const binding = deviceBinding();
-  await revokeDevice(supabase, deviceId);
-
-  const epoch = (await readCurrentEpoch(supabase)) + 1;
-  const dataKey = await generateDataKey();
-  const wrapped = await wrapDataKey(dataKey, ring.keeperKey);
-  await publishEpochKey(supabase, binding, epoch, wrappedToJson(wrapped));
-
-  // The removed device is not among these: revokeDevice took away both its rows,
-  // so it is no longer entitled and the share loop passes over it. Note it is
-  // still unmarked in the register at this point, since markDeviceRemoved is the
-  // last step, so the row deletion is what excludes it here and the register mark
-  // is what keeps its id from being reused later.
-  // Built before the share, not after, because verifying another device's grant
-  // needs the key for the epoch that grant names and the share needs the new one
-  // to hand out. Building the map is not adopting it: the ring below is still
-  // the last thing to change, so the ordering guarantee is unaffected.
-  const dataKeys = new Map(ring.dataKeys);
-  dataKeys.set(epoch, dataKey);
-
-  await shareDataKeyWithDevices(supabase, dataKeys, binding, epoch);
-
-  ring = { ...ring, dataKeys, epoch };
-  await replaceKeyRing(ring);
-
-  // Recorded in the register so the other devices show what happened, and pushed
-  // under the new epoch as an ordinary edit.
-  // No republish here. The register lives in the encrypted document, so the
-  // Sync screen's own Yjs observer (store/devices.ts onDevicesChange) is what
-  // refreshes the list; the notification this used to send changed nothing in
-  // the snapshot and nothing read it.
   markDeviceRemoved(deviceId);
 };
 
-/** Refuse a request, whether because the codes differ or it was not expected. */
-export const rejectDevice = async (deviceId: string): Promise<void> => {
-  if (!supabase) throw new Error("Sync is not configured");
-  await rejectLinkRequest(supabase, deviceId);
-  setLinkRequests(getLinkRequests().filter((r) => r.deviceId !== deviceId));
-};
-
-/**
- * A keeper key that opened its wrap, or was typed correctly, and still does not
- * open this account's journal.
- *
- * Typed here rather than thrown as a message because the two callers describe it
- * differently and neither may borrow the other's words: one person has typed a
- * journal key and can be told so, the other has passed a biometric and never saw a
- * code at all. Reachable from both — a wrap decrypting proves only that the
- * credential matched the row, not that what came out of it fits the journal.
- */
 class KeeperKeyMismatchError extends Error {
   constructor() {
     super("That key does not open this account's journal");
@@ -1167,7 +699,6 @@ const adoptKeeperKey = async (keeperKey: CryptoKey): Promise<void> => {
   // Proven by the unwrap above: this key opens this account's journal, so this
   // device can display it as the recovery code.
   keeperUsable = true;
-  await withdrawLinkRequest();
 };
 
 /** Adopt a keeper key that arrived as a typed or scanned journal key code. */
@@ -1667,10 +1198,13 @@ const reportTally = (tally: SkipTally): void => {
   }
   else if (tally.behind > 0) {
     // Said instead of the message above, not alongside it: on a device that is
-    // behind, both counts can be non-zero and the accurate, actionable one is
-    // this. Which message it is depends on whether this device still has keys on
-    // the server, so it takes a round trip and cannot be answered here.
-    void explainMissingKey();
+    // behind, both counts can be non-zero and the accurate, actionable one is this.
+    //
+    // One message rather than a round trip since §12.1 phase 7. This used to ask the
+    // server which of removed, unproven or behind applied, because the answer lived in
+    // the grant tables. Those are gone: a device that cannot read an epoch is behind,
+    // and removal is a mark in the register which the register itself reports.
+    setError(MISSING_EPOCH_KEY);
   }
   if (tally.legacy > 0) {
     // Not a fault: these are pre-AAD rows that are never read again. Logged
@@ -1782,19 +1316,6 @@ const subscribe = () => {
         if (row.payload) void applyRemotePayload(row.payload);
       }
     )
-    .on(
-      "postgres_changes",
-      {
-        // Every event, not just INSERT: a request withdrawn or approved on
-        // another device has to take the prompt off this screen too, or two
-        // devices both show a card for something already dealt with.
-        event: "*",
-        schema: "public",
-        table: "device_link_requests",
-        filter: `user_id=eq.${session.user.id}`,
-      },
-      () => void refreshLinkRequests()
-    )
     .subscribe((state) => {
       if (state === "SUBSCRIBED") {
         // A re-join after a dropped socket means events were missed while
@@ -1865,41 +1386,6 @@ const doConnect = async (): Promise<void> => {
   subscribe();
   touchThisDevice();
   setStatus("synced");
-  // Not awaited, and deliberately last. Per-device keys are groundwork: nothing
-  // the user can see depends on them yet, and a journal that is synced should say
-  // so without waiting on a table it does not read from.
-  void shareThisDevicesKeys();
-  // Realtime is the fast path, this is the floor: a backgrounded PWA misses
-  // events with no replay, so a device that was asleep when a request arrived
-  // would otherwise show nothing until something else happened to poke it.
-  void refreshLinkRequests();
-};
-
-/**
- * Publish this device's public key, then hand the data key to any device that has
- * published one and has not been given it (spec step 2).
- *
- * Failure is swallowed on purpose. There is nothing for the user to do about it,
- * the journal in front of them is syncing normally, and the next launch tries
- * again, so an error banner here would be alarm without a remedy. The console
- * line is for me.
- */
-const shareThisDevicesKeys = async (): Promise<void> => {
-  if (!supabase || !session || !ring) return;
-  const binding = deviceBinding();
-  try {
-    await publishDeviceKey(supabase, binding);
-    const key = currentDataKey(ring);
-    if (key)
-      await shareDataKeyWithDevices(
-        supabase,
-        ring.dataKeys,
-        binding,
-        ring.epoch
-      );
-  } catch (e) {
-    console.warn("[devices] key sharing deferred to the next launch", e);
-  }
 };
 
 // Single-flight. connect() has four callers — the auth listener, the online
@@ -1991,6 +1477,18 @@ export const startSync = (): void => {
     }
   });
 
+  // Removal is a mark in the encrypted register since §12.1 phase 7, so this is where
+  // a removed device finds out: the mark arrives as ordinary journal content, on the
+  // realtime path or the next reconcile, and the register's own observer fires.
+  //
+  // Read from the register rather than pushed through the snapshot, because the doc is
+  // the only place the fact exists. Before phase 7 the server knew — removal deleted
+  // this device's grant — and checkStanding asked it. There is nothing to ask now.
+  onDevicesChange(() => {
+    const mine = listDevices().find((d) => d.isThisDevice);
+    if (mine?.removedAt) enterRemovedState();
+  });
+
   window.addEventListener("online", () => {
     if (session) void connect().then(() => dirty && reconcile("online"));
   });
@@ -2002,12 +1500,8 @@ export const startSync = (): void => {
   // replay — catch up whenever the app comes back to the foreground
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !session) return;
-    if (connectedUserId) {
-      void reconcile("visibility");
-      // A request that arrived while this device was asleep produced no event it
-      // could hear, so foregrounding is the moment it finds out.
-      void refreshLinkRequests();
-    } else void connect();
+    if (connectedUserId) void reconcile("visibility");
+    else void connect();
   });
 };
 
@@ -2086,22 +1580,10 @@ export const signOutAndWipe = async (): Promise<void> => {
   } catch {
     // Never block leaving on being able to announce it.
   }
-  // Withdraw any outstanding request while there is still a session to do it
-  // with. A device that asked, gave up and signed out would otherwise leave a
-  // prompt on someone else's screen for something that is no longer waiting.
-  await withdrawLinkRequest();
-  // Give up this device's key rows, for the same reason and in the same window.
-  // Sign-out left them behind until 31 July, which meant per-device keys were
-  // built and never used for the one thing they exist for.
-  if (supabase && session) {
-    try {
-      await surrenderDeviceKeys(supabase, deviceBinding());
-    } catch (e) {
-      // Never block leaving. The rows are unopenable regardless once the
-      // keystore is wiped, and this device's next sign-in republishes over them.
-      console.warn("[devices] could not release this device's keys", e);
-    }
-  }
+  // Nothing on the server to withdraw or surrender any more. Signing out used to
+  // retract an outstanding link request and delete this device's key rows, both of
+  // which §12.1 phase 7 removed along with the tables they lived in. What remains is
+  // the register mark above, which is what the other devices read.
   teardown();
   clearPendingKey();
   if (supabase) {

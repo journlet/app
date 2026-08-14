@@ -224,58 +224,14 @@ on conflict (user_id) do update set bytes = excluded.bytes, updated_at = now();
 -- are public by construction, and a device can read every wrapped blob but can
 -- only *unwrap* the one bound to its own device id.
 
--- One row per device: its public ECDH key, raw P-256 point, base64.
-create table if not exists public.device_keys (
-  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  device_id  text not null,
-  public_key text not null,
-  created_at timestamptz not null default now(),
-  primary key (user_id, device_id)
-);
 
-alter table public.device_keys enable row level security;
-
-drop policy if exists "read own device keys" on public.device_keys;
-create policy "read own device keys" on public.device_keys
-  for select using (auth.uid() = user_id);
-drop policy if exists "write own device keys" on public.device_keys;
-create policy "write own device keys" on public.device_keys
-  for insert with check (auth.uid() = user_id);
-drop policy if exists "update own device keys" on public.device_keys;
-create policy "update own device keys" on public.device_keys
-  for update using (auth.uid() = user_id);
-drop policy if exists "delete own device keys" on public.device_keys;
-create policy "delete own device keys" on public.device_keys
-  for delete using (auth.uid() = user_id);
-
--- The data key, wrapped so that exactly one device can open it. Ciphertext
--- only: { v, epk, salt, iv, blob }, all base64.
-create table if not exists public.device_wrapped_keys (
-  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  device_id  text not null,
-  wrapped    jsonb not null,
-  created_at timestamptz not null default now(),
-  primary key (user_id, device_id)
-);
-
-alter table public.device_wrapped_keys enable row level security;
-
-drop policy if exists "read own wrapped keys" on public.device_wrapped_keys;
-create policy "read own wrapped keys" on public.device_wrapped_keys
-  for select using (auth.uid() = user_id);
-drop policy if exists "write own wrapped keys" on public.device_wrapped_keys;
-create policy "write own wrapped keys" on public.device_wrapped_keys
-  for insert with check (auth.uid() = user_id);
-drop policy if exists "update own wrapped keys" on public.device_wrapped_keys;
-create policy "update own wrapped keys" on public.device_wrapped_keys
-  for update using (auth.uid() = user_id);
-drop policy if exists "delete own wrapped keys" on public.device_wrapped_keys;
-create policy "delete own wrapped keys" on public.device_wrapped_keys
-  for delete using (auth.uid() = user_id);
-
--- Data key epochs (spec/device-identity-design.md, steps 4 and 5). Rotating the
--- data key is what makes removing a device mean anything: without it a removed
--- device keeps the only key there is and carries on reading everything.
+-- Data key epochs (spec/device-identity-design.md, steps 4 and 5).
+--
+-- Written to make removing a device mean something: rotating the data key was what
+-- denied a removed device future content. §12.1 phase 7 ended that on 14 August 2026,
+-- because every device now holds the keeper key and can read any row here, so nothing
+-- rotates any more and the client only reads this table. Existing rows stay readable
+-- and are the reason it is not dropped with the other three.
 --
 -- Epoch 0 is not stored here. It lives in journals.wrapped_key, where it already
 -- is, so nothing existing has to move and an account that has never rotated has
@@ -303,69 +259,26 @@ create policy "write own journal keys" on public.journal_keys
 -- deleting one would strip the recovery code of its access to that stretch of the
 -- journal. Retention is the decision recorded in the design doc.
 
--- A device holds one wrapped key per epoch it is entitled to, not just the
--- newest, because history has to stay readable. Existing rows are epoch 0, which
--- the default supplies.
-alter table public.device_wrapped_keys
-  add column if not exists epoch int not null default 0;
-
-do $$
-begin
-  if exists (
-    select 1 from pg_constraint
-    where conname = 'device_wrapped_keys_pkey'
-      and conrelid = 'public.device_wrapped_keys'::regclass
-      and array_length(conkey, 1) = 2
-  ) then
-    alter table public.device_wrapped_keys
-      drop constraint device_wrapped_keys_pkey,
-      add primary key (user_id, device_id, epoch);
-  end if;
-end $$;
-
--- A device asking to be let in, pending approval on a device already trusted.
+-- The three tables approval needed are gone (§12.1 phase 7, 14 August 2026).
 --
--- It held a plaintext `client` label until 14 August 2026, on the argument that an
--- approval prompt which cannot say what is asking is a prompt nobody can judge, and
--- that the asking device has no key yet so it cannot write into the encrypted
--- journal. §6.5 refused the argument rather than the need: the prompt now names the
--- device from the register once it is in, and until then says only that something is
--- asking, which is honest. The column is dropped below.
-create table if not exists public.device_link_requests (
-  user_id      uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  device_id    text not null,
-  public_key   text not null,
-  requested_at timestamptz not null default now(),
-  primary key (user_id, device_id)
-);
-
--- `client` held a plaintext label like "Safari (iOS)" and was published over
--- realtime, which is class none under §6.5: not ciphertext, not a public key, not an
--- opaque id, not an operational counter. §12.1 phase 1 stopped the client writing it
--- and this is phase 1b, applied 14 August 2026 once every device had been quit and
--- reopened on a build that no longer sends it.
+-- `device_keys` held a public key per device, `device_wrapped_keys` held the data key
+-- wrapped to each of those, and `device_link_requests` held a device asking to be let
+-- in. Together they were §6.1d's grants: the machinery that let a device read the
+-- journal without ever holding the keeper key. Two routes remain, a passkey and the
+-- journal key, and both hand the keeper key over — so a device either can open the
+-- journal itself or cannot open it at all, and there is nothing left for a grant to
+-- express.
 --
--- Separate from the create above rather than folded into it, and it has to be: the
--- create is `if not exists`, so on a database that already has the table it does
--- nothing at all and the column would have survived a schema apply that looked like
--- it had removed it.
-alter table public.device_link_requests
-  drop column if exists client;
-
-alter table public.device_link_requests enable row level security;
-
-drop policy if exists "read own link requests" on public.device_link_requests;
-create policy "read own link requests" on public.device_link_requests
-  for select using (auth.uid() = user_id);
-drop policy if exists "write own link requests" on public.device_link_requests;
-create policy "write own link requests" on public.device_link_requests
-  for insert with check (auth.uid() = user_id);
-drop policy if exists "update own link requests" on public.device_link_requests;
-create policy "update own link requests" on public.device_link_requests
-  for update using (auth.uid() = user_id);
-drop policy if exists "delete own link requests" on public.device_link_requests;
-create policy "delete own link requests" on public.device_link_requests
-  for delete using (auth.uid() = user_id);
+-- Dropped rather than left empty. An unused table is a table something will eventually
+-- write to, and §6.5's register would have to keep classifying its columns for ever.
+-- `journal_keys` survives and is read by every device: an epoch's data key wrapped
+-- under the keeper key needs no per-device copy.
+--
+-- Order matters on a live database: drop the dependent table first. Neither is
+-- referenced by anything that remains, so this is safe to run twice.
+drop table if exists public.device_wrapped_keys;
+drop table if exists public.device_keys;
+drop table if exists public.device_link_requests;
 
 -- The keeper key, wrapped so that one passkey can open it (spec §6.1e).
 --
@@ -469,19 +382,16 @@ drop function if exists public.set_delete_code(text);
 -- is harmless: nothing subscribes to it. To tidy it up:
 --   alter publication supabase_realtime drop table public.journals;
 --
--- device_link_requests and device_wrapped_keys are published too, and both are
--- load-bearing rather than a nicety: an approval prompt that only appears when
--- the trusted device happens to relaunch would leave someone holding a phone
--- that says "waiting" with nothing to wait for, and the new device needs to
--- notice its wrapped key the moment it is granted. Foreground polling remains
--- the floor under both, since a backgrounded PWA misses realtime entirely and
--- there is no replay (spec §6.1a).
+-- device_link_requests and device_wrapped_keys were published too until §12.1 phase 7
+-- dropped them, because an approval prompt that only appeared when the trusted device
+-- happened to relaunch was no good to somebody holding a phone that said "waiting".
+-- Dropping a table removes it from the publication, so nothing else is needed here.
 do $$
 declare
   t text;
 begin
   foreach t in array array[
-    'journal_updates', 'device_link_requests', 'device_wrapped_keys'
+    'journal_updates'
   ] loop
     if not exists (
       select 1 from pg_publication_tables

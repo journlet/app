@@ -861,3 +861,49 @@ describe("the four ways it does not work", () => {
     await expect(sync.countPasskeyRoutes()).resolves.toBeNull();
   });
 });
+
+describe("a device marked removed in the register", () => {
+  test("hides the journal, having learned it from the journal itself", async () => {
+    // §12.1 phase 7 moved this. Removal used to revoke this device's grant on the
+    // server and rotate the data key, and checkStanding asked the server which of
+    // removed, unproven or behind applied. Those tables are gone, so the mark in the
+    // encrypted register is the only place the fact exists, and store/sync.ts watches
+    // the register for it.
+    //
+    // Worth a test of its own because the deleted files were where this behaviour was
+    // covered, and the failure mode is silent: a device that never notices the mark
+    // carries on showing the journal, which is removal meaning nothing at all.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
+
+    const devices = await import("../src/store/devices");
+    devices.markDeviceRemoved("phone-id");
+
+    await vi.waitFor(() => expect(sync.getSyncSnapshot().removed).toBe(true));
+    expect(sync.getSyncStatus()).toBe("needs-key");
+  });
+
+  test("and ignores a mark against some other device", async () => {
+    // The obvious way to get this wrong: react to any removal rather than to this
+    // device's. The other row has to be built in the register first — markDeviceRemoved
+    // does nothing for an id it has never seen, so marking a stranger would have made
+    // this test pass against the bug it is written for.
+    const sync = await boot();
+    await sync.unlockWithPasskey();
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("synced"));
+
+    const other = new Y.Map<unknown>();
+    doc.getMap<Y.Map<unknown>>("devices").set("laptop-id", other);
+    other.set("name", "Chrome (macOS)");
+    other.set("firstSeen", 1);
+    other.set("lastSeen", 1);
+
+    const devices = await import("../src/store/devices");
+    devices.markDeviceRemoved("laptop-id");
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sync.getSyncSnapshot().removed).toBe(false);
+    expect(sync.getSyncStatus()).toBe("synced");
+  });
+});

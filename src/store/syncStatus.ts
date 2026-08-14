@@ -21,7 +21,6 @@
 // counter it existed to bump are gone: identity now changes exactly when a
 // field does, so there is nothing left to bump.
 
-import type { LinkRequest } from "./deviceLink";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 
 export type SyncStatus =
@@ -33,26 +32,9 @@ export type SyncStatus =
   | "pending" // local changes not yet on the server
   | "offline";
 
-/**
- * Where this device is in being added.
- *
- * "opening" is the gap between being granted the key and having a journal to
- * show, which takes a fetch and a decrypt. Reported rather than left blank
- * because that gap is exactly where the screen looked hung: the code sat there
- * saying "waiting for approval" for seconds after the approval had happened.
- *
- * "declined" is the request having gone without a key arriving. It covers both a
- * refusal and an expiry, which are the same thing from here, and it exists
- * because the alternative was a device saying "waiting" for half an hour after
- * the answer had been given (Gary, 3 August).
- */
-export type LinkStage = "waiting" | "opening" | "declined";
-
+/** Whether this build has Supabase configured at all. */
 export const isConfigured = (): boolean =>
   Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
-
-/** Shared empty list, so "no requests" keeps one identity across publishes. */
-const NO_REQUESTS: readonly LinkRequest[] = [];
 
 export interface SyncSnapshot {
   readonly status: SyncStatus;
@@ -61,24 +43,13 @@ export interface SyncSnapshot {
    * problem does not masquerade as "offline".
    */
   readonly error: string | null;
-  /** The code this device is displaying while it waits, or null if not waiting. */
-  readonly linkCode: string | null;
-  /** How far along being added this device is. */
-  readonly linkStage: LinkStage | null;
   /**
-   * Requests this device could approve.
+   * Whether another device has marked this one removed in the register.
    *
-   * Compared by identity like everything else here, which is why store/sync.ts
-   * keeps its own field-by-field check before handing a new array over: a fresh
-   * array of equal requests would restart LinkPrompts' expiry countdown.
-   */
-  readonly requests: readonly LinkRequest[];
-  /**
-   * Whether this device has been removed from the account by another device.
-   *
-   * Kept apart from "cannot open the journal" because the two need opposite
-   * screens. A device that is behind should be told to wait; a removed one has
-   * to be told what happened and offered the way back.
+   * A mark inside the encrypted journal since §12.1 phase 7 removed the grant tables,
+   * so it arrives as ordinary content rather than as a fact the server could be asked
+   * for. Kept apart from "cannot open the journal" because the two need opposite
+   * screens: a device that is behind should wait, a removed one has to be told.
    */
   readonly removed: boolean;
 }
@@ -86,9 +57,6 @@ export interface SyncSnapshot {
 const initial = (): SyncSnapshot => ({
   status: isConfigured() ? "signed-out" : "disabled",
   error: null,
-  linkCode: null,
-  linkStage: null,
-  requests: NO_REQUESTS,
   removed: false,
 });
 
@@ -109,9 +77,6 @@ const listeners = new Set<() => void>();
 const same = (a: SyncSnapshot, b: SyncSnapshot): boolean =>
   a.status === b.status &&
   a.error === b.error &&
-  a.linkCode === b.linkCode &&
-  a.linkStage === b.linkStage &&
-  a.requests === b.requests &&
   a.removed === b.removed;
 
 const publish = (next: SyncSnapshot): void => {
@@ -135,9 +100,6 @@ export const subscribeSync = (fn: () => void): (() => void) => {
 
 export const getSyncStatus = (): SyncStatus => snapshot.status;
 export const getSyncError = (): string | null => snapshot.error;
-export const getLinkCode = (): string | null => snapshot.linkCode;
-export const getLinkStage = (): LinkStage | null => snapshot.linkStage;
-export const getLinkRequests = (): readonly LinkRequest[] => snapshot.requests;
 export const wasRemoved = (): boolean => snapshot.removed;
 
 export const setStatus = (status: SyncStatus): void =>
@@ -160,12 +122,8 @@ export const clearError = (): void => publish({ ...snapshot, error: null });
  * with no code and a stage that had not caught up.
  */
 export const setLinkState = (next: {
-  linkCode?: string | null;
-  linkStage?: LinkStage | null;
 }): void => publish({ ...snapshot, ...next });
 
-export const setLinkRequests = (requests: readonly LinkRequest[]): void =>
-  publish({ ...snapshot, requests: requests.length ? requests : NO_REQUESTS });
 
 export const setRemoved = (removed: boolean): void =>
   publish({ ...snapshot, removed });
@@ -181,9 +139,6 @@ export const setRemoved = (removed: boolean): void =>
 export const resetLinkState = (): void =>
   publish({
     ...snapshot,
-    linkCode: null,
-    linkStage: null,
-    requests: NO_REQUESTS,
     removed: false,
   });
 

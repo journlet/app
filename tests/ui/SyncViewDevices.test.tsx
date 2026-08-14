@@ -394,17 +394,24 @@ describe("the device register", () => {
   });
 
   test("spells out what removal does and does not do before doing it", () => {
-    // The wording is the feature. Tier one without rotation was deleted in July
-    // for claiming more than it did; this claims exactly what it does.
+    // The wording is the feature, and §12.1 phase 7 changed what it may claim. Until
+    // 14 August 2026 removal rotated the data key and revoked that device's grant, so
+    // "cannot read anything written from now on" was true. Every device now holds the
+    // keeper key and can read any epoch, so rotation would exclude nobody and none is
+    // attempted: what is left is a mark the other device honours. Claiming more is
+    // exactly why the July version of this feature was deleted.
     canRemove = true;
     render(<SyncView />);
 
     fireEvent.click(screen.getAllByText(/remove this device/i)[0]);
 
+    expect(screen.getByText(/hide the journal on that device/i)).toBeTruthy();
+    expect(screen.getByText(/a request that device\s+honours, not a lock/i)).toBeTruthy();
+    expect(screen.getByText(/already synced stays on\s+it/i)).toBeTruthy();
+    // And it must not go back to promising denial.
     expect(
-      screen.getByText(/not be able to read anything written from now on/i)
-    ).toBeTruthy();
-    expect(screen.getByText(/already synced stays on that device/i)).toBeTruthy();
+      screen.queryByText(/not be able to read anything written from now on/i)
+    ).toBeNull();
   });
 
   test("shows every client a device has been opened with", () => {
@@ -521,9 +528,10 @@ describe("a device that does not hold the journal key", () => {
 
     // Two boxes mention it, deliberately: the passkey box points down at the
     // remedy, and this one carries it.
-    expect(screen.getByText(/what it needs to read your\s+journal and nothing more/i))
-      .toBeTruthy();
-    expect(screen.getByText(/cannot show the key, add a\s+passkey, or remove/i))
+    expect(
+      screen.getByText(/before Journlet stopped adding devices that way/i)
+    ).toBeTruthy();
+    expect(screen.getByText(/cannot show the key, add a\s+passkey, or manage/i))
       .toBeTruthy();
     expect(screen.queryByRole("button", { name: /show journal key/i })).toBeNull();
   });

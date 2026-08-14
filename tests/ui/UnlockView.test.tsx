@@ -1,213 +1,128 @@
 // @vitest-environment jsdom
 //
-// Signed in, but this device cannot read the journal yet.
+// The unlock screen after §12.1 phase 7, which cut it roughly in half.
 //
-// Someone arriving here has just signed in and been shown no journal. The whole
-// job of the wording is to say that nothing is lost before it says what to do,
-// because the honest reassurance is available: the journal is on the server,
-// intact, and merely unopened.
+// Eleven of this file's tests described approval: the code to compare, the waiting
+// card, the refusal, asking again, and the order the three routes came in. All of it
+// went with the feature on 14 August 2026, and what is left is the part that was
+// always load-bearing — this screen must not read as "my journal is gone", and it must
+// hand over the two routes rather than describing them.
+//
+// The removed case keeps its own tests, and gained one: the wording now has to say what
+// removal actually is, since nothing enforces it any more.
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import UnlockView from "../../src/ui/UnlockView";
-import type { LinkStage } from "../../src/store/sync";
+
+const show = (props: Partial<React.ComponentProps<typeof UnlockView>> = {}) => {
+  const onSignOut = props.onSignOut ?? vi.fn();
+  render(
+    <UnlockView removed={props.removed ?? false} onSignOut={onSignOut}>
+      <div>the ways in</div>
+    </UnlockView>
+  );
+  return { onSignOut };
+};
 
 afterEach(cleanup);
 
-interface Options {
-  linkCode?: string | null;
-  linkStage?: LinkStage | null;
-  removed?: boolean;
-}
-
-const renderView = (o: Options = {}) => {
-  const onAskAgain = vi.fn();
-  const onSignOut = vi.fn();
-  render(
-    <UnlockView
-      linkCode={o.linkCode ?? null}
-      linkStage={o.linkStage ?? null}
-      removed={o.removed ?? false}
-      asking={false}
-      onAskAgain={onAskAgain}
-      onSignOut={onSignOut}
-    >
-      <div>key entry</div>
-    </UnlockView>
-  );
-  return { onAskAgain, onSignOut };
-};
-
 describe("what it says", () => {
   test("says the journal is still there, first", () => {
-    renderView();
+    // An empty screen at this point reads as loss. The truthful reassurance is that
+    // the journal is on the server, intact, and merely unopened.
+    show();
 
     expect(screen.getByText(/your journal is on the server where it was/i))
       .toBeTruthy();
   });
 
   test("explains why this device cannot read it", () => {
-    // Not a fault and not a loss: the content is encrypted and the key never
-    // leaves the user's devices, which is the design working as intended.
-    renderView();
+    show();
 
-    expect(screen.getByText(/the content is encrypted/i)).toBeTruthy();
-    expect(screen.getByText(/never leaves your devices/i)).toBeTruthy();
+    expect(screen.getByText(/the key never leaves your devices/i)).toBeTruthy();
   });
 
-  test("says where to find the key", () => {
-    renderView();
+  test("says where to find the key, including that it can be scanned", () => {
+    // The QR is how the key travels between devices, settled 14 August 2026, so the
+    // screen that needs the key says the key can be scanned rather than only typed.
+    show();
 
-    expect(screen.getByText(/show journal key/i)).toBeTruthy();
-    expect(screen.getByText(/wherever you saved it/i)).toBeTruthy();
+    expect(screen.getByText(/Sync → show journal key/i)).toBeTruthy();
+    expect(screen.getByText(/scanned as a QR code/i)).toBeTruthy();
   });
 
   test("is headed as unlocking rather than as an error", () => {
-    renderView();
+    show();
 
-    expect(screen.getByText(/Unlock your journal/i)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Unlock your journal/i }))
+      .toBeTruthy();
   });
 });
 
 describe("what it renders", () => {
-  test("the key entry it is given, rather than its own", () => {
-    // Typing the key, scanning it and the error wording all live in SyncView.
-    renderView();
+  test("the routes it is given, rather than its own", () => {
+    // The passkey button and the journal key entry are SyncView's. Two copies of
+    // either would drift, and this screen has no business owning them.
+    show();
 
-    expect(screen.getByText("key entry")).toBeTruthy();
+    expect(screen.getByText("the ways in")).toBeTruthy();
+  });
+
+  test("and no way to ask another device, which no longer exists", () => {
+    // §12.1 phase 7. Kept as an assertion rather than a deletion, because the button
+    // coming back would mean the tables came back with it.
+    show();
+
+    for (const label of [/ask a device/i, /ask again/i, /ask to be added/i])
+      expect(screen.queryByRole("button", { name: label })).toBeNull();
+    expect(screen.queryByText(/code to compare/i)).toBeNull();
+  });
+
+  test("offers signing out, which is the other thing this screen can do", () => {
+    const { onSignOut } = show();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /sign out and erase this journal/i })
+    );
+
+    expect(onSignOut).toHaveBeenCalled();
   });
 });
 
 describe("a device that was removed", () => {
   test("says so, and does not pretend it is waiting on a key it is owed", () => {
-    renderView({ removed: true });
+    show({ removed: true });
 
-    expect(screen.getByText(/This device was removed/i)).toBeTruthy();
-    expect(
-      screen.queryByText(/your journal is on the server where it was/i)
-    ).toBeNull();
+    expect(screen.getByRole("heading", { name: /This device was removed/i }))
+      .toBeTruthy();
+    expect(screen.queryByText(/your journal is on the server where it was/i))
+      .toBeNull();
   });
 
   test("says nothing here has been erased", () => {
-    // True, and the reason removal hides the journal rather than wiping it.
-    renderView({ removed: true });
+    show({ removed: true });
 
     expect(screen.getByText(/nothing here has been erased/i)).toBeTruthy();
   });
 
-  test("offers to ask again rather than asking on its own", () => {
-    const { onAskAgain } = renderView({ removed: true });
+  test("and describes removal as a request rather than a lock", () => {
+    // The change phase 7 forced. Removal used to rotate the data key and revoke that
+    // device's grant, which genuinely denied it future content. Every device now holds
+    // the keeper key, so the mark is honoured rather than enforced, and this screen is
+    // one of the two places that must not imply otherwise.
+    show({ removed: true });
 
-    fireEvent.click(screen.getByRole("button", { name: /ask to be added again/i }));
-
-    expect(onAskAgain).toHaveBeenCalled();
-  });
-});
-
-// Changed 12 August 2026 (Gary, watching the first real unlock): a passkey and the
-// journal key are both quicker than approval and neither needs another device in your
-// hands, so approval goes last — and it waits to be asked for, because the automatic
-// version put a prompt on another screen before anybody had read what was on offer.
-describe("the order the ways in are offered", () => {
-  test("the routes that need nothing else come before the one that does", () => {
-    renderView();
-
-    const body = document.body.textContent ?? "";
-    expect(body.indexOf("Unlock this device below")).toBeLessThan(
-      body.indexOf("ask a device you already use")
-    );
+    expect(screen.getByText(/asks this device to hide the journal/i)).toBeTruthy();
+    expect(screen.getByText(/which nothing can/i)).toBeTruthy();
   });
 
-  test("a new device asks nobody until it is told to", () => {
-    const { onAskAgain } = renderView();
+  test("and still offers the way back in", () => {
+    // Being marked removed is not being locked out: the routes are the same two, and
+    // using one brings the journal back.
+    show({ removed: true });
 
-    // No code, because nothing has been published: the button is the whole trigger.
-    expect(screen.queryByText(/Waiting to be added/i)).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: /ask a device you already use/i })
-    );
-
-    expect(onAskAgain).toHaveBeenCalled();
-  });
-
-  test("and says what pressing it does on the other device", () => {
-    renderView();
-
-    expect(screen.getByText(/show a prompt there for you to approve/i)).toBeTruthy();
-    expect(screen.getByText(/code to compare/i)).toBeTruthy();
-  });
-
-  test("once it has asked, the offer becomes the code to compare", () => {
-    renderView({ linkCode: "5NFT NJCF H3GA S9M4" });
-
-    expect(screen.getByText("5NFT NJCF H3GA S9M4")).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: /ask a device you already use/i })
-    ).toBeNull();
-  });
-});
-
-describe("a device whose request was refused", () => {
-  test("says it was not added, instead of still saying waiting", () => {
-    // It used to go on saying "waiting to be added back" for the full half hour
-    // after the answer had been given (Gary, 3 August).
-    renderView({ removed: true, linkStage: "declined" });
-
-    expect(screen.getByText(/was not added/i)).toBeTruthy();
-    expect(screen.queryByText(/waiting to be added/i)).toBeNull();
-  });
-
-  test("but they do go while the journal is being opened", () => {
-    // The one reason the routes are ever hidden, and now the only one: offering
-    // another way in at the moment approval has landed invites somebody to start over
-    // on top of a fetch and a decrypt already underway.
-    renderView({ linkStage: "opening" });
-
-    expect(screen.queryByText(/Unlock this device below/i)).toBeNull();
-    expect(screen.getByText(/Opening your journal/i)).toBeTruthy();
-  });
-
-  test("keeps the ways in that do not need anybody's permission", () => {
-    // Reported 12 August: pressing "do not add it" on the other device replaced this
-    // whole screen with the refusal, so the person was left choosing between asking
-    // again and signing out — with a passkey and their journal key both a tap away
-    // and no longer on screen. A refusal is one route failing, not the screen ending.
-    renderView({ removed: true, linkStage: "declined" });
-
-    expect(screen.getByText(/key entry/i)).toBeTruthy();
-    expect(screen.getByText(/Unlock this device below/i)).toBeTruthy();
-    expect(screen.getByText(/two ways in above still work/i)).toBeTruthy();
-  });
-
-  test("and does not offer to ask twice over", () => {
-    // The refusal card carries "ask again", so the ordinary offer stands down rather
-    // than sitting under it saying the same thing in different words.
-    renderView({ linkStage: "declined" });
-
-    expect(
-      screen.queryByRole("button", { name: /ask a device you already use/i })
-    ).toBeNull();
-    expect(screen.getByRole("button", { name: /ask again/i })).toBeTruthy();
-  });
-
-  test("offers both ways out: ask again, or sign out", () => {
-    // Gary asked for exactly these two. Signing out is the only thing that erases
-    // the copy held here, so it says so.
-    const { onAskAgain, onSignOut } = renderView({
-      removed: true,
-      linkStage: "declined",
-    });
-
-    fireEvent.click(screen.getByText(/^ask again$/i));
-    expect(onAskAgain).toHaveBeenCalled();
-
-    fireEvent.click(screen.getByText(/sign out and erase this journal/i));
-    expect(onSignOut).toHaveBeenCalled();
-  });
-
-  test("shows no code to compare, since there is nothing pending", () => {
-    renderView({ removed: true, linkStage: "declined", linkCode: "AAAA BBBB" });
-
-    expect(screen.queryByText("AAAA BBBB")).toBeNull();
+    expect(screen.getByText("the ways in")).toBeTruthy();
+    expect(screen.getByText(/Unlocking below brings\s+it back/i)).toBeTruthy();
   });
 });
