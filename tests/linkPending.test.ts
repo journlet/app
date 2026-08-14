@@ -261,7 +261,7 @@ describe("a stashed key that does not fit", () => {
     // The shared adoption path cannot say "journal key", because a passkey wrap
     // reaches it too and that person has typed nothing (spec §6.1e). So this path
     // translates, and the translation is worth pinning: the message goes straight to
-    // the box someone has just typed sixteen characters into.
+    // the box someone has just typed the journal key into.
     const sync = await boot();
     await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("needs-key"));
 

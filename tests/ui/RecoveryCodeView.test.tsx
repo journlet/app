@@ -70,6 +70,18 @@ describe("what it says", () => {
     expect(screen.getByText(/runs Journlet/i)).toBeTruthy();
   });
 
+  test("and describes the key by its real length, which is not sixteen characters", async () => {
+    // It said "sixteen characters" from the day it was written until 13 August 2026,
+    // for a 256-bit key that renders as thirteen groups of four. The number is not
+    // pedantry: it is the difference between "just type it" and a minute of careful
+    // transcription on a phone, and it is why the QR beside the key on the Sync screen
+    // earns its place rather than being a nicety to retire.
+    await renderView();
+
+    expect(screen.getByText(/thirteen groups of four/i)).toBeTruthy();
+    expect(screen.queryByText(/sixteen characters/i)).toBeNull();
+  });
+
   test("what each route is, in terms of where it works", async () => {
     await renderView();
 

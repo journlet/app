@@ -199,7 +199,7 @@ describe("the four ways it fails, each with a way on", () => {
   test("a refusal, which is the one where trying again is the advice", async () => {
     // Cancelled or timed out. Distinct from the two above precisely because the
     // answer is the opposite one, and a single message for all three would send
-    // someone to type sixteen characters when they had fat-fingered a sheet.
+    // someone to transcribe sixty-seven characters when they had fat-fingered a sheet.
     await failWith(new CredentialRefusedError());
 
     await waitFor(() =>
