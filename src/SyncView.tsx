@@ -674,11 +674,16 @@ export default function SyncView() {
               // journal" as the only one that could show the key — untrue since
               // §6.1e, where any device holding the key can.
               <>
+                {/* Reachable only on a device linked by approval before §12.1
+                    phase 7, which is the one way to hold a readable journal and no
+                    keeper key. No new device can arrive in this state: the two
+                    routes that remain both hand the key over. Kept because such a
+                    device may still exist and would otherwise be told nothing. */}
                 <p style={ST.p}>
-                  This device does not hold the journal key. It was added by
-                  another device, which gave it what it needs to read your
-                  journal and nothing more. So it cannot show the key, add a
-                  passkey, or remove another device.
+                  This device does not hold the journal key. It was added by another
+                  device before Journlet stopped adding devices that way, so it can
+                  read your journal and nothing more — it cannot show the key, add a
+                  passkey, or manage another device until it takes the key below.
                 </p>
                 {keyTaking ? (
                   <>
@@ -739,7 +744,7 @@ export default function SyncView() {
             <p style={{ ...ST.p, marginTop: 0 }}>
               This list is stored inside your encrypted journal, so the server
               never sees it. It is here so you can spot a device you do not
-              recognise, and remove one you no longer want to have access.
+              recognise, and ask one you no longer use to hide the journal.
             </p>
             {deviceList.length === 0 ? (
               <p style={ST.p}>No devices recorded yet.</p>
@@ -797,19 +802,29 @@ export default function SyncView() {
                       </div>
                       {/* Offered only where it can actually be carried out.
                           Removing means rotating the data key, and the new key
-                          has to be published under the recovery key first, so a
-                          device linked by approval cannot do it. A disabled
-                          button with an explanation would be worse than no
-                          button: the honest version is that the action lives on
-                          the device that holds your recovery code. */}
+                          needed the keeper key, and a device linked by approval
+                          did not have one. Approval is gone (§12.1 phase 7) so every
+                          device qualifies, and the guard is kept because a device
+                          that cannot read the register has no business editing
+                          it. */}
                       {removing === d.id ? (
                         <div style={{ marginTop: 6, maxWidth: 420 }}>
+                          {/* Rewritten 14 August 2026 with §12.1 phase 7. This used
+                              to promise that a removed device could read nothing
+                              written from then on, which was true while removal
+                              rotated the data key and revoked that device's grant.
+                              Every device now holds the keeper key and can read any
+                              epoch, so rotation would exclude nobody and is not
+                              attempted. What is left is a mark the other device
+                              honours, and saying more than that would be the July
+                              lost-device feature again. */}
                           <p style={{ ...ST.p, marginTop: 0 }}>
-                            Remove {d.name}? It will not be able to read anything
-                            written from now on, and it cannot be added back
-                            without approving it again. What it has already synced
-                            stays on that device — only signing out or wiping
-                            there removes that.
+                            Remove {d.name}? It will hide the journal on that device
+                            and stop showing it here. It is a request that device
+                            honours, not a lock: what it has already synced stays on
+                            it, and anyone holding it who does not open Journlet is
+                            not reached by this. Signing out or wiping there is what
+                            actually removes the copy.
                           </p>
                           <div style={ST.row}>
                             <button

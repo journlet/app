@@ -9,12 +9,10 @@ import {
   wrapDataKey,
 } from "./crypto";
 import type { KeyRing } from "./keyring";
-import { generateDeviceKeyPair } from "./deviceKeys";
 
 const DB_NAME = "journlet-keys";
 const STORE = "keys";
 const RING_KEY = "ring-v1";
-const PAIR_KEY = "device-pair-v1";
 
 export type { KeyRing } from "./keyring";
 
@@ -57,26 +55,7 @@ const idbPut = async (key: string, value: unknown): Promise<void> => {
 };
 
 let ringPromise: Promise<KeyRing> | null = null;
-let pairPromise: Promise<CryptoKeyPair> | null = null;
 
-/**
- * This device's own ECDH keypair, generated silently on first launch.
- *
- * A separate record from the keyring, and separate for a reason: the keyring says
- * what this device can read, the keypair says who this device is. A device can
- * have an identity before it has been granted anything, which is exactly the
- * state a device sits in while it waits to be approved.
- */
-export const ensureDeviceKeyPair = (): Promise<CryptoKeyPair> => {
-  pairPromise ??= (async () => {
-    const existing = await idbGet<CryptoKeyPair>(PAIR_KEY);
-    if (existing) return existing;
-    const pair = await generateDeviceKeyPair();
-    await idbPut(PAIR_KEY, pair);
-    return pair;
-  })();
-  return pairPromise;
-};
 
 /** Adopt a keyring from another device (journal key entry on link). */
 export const replaceKeyRing = async (ring: KeyRing): Promise<void> => {
@@ -93,11 +72,11 @@ export const replaceKeyRing = async (ring: KeyRing): Promise<void> => {
  */
 export const wipeKeys = (): Promise<void> => {
   ringPromise = null;
-  // The device keypair goes with it, because it lives in the same database. That
-  // is the right outcome rather than a side effect: a device that has signed out
-  // and come back is a fresh trust decision, so it should arrive with a new
-  // public key and be approved again on its merits.
-  pairPromise = null;
+  // The whole database goes. It held this device's ECDH keypair too until §12.1
+  // phase 7 deleted approval, and the point then was that a device signing out and
+  // coming back is a fresh trust decision. Nothing about identity survives here now:
+  // what is erased is the keyring, and a device comes back by holding a passkey or
+  // the journal key like any other.
   return new Promise((resolve, reject) => {
     const req = indexedDB.deleteDatabase(DB_NAME);
     req.onsuccess = () => resolve();

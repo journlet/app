@@ -42,7 +42,6 @@ import {
   getSyncSnapshot,
   hasSyncedOnce,
   isConfigured,
-  askForApproval,
   signOutAndWipe,
   subscribeSync,
   retryConnect,
@@ -111,7 +110,6 @@ import OnboardingView from "./ui/OnboardingView";
 import SignedOutView from "./ui/SignedOutView";
 import RecoveryCodeView from "./ui/RecoveryCodeView";
 import UnlockView from "./ui/UnlockView";
-import LinkPrompts from "./ui/LinkPrompts";
 import CannotLoadView from "./ui/CannotLoadView";
 import NotSyncingBanner, { notSyncingReason } from "./ui/NotSyncingBanner";
 import {
@@ -719,7 +717,6 @@ export default function App() {
   // rendering an empty spread, which reads as a journal that has lost its
   // contents (see lib/onboarding).
   const removed = sync.removed;
-  const [asking, setAsking] = useState(false);
   const unlocking = needsJournalKey({
     configured: isConfigured(),
     status: syncStatus,
@@ -754,12 +751,6 @@ export default function App() {
     syncedOnce,
   });
 
-  // The code this device is displaying while it waits to be approved, and how
-  // far along it is. Both come off the one snapshot subscribed to above, along
-  // with `removed`: they were three useState mirrors kept in step by an effect
-  // that re-read three getters on every publish (assessment Finding 12).
-  const linkCode = sync.linkCode;
-  const linkStage = sync.linkStage;
 
   // Second stage of first run: the recovery code, shown once before the journal
   // on the device that created it (decision 4). Re-read on every status change
@@ -1277,14 +1268,6 @@ export default function App() {
         {journalOnScreen && stalled && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner reason={stalled} onOpenSync={() => setView("sync")} />
         )}
-        {/* A device asking to be added, shown wherever the journal is. Above the
-            not-syncing banner would be wrong — that banner explains why the
-            journal in front of you is stale, which is the more urgent thing —
-            and inside a particular view would mean the prompt disappears when
-            you change view while a device sits waiting. */}
-        {journalOnScreen && loaded && (
-          <LinkPrompts />
-        )}
         {!loaded && <div style={S.empty}>opening journal…</div>}
         {onboarding && (
           <OnboardingView>
@@ -1323,15 +1306,8 @@ export default function App() {
         )}
         {!onboarding && unlocking && (
           <UnlockView
-            linkCode={linkCode}
-            linkStage={linkStage}
             removed={removed}
-            asking={asking}
             onSignOut={() => void signOutAndWipe()}
-            onAskAgain={() => {
-              setAsking(true);
-              void askForApproval().finally(() => setAsking(false));
-            }}
           >
             <SyncView />
           </UnlockView>

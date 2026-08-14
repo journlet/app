@@ -78,18 +78,9 @@ const CLASSES: Record<string, ColumnClass> = {
   "user_usage.quota_bytes": "D",
   "user_usage.updated_at": "D",
 
-  "device_keys.user_id": "C",
   // Random id generated on the device and kept in localStorage, not derived from
   // anything about it (store/devices.ts, thisDeviceId).
-  "device_keys.device_id": "C",
-  "device_keys.public_key": "B", // raw P-256 point
-  "device_keys.created_at": "D",
 
-  "device_wrapped_keys.user_id": "C",
-  "device_wrapped_keys.device_id": "C",
-  "device_wrapped_keys.wrapped": "A", // includes the §6.1d grant
-  "device_wrapped_keys.epoch": "D",
-  "device_wrapped_keys.created_at": "D",
 
   "journal_keys.user_id": "C",
   "journal_keys.epoch": "D",
@@ -104,10 +95,6 @@ const CLASSES: Record<string, ColumnClass> = {
   "keeper_wraps.wrapped": "A",
   "keeper_wraps.created_at": "D",
 
-  "device_link_requests.user_id": "C",
-  "device_link_requests.device_id": "C",
-  "device_link_requests.public_key": "B",
-  "device_link_requests.requested_at": "D", // also the thirty minute expiry
 };
 
 /**
@@ -183,7 +170,7 @@ const declared = { ...CLASSES, ...PENDING_REMOVAL };
 describe("every column is classified (spec §6.5)", () => {
   test("the schema is read at all", () => {
     // A parser that silently matches nothing would make every test below pass.
-    expect(columns.length).toBeGreaterThan(20);
+    expect(columns.length).toBeGreaterThan(12);
     expect(columns).toContain("journals.wrapped_key");
   });
 
@@ -207,6 +194,15 @@ describe("every column is classified (spec §6.5)", () => {
   test("a quarantined column is never also classified", () => {
     const both = Object.keys(PENDING_REMOVAL).filter((c) => c in CLASSES);
     expect(both).toEqual([]);
+  });
+
+  test("the tables §12.1 phase 7 dropped are not classified either", () => {
+    // Deleted 14 August 2026 with approval: device_keys, device_wrapped_keys and
+    // device_link_requests were §6.1d's grants. The register has to lose them at the
+    // same time, and the stale-classification test above is what enforces it — this
+    // one states the intent so a reader knows the absence is deliberate.
+    for (const t of ["device_keys", "device_wrapped_keys", "device_link_requests"])
+      expect(columns.filter((c) => c.startsWith(`${t}.`))).toEqual([]);
   });
 
   test("the quarantine is empty, and the last breach really is gone", () => {
