@@ -422,7 +422,7 @@ doc.on("update", (update: Uint8Array, origin: unknown) => {
  *
  * Every fresh device generates a keeper key on first launch, and on a device
  * that is linking to an existing journal that key is simply wrong. Without this
- * flag the Sync screen would happily render it as the recovery code: sixteen
+ * flag the Sync screen would happily render it as the recovery code: thirteen
  * groups of characters that look exactly like the real thing and open nothing.
  * A recovery code that does not work is worse than no recovery code, because it
  * gets written down and trusted.
@@ -1180,7 +1180,7 @@ const adoptJournalKey = async (code: string): Promise<void> => {
     // Only on this path: a passkey unlock proves nothing about where the code is.
     markKeySaved();
   } catch (e) {
-    // The wording for someone who has just typed sixteen characters, and the only
+    // The wording for someone who has just transcribed sixty-seven characters, and the only
     // thing this path adds over the shared one. SyncView shows the message.
     if (e instanceof KeeperKeyMismatchError)
       throw new Error("That journal key does not match this account's journal");

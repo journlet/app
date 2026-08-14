@@ -6,7 +6,7 @@
 // that there is no better moment to interrupt somebody. That was wrong, and §6.1e
 // says why: it is the hardest possible ask at the moment of least investment.
 // Somebody who has just installed a journalling app and written nothing in it is
-// being handed sixteen characters they have no reason to care about yet, and the
+// being handed a sixty-seven character key they have no reason to care about yet, and the
 // honest outcomes are a box ticked without reading it or a screenshot in the camera
 // roll.
 //
@@ -139,10 +139,16 @@ export default function RecoveryCodeView({
         <div style={ST.boxLabel}>
           {canPasskey ? "Belt and braces" : "Your way back in"}
         </div>
+        {/* "Sixteen characters" until 13 August 2026, which was wrong and had been
+            wrong since this screen was written: a 256-bit key in Crockford base32
+            groups of four is thirteen groups, sixty-seven characters with the prefix
+            and separators. The number matters rather than being pedantry — it is the
+            difference between "just type it" and a minute of careful transcription on
+            a phone, and it is the reason the QR beside the key is not a nicety. */}
         <p style={{ ...S.onboardLede, marginTop: 0 }}>
-          Your journal key is sixteen characters that open this journal anywhere,
-          including where passkeys do not reach. Keep it in a password manager, or
-          write it down.
+          Your journal key is thirteen groups of four characters that open this journal
+          anywhere, including where passkeys do not reach. Keep it in a password
+          manager, or write it down.
         </p>
         {/* Behind a tap rather than on screen, and this is the change that matters
             most on this screen: a code rendered unbidden at first run is a code

@@ -5,7 +5,8 @@
 // 2026 once a passkey became one of them (Gary, watching the first real unlock).
 //
 // A passkey opens the journal here and now. The journal key does too, at the cost of
-// sixteen characters. Approval needs another device in your hands and somebody to
+// thirteen groups of four characters, or a QR code scanned from the device that has
+// it. Approval needs another device in your hands and somebody to
 // press a button on it, so it goes last — and it now waits to be asked for rather
 // than having happened before anybody read a word of this screen. Automatic asking
 // put a prompt on another device whether or not approval was the route anybody
@@ -90,8 +91,10 @@ export default function UnlockView({
 
           The ways in, in the order they are worth trying, and the order is the
           point of this screen since 12 August 2026 (Gary, on the first unlock run).
-          A passkey opens the journal here and now; the journal key does too and
-          costs sixteen characters; approval needs another device in your hands and
+          A passkey opens the journal here and now; the journal key does too, at the
+          cost of transcribing thirteen groups of four characters — sixty-seven with
+          the prefix and separators, which is why the Sync screen offers it as a QR to
+          scan as well; approval needs another device in your hands and
           somebody to press a button on it. Approval used to be first, and to have
           happened already before anybody read a word of this, which is why it moved
           and why it waits to be asked for. */}
