@@ -420,6 +420,36 @@ export default function App() {
       return next;
     });
 
+  /**
+   * Put the capture form's choices back to a plain entry for today (added 14
+   * August 2026): day scope on today's page, task, no signifiers. Sticky state
+   * (spec §4.1) earns its keep on a run of similar entries, but it also lets
+   * the form's starting point drift from what most entries are — a lit
+   * "* priority" left over from three days ago is a choice nobody made this
+   * time. One labelled action clears the lot rather than four taps of undoing.
+   *
+   * Choices only: the typed text and details are left alone, so a reset never
+   * eats words mid-thought. Sticky storage is written once, not once per field.
+   */
+  const resetCapture = () => {
+    sticky.current = {
+      ...sticky.current,
+      scope: "day",
+      type: "task",
+      priority: false,
+      inspiration: false,
+    };
+    persistSticky();
+    _setCaptureScope("day");
+    _setCaptureType("task");
+    _setCapturePriority(false);
+    _setCaptureInspiration(false);
+    // todayRef, not today: this must be the current day even if the form has
+    // been open across midnight, which is the case the reset exists for
+    setCaptureAnchor(todayRef.current);
+    inputRef.current?.focus();
+  };
+
   // The entry input lives in the full-screen capture form and autofocuses
   // when the form opens (autoFocus attribute); nothing to focus at load.
 
@@ -1542,6 +1572,7 @@ export default function App() {
           setCaptureInspiration={setCaptureInspiration}
           captureAnchor={captureAnchor}
           setCaptureAnchor={setCaptureAnchor}
+          resetCapture={resetCapture}
         />
       )}
 

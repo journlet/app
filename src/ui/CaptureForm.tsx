@@ -46,6 +46,9 @@ interface CaptureFormProps {
   setCapturePriority: (fn: (v: boolean) => boolean) => void;
   captureInspiration: boolean;
   setCaptureInspiration: (fn: (v: boolean) => boolean) => void;
+  /** put the choices back to today / task / no signifiers, leaving the typed
+   *  text and details alone (see App's resetCapture) */
+  resetCapture: () => void;
 }
 
 export default function CaptureForm({
@@ -73,12 +76,27 @@ export default function CaptureForm({
   setCapturePriority,
   captureInspiration,
   setCaptureInspiration,
+  resetCapture,
 }: CaptureFormProps) {
   // The capture is pinned to one page for as long as App holds a parent for it.
   // Gate the page choice on the pin, not on the parent entry: if the parent has
   // gone the page is still fixed, and showing scope buttons that are then
   // ignored would be the app claiming a choice the entry can't honour.
   const pinnedToPage = captureParentPageLabel !== null;
+  // Whether the page choice is this form's to make at all: pinned sub-bullets
+  // and collection capture have no picker, so reset must not claim to move the
+  // entry to today — it would be naming a choice the form doesn't own.
+  const pageIsChosenHere = !pinnedToPage && !activeCol;
+  const pageIsToday =
+    captureScope === "day" &&
+    periodKey("day", captureAnchor) === periodKey("day", today);
+  // Only offer the reset when it would change something. A button that does
+  // nothing when tapped is the same broken promise as an unlabelled one.
+  const canReset =
+    (pageIsChosenHere && !pageIsToday) ||
+    captureType !== "task" ||
+    capturePriority ||
+    captureInspiration;
   return (
         <div style={S.captureForm} role="dialog" aria-label="New entry">
           <div style={S.captureFormHead}>
@@ -278,6 +296,24 @@ export default function CaptureForm({
                 inspiration
               </button>
             </div>
+            {/* Clear the sticky choices in one labelled action (14 August
+                2026). Sits below the three sections it resets, and names the
+                state it goes to rather than saying only "Reset" — the entry
+                text and details are deliberately untouched, so the label has
+                to be exact about what moves. Shown only when something would
+                actually change; the page part is dropped from the label when
+                this form has no page choice to make. */}
+            {canReset && (
+              <button
+                className="sheetBtn isCompact isQuiet"
+                style={{ flex: "none", width: "100%", margin: "10px 0 0" }}
+                onClick={resetCapture}
+              >
+                {pageIsChosenHere
+                  ? "Reset to today, task, no signifiers"
+                  : "Reset to task, no signifiers"}
+              </button>
+            )}
             {/* Optional per-entry details (spec §9). Full-screen form has room,
                 so it's offered at capture too — kept last and out of the type-
                 and-Log fast path so thoughtless capture (spec §4.1) still holds.
