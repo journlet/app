@@ -113,18 +113,18 @@ const CLASSES: Record<string, ColumnClass> = {
 /**
  * Columns that exist and are breaches, with the phase that removes them.
  *
- * Not a class and not an exception: a quarantine, so the breach is visible in the
- * code rather than only in the specification, and so the suite is honest about
- * what is still in the database today.
+ * Empty as of 14 August 2026, and kept rather than deleted: it is the mechanism that
+ * made the one breach visible in the code rather than only in the specification, and
+ * the next one wants somewhere to go that is not a quiet exception.
  *
- * `client` holds "Safari (iOS)" and is published over realtime. §12.1 phase 1
- * stops the client writing it and phase 1b drops the column; when it does, the
- * stale-entry test below fails until this entry goes too.
+ * What was here: `device_link_requests.client`, a plaintext label like "Safari (iOS)"
+ * published over realtime, which §6.5 classifies as none of its four kinds. §12.1
+ * phase 1 stopped the client writing it; phase 1b dropped the column once every
+ * device had been quit and reopened on a build that no longer sends it, since an old
+ * build inserting into a column that has gone presents as linking being broken on
+ * that device with no visible cause.
  */
-const PENDING_REMOVAL: Record<string, string> = {
-  "device_link_requests.client":
-    "Plaintext client label, §6.5. Removed by §12.1 phase 1b, after every device is on the phase 1 build.",
-};
+const PENDING_REMOVAL: Record<string, string> = {};
 
 /**
  * Every column the schema actually creates, as `table.column`.
@@ -209,12 +209,23 @@ describe("every column is classified (spec §6.5)", () => {
     expect(both).toEqual([]);
   });
 
-  test("the quarantine holds exactly the one known breach", () => {
-    // Two places to edit rather than one, on purpose: adding a breach here means
-    // writing down which phase removes it, next to the reason it is a breach.
-    expect(Object.keys(PENDING_REMOVAL)).toEqual([
-      "device_link_requests.client",
-    ]);
+  test("the quarantine is empty, and the last breach really is gone", () => {
+    // Both halves. The register being empty is only meaningful if the column it used
+    // to hold has actually left the schema, and the parser applies drop statements in
+    // order, so this reads the file rather than the intention.
+    //
+    // The limit, since this test could be read as proving more than it does: it proves
+    // the schema no longer declares the column. Whether the live project has dropped
+    // it depends on somebody applying the file, which is manual and unverifiable from
+    // here. Reintroducing the column in the create *and* deleting the drop fails this;
+    // doing either alone does not, because either alone still leaves it gone.
+    expect(Object.keys(PENDING_REMOVAL)).toEqual([]);
+    expect(columns).not.toContain("device_link_requests.client");
+  });
+
+  test("and anything quarantined in future has to name the phase that removes it", () => {
+    // The rule the register exists for, kept alive while it is empty: a breach may be
+    // recorded here rather than classified, and only with the phase that ends it.
     for (const reason of Object.values(PENDING_REMOVAL)) {
       expect(reason).toMatch(/phase/i);
     }

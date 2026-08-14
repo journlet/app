@@ -325,21 +325,32 @@ end $$;
 
 -- A device asking to be let in, pending approval on a device already trusted.
 --
--- `client` is plaintext, and is the one deliberate metadata addition in the
--- whole design: an approval prompt that cannot say what is asking is a prompt
--- nobody can judge, and the asking device has no key yet so it cannot write into
--- the encrypted journal. Mitigated by being ephemeral — the client enforces a
--- thirty minute expiry and deletes the row on approval or rejection — so the
--- server learns "something calling itself Safari on iOS asked to link at 14:32"
--- for half an hour, and nothing about content.
+-- It held a plaintext `client` label until 14 August 2026, on the argument that an
+-- approval prompt which cannot say what is asking is a prompt nobody can judge, and
+-- that the asking device has no key yet so it cannot write into the encrypted
+-- journal. §6.5 refused the argument rather than the need: the prompt now names the
+-- device from the register once it is in, and until then says only that something is
+-- asking, which is honest. The column is dropped below.
 create table if not exists public.device_link_requests (
   user_id      uuid not null default auth.uid() references auth.users (id) on delete cascade,
   device_id    text not null,
   public_key   text not null,
-  client       text,
   requested_at timestamptz not null default now(),
   primary key (user_id, device_id)
 );
+
+-- `client` held a plaintext label like "Safari (iOS)" and was published over
+-- realtime, which is class none under §6.5: not ciphertext, not a public key, not an
+-- opaque id, not an operational counter. §12.1 phase 1 stopped the client writing it
+-- and this is phase 1b, applied 14 August 2026 once every device had been quit and
+-- reopened on a build that no longer sends it.
+--
+-- Separate from the create above rather than folded into it, and it has to be: the
+-- create is `if not exists`, so on a database that already has the table it does
+-- nothing at all and the column would have survived a schema apply that looked like
+-- it had removed it.
+alter table public.device_link_requests
+  drop column if exists client;
 
 alter table public.device_link_requests enable row level security;
 
