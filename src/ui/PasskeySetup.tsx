@@ -20,8 +20,16 @@ import { useCallback, useEffect, useState } from "react";
 import {
   countPasskeyRoutes,
   enrolPasskey,
+  listPasskeyRoutes,
+  removePasskeyRoute,
   replaceAllPasskeys,
 } from "../store/sync";
+import {
+  describeRoute,
+  forgetCredentialNote,
+  onCredentialsChange,
+} from "../store/credentials";
+import type { CredentialNote, RouteListing } from "../store/credentials";
 import { probeCredentialSupport, relyingPartyId } from "../lib/prf";
 import type { PrfCapability } from "../lib/prf";
 import { enrolFailureMessage } from "../lib/passkeyMessages";
@@ -61,6 +69,327 @@ export const noLocalCheckNote = (c: PrfCapability): string | null =>
 const routeCount = (n: number): string =>
   n === 1 ? "1 passkey can open this journal." : `${n} passkeys can open this journal.`;
 
+/** "12 Aug", or "today, 14:20" for something that happened today. */
+const when = (at: number): string => {
+  const d = new Date(at);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? `today, ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
+
+/**
+ * When a route last opened the journal, and from where.
+ *
+ * The changing half of a row, and the half that answers "was that me": the register
+ * has held `lastOpenedOn` and `lastOpenedRoute` since it was written and the screen
+ * showed neither, so a phone unlocking a wrap enrolled on the Mac read as a bare
+ * timestamp. Reported on hardware by Gary on 13 August 2026, the same evening it
+ * shipped.
+ *
+ * The route is named because §6.1k makes it the interesting part: a credential
+ * reached locally and the same credential reached through the tunnel derive different
+ * secrets, so "opened from the phone" and "opened by the phone on behalf of this
+ * machine" are different events and only one of them says the phone holds a working
+ * passkey. Where is omitted when the title already names it, which happens on a row
+ * the register knows only from an unlock.
+ */
+/** "Chrome", "Chrome and the installed app", "Chrome, Safari and the installed app". */
+const listSentence = (parts: readonly string[]): string =>
+  parts.length <= 1
+    ? (parts[0] ?? "")
+    : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+
+const lastOpenedSentence = (
+  note: CredentialNote | null,
+  titleNamesEnrolment: boolean
+): string => {
+  if (!note?.lastOpenedAt)
+    return "has not opened this journal on any device yet";
+  // Every client that has used it, not only the most recent one. Last-opened alone is
+  // overwritten by whichever device unlocked last, so a phone's use vanished the next
+  // time the Mac unlocked and the row stopped acknowledging it happened.
+  const clients = note.openedBy ?? [];
+  const where =
+    clients.length > 1
+      ? ` on ${listSentence(clients)}`
+      : titleNamesEnrolment && note.lastOpenedOn
+        ? ` on ${note.lastOpenedOn}`
+        : "";
+  const how =
+    note.lastOpenedRoute === "this device"
+      ? ", with a passkey on that device"
+      : note.lastOpenedRoute === "another device"
+        ? ", with a passkey from another device"
+        : "";
+  return clients.length > 1
+    ? `opened${where}, most recently ${when(note.lastOpenedAt)}${how}`
+    : `last opened ${when(note.lastOpenedAt)}${where}${how}`;
+};
+
+/**
+ * The saved routes, laid out to be compared against a password manager.
+ *
+ * Loaded on request rather than with the box: it costs a round trip, it is only
+ * wanted when somebody is actually reconciling, and a list unfurling under a
+ * one-line summary is the wall of text this box was cut back from on 12 August.
+ */
+function RouteList({
+  textStyle,
+  version,
+  onChanged,
+}: {
+  textStyle: React.CSSProperties;
+  /**
+   * Bumped by the box whenever it enrols or starts again.
+   *
+   * Without it this list kept whatever it had loaded, so "start again" left the wrap
+   * it had just deleted on the screen — described as "not recognised", since that
+   * wrap predated the register, and offering a remove that would have deleted
+   * nothing and reported success. Found on hardware within minutes of shipping
+   * (Gary, 13 August 2026), which is the second time a two-part screen has gone
+   * stale in one direction: §6.1c's register had the same shape of bug.
+   */
+  version: number;
+  /** Told when a removal happened, so the count above can stop being wrong too. */
+  onChanged: () => void;
+}) {
+  const [state, setState] = useState<{
+    routes: RouteListing[];
+    strays: CredentialNote[];
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  /** Which row is asking to be removed. One at a time, and never by mistake. */
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setProblem(null);
+    setBusy(true);
+    try {
+      setState(await listPasskeyRoutes());
+    } catch {
+      setProblem(
+        "Could not read the saved passkeys just now. Try again in a moment."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  // A register change arriving over sync is the other way this list goes stale, and
+  // the one that cannot be fixed by refreshing after our own actions: another device
+  // unlocking is what fills in a row here, and until this existed you had to close the
+  // list and open it again to see it. Only while something is showing, so a background
+  // sync never costs a round trip nobody asked for.
+  const showing = state !== null;
+  useEffect(() => {
+    if (!showing) return;
+    return onCredentialsChange(() => void load());
+  }, [showing, load]);
+
+  // Only when something is already showing: the round trip is deliberate elsewhere,
+  // and enrolling should not open a list nobody asked for.
+  useEffect(() => {
+    if (version > 0 && state) void load();
+    // `state` is deliberately not a dependency: including it would reload on the
+    // reload's own result, for ever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, load]);
+
+  /**
+   * Drop a note whose route has gone, which is tidying and nothing else.
+   *
+   * Needed because the first fix could only forget notes as it deleted their rows, so
+   * every note orphaned by a "start again" before that shipped is in the register for
+   * good with nothing in the interface able to reach it (Gary, on hardware, 13 August
+   * 2026). The device register learned the same lesson on 12 August, from the same
+   * cause: a list that is mostly wreckage answers nothing at all (§6.1c).
+   */
+  const forget = (wrapId: string) => {
+    forgetCredentialNote(wrapId);
+    void load();
+  };
+
+  const remove = async (wrapId: string) => {
+    setProblem(null);
+    setBusy(true);
+    try {
+      await removePasskeyRoute(wrapId);
+      setRemoving(null);
+      await load();
+      onChanged();
+    } catch {
+      setProblem("Could not remove that one. Nothing has changed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!state)
+    return (
+      <div style={{ marginTop: 10 }}>
+        <button className="miniBtn" disabled={busy} onClick={() => void load()}>
+          {busy ? "checking…" : "which passkeys are these?"}
+        </button>
+        {problem && <p style={{ ...textStyle, marginBottom: 0 }}>{problem}</p>}
+      </div>
+    );
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      {/* Said before the rows, because the box above counts passkeys and the rows
+          below look like devices. Gary read one row and two devices as a fault, which
+          it is not: a passkey set up on the Mac and used on the phone is one saved
+          route used twice, and the phone gets a row of its own only by being given a
+          passkey of its own. */}
+      <p style={{ ...textStyle, fontSize: 13, marginTop: 0 }}>
+        One row for each saved passkey, not for each device. A passkey set up here and
+        used on your phone stays a single row; “add another passkey” on the phone gives
+        it one of its own, which is worth having.
+      </p>
+      {state.routes.map((r) => (
+        <div
+          key={r.wrapId}
+          style={{
+            borderTop: "1px solid var(--line)",
+            paddingTop: 8,
+            marginTop: 8,
+          }}
+        >
+          <div
+            style={{
+              ...textStyle,
+              marginTop: 0,
+              marginBottom: 2,
+              fontWeight: 600,
+            }}
+          >
+            {describeRoute(r.note)}
+          </div>
+          <div
+            style={{ ...textStyle, fontSize: 13, marginTop: 0, marginBottom: 0 }}
+          >
+            {r.note?.enrolledAt ? `set up ${when(r.note.enrolledAt)}. ` : ""}
+            {lastOpenedSentence(
+              r.note,
+              !!(r.note?.enrolledAt && r.note?.enrolledOn)
+            )}
+            {/* The two measured fields, last and small. They are what settles a
+                disagreement between this list and a password manager, and §6.1k is
+                why the second one is here: the same credential reached two ways
+                derives two secrets, so two rows can share the first and differ in
+                the second. */}
+            {r.note?.credentialId
+              ? ` · passkey ${r.note.credentialId.slice(0, 12)}`
+              : ""}
+            {r.note?.fingerprint ? ` · key ${r.note.fingerprint}` : ""}
+          </div>
+          {removing === r.wrapId ? (
+            <div style={{ marginTop: 6 }}>
+              {/* The caveat before the action, as "start again" has it. This
+                  withdraws a saved way in and takes nothing back, and a screen that
+                  let it read as revocation would be the lost-device feature of 28
+                  July over again (§6.1h). */}
+              <p style={{ ...textStyle, fontSize: 13, marginTop: 0 }}>
+                This removes the saved route only. A device that has already opened
+                your journal with this passkey keeps its copy, and your journal key
+                still works. The passkey itself stays in the password manager holding
+                it, where you can delete it yourself.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="miniBtn"
+                  disabled={busy}
+                  onClick={() => void remove(r.wrapId)}
+                >
+                  {busy ? "removing…" : "remove this route"}
+                </button>
+                {!busy && (
+                  <button className="miniBtn" onClick={() => setRemoving(null)}>
+                    cancel
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <button
+              className="miniBtn"
+              style={{ marginTop: 6 }}
+              onClick={() => setRemoving(r.wrapId)}
+            >
+              remove
+            </button>
+          )}
+        </div>
+      ))}
+
+      {state.routes.length === 0 && (
+        <p style={{ ...textStyle, marginBottom: 0 }}>No saved passkey routes.</p>
+      )}
+
+      {/* Notes whose routes have gone. Rows rather than a count, because a count
+          cannot be acted on and these are the ones you want rid of. The cause is not
+          guessed at any more: it used to read "most likely removed from another
+          device", which was wrong for the case that produces them most often, namely
+          a "start again" on this device before notes were forgotten with their
+          rows. */}
+      {state.strays.map((s) => (
+        <div
+          key={s.wrapId}
+          style={{
+            borderTop: "1px solid var(--line)",
+            paddingTop: 8,
+            marginTop: 8,
+          }}
+        >
+          <div
+            style={{
+              ...textStyle,
+              marginTop: 0,
+              marginBottom: 2,
+              fontWeight: 600,
+            }}
+          >
+            No longer a saved route
+          </div>
+          <div
+            style={{ ...textStyle, fontSize: 13, marginTop: 0, marginBottom: 0 }}
+          >
+            {describeRoute(s) === "Not recognised"
+              ? "nothing is known about this one"
+              : describeRoute(s).replace(/^Set up/, "was set up").replace(/^Last used/, "was last used")}
+            {s.credentialId ? ` · passkey ${s.credentialId.slice(0, 12)}` : ""}
+            {s.fingerprint ? ` · key ${s.fingerprint}` : ""}
+          </div>
+          <button
+            className="miniBtn"
+            style={{ marginTop: 6 }}
+            onClick={() => forget(s.wrapId)}
+          >
+            forget this note
+          </button>
+        </div>
+      ))}
+
+      {state.strays.length > 0 && (
+        <p style={{ ...textStyle, fontSize: 13, marginBottom: 0 }}>
+          Removed here or on another device: the route is gone and this is only what
+          the list remembered about it. Forgetting clears the record and nothing else.
+        </p>
+      )}
+
+      <p style={{ ...textStyle, fontSize: 13, marginBottom: 0 }}>
+        A row that says “not recognised” was saved before this list existed, or on a
+        device that has not synced since. Open the journal with it once and it names
+        itself here.
+      </p>
+
+      {problem && <p style={{ ...textStyle, marginBottom: 0 }}>{problem}</p>}
+    </div>
+  );
+}
+
 interface PasskeySetupProps {
   /**
    * Whether this device holds the keeper key, and so can wrap it.
@@ -92,6 +421,8 @@ export default function PasskeySetup({
   const [adding, setAdding] = useState(false);
   /** Whether the start-again step is open. Same reason: its caveat comes first. */
   const [replacing, setReplacing] = useState(false);
+  /** Bumped when the routes change, so the list below reloads rather than going stale. */
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     void probeCredentialSupport().then(setCapability);
@@ -129,6 +460,7 @@ export default function PasskeySetup({
       setAdding(false);
       setReplacing(false);
       refreshCount();
+      setVersion((v) => v + 1);
     } catch (e) {
       // Shared with the first-run screen, which says the same three things.
       setProblem(enrolFailureMessage(e));
@@ -175,6 +507,22 @@ export default function PasskeySetup({
           <p style={{ ...textStyle, marginTop: 0, marginBottom: 0, fontWeight: 600 }}>
             {routeCount(routes)}
           </p>
+          {/* Above the list rather than below it, which is where it was and which
+              read as a description of the top row: after "start again" the line
+              "Passkey set up, and the older routes removed" sat under a stale row
+              saying "not recognised", so the two together said the new passkey was
+              unrecognised (Gary, on hardware, 13 August 2026). */}
+          {done && (
+            <p style={{ ...textStyle, fontWeight: 600, marginBottom: 0 }}>{done}</p>
+          )}
+          {/* The list, once there is something to list: the answer to the question
+              the count could only ever raise, which is which of my passkeys these
+              are and whether one of them leads nowhere (§6.1l). */}
+          <RouteList
+            textStyle={textStyle}
+            version={version}
+            onChanged={refreshCount}
+          />
           {details && (
             <>
               <p style={textStyle}>
@@ -185,9 +533,11 @@ export default function PasskeySetup({
                   than "this device is set up": §6.5 keeps which device or password
                   manager holds each one off the server deliberately. */}
               <p style={textStyle}>
-                Which device or password manager holds each one is not recorded on
-                the server, so this cannot tell you whether one of them is in this
-                browser.
+                Nothing about which device or password manager holds each one is
+                recorded on the server. What the list above knows is kept inside your
+                journal instead, so it can describe a route only once a device
+                holding that route has opened the journal — and it still cannot tell
+                you whether one of them is in this browser.
               </p>
               {/* Advice rather than mechanism, and it earns its place: measured on
                   13 August 2026 (spec §6.1k), one credential gives a different secret
@@ -247,7 +597,11 @@ export default function PasskeySetup({
         <p style={{ ...textStyle, marginBottom: 0 }}>{cannot}</p>
       ) : (
         <>
-          {done && <p style={{ ...textStyle, fontWeight: 600 }}>{done}</p>}
+          {/* Still here for the first passkey, where there is no list above to put
+              it over and `enrolled` is false until the count comes back. */}
+          {done && !enrolled && (
+            <p style={{ ...textStyle, fontWeight: 600 }}>{done}</p>
+          )}
 
           {/* On an account with a passkey, adding another is two taps: the first
               reveals what to expect, the second does it. The warnings have to come
@@ -260,12 +614,25 @@ export default function PasskeySetup({
                   this removes stored routes and takes nothing back. Saying it after
                   the fact would be the lost-device feature of 28 July again. */}
               <p style={{ ...textStyle, fontSize: 13 }}>
-                This sets up a new passkey here and removes the saved routes that
-                existed before it — useful when you have lost track of how many there
+                This sets up a new passkey here, removes the saved routes that
+                existed before it, and clears the leftover records of routes that
+                have already gone — useful when you have lost track of how many there
                 are, or a passkey has been deleted from a password manager and its
                 route is still counted. It does not take the key back from a device
                 that already has it, and nothing can. Your journal key does not
                 change.
+              </p>
+              {/* The part that was missing, and the part that cost an evening: the
+                  routes go, the passkeys do not. They stay in the password manager,
+                  they sync to your other devices, and each one is offered again the
+                  next time you unlock there — where it opens nothing, because its
+                  route has been deleted. The app cannot delete a credential; it can
+                  only ask, and only where the browser implements the ask (§6.1f). */}
+              <p style={{ ...textStyle, fontSize: 13 }}>
+                The old passkeys themselves stay in your password manager, on every
+                device it syncs to, and will still be offered when you unlock there.
+                Delete them yourself wherever they are kept, or you will be choosing
+                between passkeys that no longer open this journal.
               </p>
               <p style={{ ...textStyle, fontSize: 13 }}>
                 Two prompts follow, as before.

@@ -60,6 +60,15 @@ export const recurrences = doc.getArray<Y.Map<unknown>>("recurrences");
 // means two devices registering at once cannot collide.
 export const devices = doc.getMap<Y.Map<unknown>>("devices");
 
+/**
+ * The credential register: which saved passkey route is which (§6.1l, 13 August
+ * 2026). Here rather than in a `keeper_wraps` column for the reason the device
+ * register is here — a row naming its credential would tell the operator which
+ * password manager somebody uses (§6.5) — and keyed by the wrap id the server
+ * already holds. Informational, like `devices`: see store/credentials.ts.
+ */
+export const credentials = doc.getMap<Y.Map<unknown>>("credentials");
+
 export const persistence = new IndexeddbPersistence(DOC_NAME, doc);
 
 /**

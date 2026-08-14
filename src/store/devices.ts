@@ -213,6 +213,17 @@ export const touchThisDevice = (): void => {
   });
 };
 
+/**
+ * How this client would describe itself in a register row: "Chrome (macOS)".
+ *
+ * Shared with the credential register (§6.1l), which needs the same sentence for
+ * the same reason and must not grow a second implementation of it that drifts.
+ * Inside the encrypted document only — the plaintext version of this string was
+ * removed from `device_link_requests` under §6.5 and does not come back.
+ */
+export const describeThisClient = (): string =>
+  `${clientName()} (${platformName()})`;
+
 /** "Chrome", "Chrome and installed app", "Chrome, Safari and installed app". */
 const listSentence = (parts: string[]): string => {
   if (parts.length <= 1) return parts[0] ?? "";

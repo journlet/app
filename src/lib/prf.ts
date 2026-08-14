@@ -197,6 +197,32 @@ export interface DerivedSecret {
   attachment: string | null;
 }
 
+/**
+ * Eight hex characters of a derived secret, for telling routes apart (§6.1k).
+ *
+ * A truncated SHA-256, so it identifies and does not reconstruct: four bytes cannot
+ * be walked back to a 32-byte secret, and the value never leaves the encrypted
+ * document in any case. This is the measurement IDR-017 was taken with, promoted
+ * from a diagnostic to a stored field, because the thing it discriminates — one
+ * credential reached two ways deriving two secrets — is invisible to every other
+ * field the register holds.
+ */
+export const secretFingerprint = async (secret: ArrayBuffer): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", secret);
+  return Array.from(new Uint8Array(digest).slice(0, 4))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+};
+
+/**
+ * A credential id as text, for the encrypted register and nothing else.
+ *
+ * Named to be awkward to misuse: §6.5 keeps this off every column, so a caller that
+ * wants a string is either writing to the journal document or making a mistake.
+ */
+export const credentialIdText = (id: CredentialId): string => b64url(id);
+
 /** base64url, which is the encoding the Signal API asks for. */
 const b64url = (bytes: Uint8Array): string =>
   b64encode(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -289,7 +315,7 @@ const random = (n: number): Uint8Array<ArrayBuffer> =>
 export const createCredential = async (
   account: CredentialAccount,
   rpId: string | undefined
-): Promise<CredentialId> => {
+): Promise<{ id: CredentialId; provider: string | null }> => {
   let credential: Credential | null;
   try {
     credential = await navigator.credentials.create({
@@ -346,7 +372,63 @@ export const createCredential = async (
   // state, and treating it as one keeps the caller down to three outcomes.
   const rawId = (credential as PublicKeyCredential | null)?.rawId;
   if (!rawId) throw new CredentialRefusedError();
-  return new Uint8Array(rawId);
+  return { id: new Uint8Array(rawId), provider: providerOf(credential) };
+};
+
+/**
+ * Passkey providers by AAGUID, which is the only thing that names one.
+ *
+ * Kept deliberately short. Each line is a claim about a public identifier that this
+ * application cannot check at runtime, so a wrong entry would have the journal
+ * telling somebody their passkey is in iCloud Keychain when it is in Google Password
+ * Manager, which is worse than saying nothing — and saying nothing is exactly what an
+ * unlisted AAGUID gets. Added 13 August 2026 because "which of my passkeys is this"
+ * cannot be answered by a browser name: Chrome on a Mac may be holding a Google
+ * credential, an iCloud one, or its own profile credential, and those behave
+ * differently over the cross-device tunnel (§6.1k).
+ */
+const PROVIDERS: Record<string, string> = {
+  "fbfc3007-154e-4ecc-8c0b-6e020557d7bd": "iCloud Keychain",
+  "ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4": "Google Password Manager",
+  "adce0002-35bc-c60a-648b-0b25f1f05503": "Chrome on this Mac",
+  "08987058-cadc-4b81-b6e1-30de50dcbe96": "Windows Hello",
+  "9ddd1817-af5a-4672-a2b9-3e3dd95000a9": "Windows Hello",
+  "6028b017-b1d4-4c02-b4b3-afcdafc96bb2": "Windows Hello",
+  "bada5566-a7aa-401f-bd96-45619a55120d": "1Password",
+  "d548826e-79b4-db40-a3d8-11116f7e8349": "Bitwarden",
+};
+
+/**
+ * Which provider made this credential, or null when nothing can be said.
+ *
+ * The AAGUID sits in the authenticator data an attestation carries, and a client is
+ * free to zero it — several do, since attestation is "none" here and anonymising is
+ * the privacy-preserving default. Zeroed, short, missing, unlisted and unsupported
+ * all answer null rather than a guess, and the screen then simply does not name a
+ * provider. It also never reaches the server: this is journal content, held in the
+ * encrypted register like every other label (§6.5).
+ */
+const providerOf = (credential: Credential | null): string | null => {
+  try {
+    const response = (credential as PublicKeyCredential | null)
+      ?.response as AuthenticatorAttestationResponse | undefined;
+    const data = response?.getAuthenticatorData?.();
+    if (!data || data.byteLength < 53) return null;
+    const bytes = new Uint8Array(data).slice(37, 53);
+    if (bytes.every((b) => b === 0)) return null;
+    const hex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    const aaguid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
+      12,
+      16
+    )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    return PROVIDERS[aaguid] ?? null;
+  } catch {
+    // An older browser without getAuthenticatorData, or an attestation shape this
+    // does not expect. Naming nothing is always available.
+    return null;
+  }
 };
 
 /**

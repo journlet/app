@@ -29,10 +29,33 @@ let replace: () => Promise<void> = async () => {
   routes = 1;
 };
 
+/** What the register says about each saved route, and what removal did. */
+let routeRows: { wrapId: string; note: Record<string, unknown> | null }[] = [];
+let strayRows: Record<string, unknown>[] = [];
+let removed: string[] = [];
+let forgotten: string[] = [];
+
 vi.mock("../../src/store/sync", () => ({
   countPasskeyRoutes: async () => routes,
   enrolPasskey: () => enrol(),
   replaceAllPasskeys: () => replace(),
+  listPasskeyRoutes: async () => ({ routes: routeRows, strays: strayRows }),
+  removePasskeyRoute: async (wrapId: string) => {
+    removed.push(wrapId);
+    routeRows = routeRows.filter((r) => r.wrapId !== wrapId);
+    routes = routeRows.length;
+  },
+}));
+
+// Partial, so describeRoute and onCredentialsChange stay real: the wording of a row
+// is the thing under test and forgetting is the only part that touches the document.
+vi.mock("../../src/store/credentials", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/store/credentials")>()),
+  forgetCredentialNote: (wrapId: string) => {
+    forgotten.push(wrapId);
+    strayRows = strayRows.filter((s) => s.wrapId !== wrapId);
+    return true;
+  },
 }));
 
 vi.mock("../../src/lib/prf", async (importOriginal) => ({
@@ -75,7 +98,23 @@ const servedFrom = (hostname: string): void => {
   });
 };
 
+/** Open the list of saved routes, which is loaded on request rather than with the box. */
+const openList = async () => {
+  fireEvent.click(screen.getByRole("button", { name: /which passkeys are these/i }));
+  // All, not one: an account with two routes has two remove buttons, and a query
+  // for a single one throws rather than waiting.
+  await waitFor(() =>
+    expect(
+      screen.queryAllByRole("button", { name: /^remove$/i }).length
+    ).toBeGreaterThan(0)
+  );
+};
+
 beforeEach(() => {
+  routeRows = [];
+  strayRows = [];
+  removed = [];
+  forgotten = [];
   routes = 0;
   usable = true;
   localCheck = true;
@@ -158,7 +197,15 @@ describe("an account that already has one", () => {
 
     expect(screen.getByText(/sign in with the same email/i)).toBeTruthy();
     expect(screen.getByText(/Unlock with a passkey/i)).toBeTruthy();
-    expect(screen.getByText(/not recorded on\s+the server/i)).toBeTruthy();
+    // The limit narrowed on 13 August 2026 rather than going away: the register
+    // (§6.1l) can now say what a route is, and still nothing about it is on the
+    // server, and it still cannot say whether a route lives in this browser.
+    expect(
+      screen.getByText(/is\s+recorded on the server/i)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/cannot tell you whether one of them is in this\s+browser/i)
+    ).toBeTruthy();
   });
 
   test("and the explaining includes which manager covers a borrowed computer", async () => {
@@ -496,5 +543,241 @@ describe("when it works", () => {
       expect(screen.getByText(/1 passkey can open this journal/i)).toBeTruthy()
     );
     expect(calls).toBe(1);
+  });
+});
+
+describe("the list of saved routes (§6.1l)", () => {
+  const NAMED = {
+    wrapId: "w-new",
+    note: {
+      wrapId: "w-new",
+      enrolledAt: Date.now(),
+      enrolledOn: "Installed app (macOS)",
+      enrolledRoute: "this device",
+      lastOpenedAt: Date.now(),
+      lastOpenedOn: "Safari (iOS)",
+      lastOpenedRoute: "another device",
+    },
+  };
+
+  test("reloads after starting again, rather than keeping the route it removed", async () => {
+    // The bug this exists for, found on hardware within minutes of shipping: the list
+    // held its loaded copy, so after "start again" the wrap that had just been deleted
+    // was still on screen, described as "not recognised" because it predated the
+    // register, with a remove button pointing at a row the server no longer had.
+    routes = 1;
+    routeRows = [{ wrapId: "w-old", note: null }];
+    replace = async () => {
+      routes = 1;
+      routeRows = [NAMED];
+    };
+    await show();
+    await openList();
+    expect(screen.getByText("Not recognised")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^start again$/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /start again with one passkey/i })
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/Set up on Installed app \(macOS\)/i)).toBeTruthy()
+    );
+    // The old row is gone rather than sitting above the new one.
+    expect(screen.queryByText("Not recognised")).toBeNull();
+  });
+
+  test("does not open the list for somebody who never asked for it", async () => {
+    // The reload is for a list already showing. Enrolling must not unfurl one.
+    routes = 1;
+    routeRows = [NAMED];
+    await show();
+
+    fireEvent.click(screen.getByRole("button", { name: /add another passkey/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /set up another passkey/i })
+    );
+
+    await waitFor(() => expect(screen.getByText(/Passkey set up/i)).toBeTruthy());
+    expect(
+      screen.getByRole("button", { name: /which passkeys are these/i })
+    ).toBeTruthy();
+  });
+
+  test("says where and how a route was last opened", async () => {
+    // Both facts were recorded from the first day and neither was shown, so a phone
+    // opening a wrap enrolled on the Mac read as a bare timestamp. The route is the
+    // part §6.1k makes load-bearing.
+    routes = 1;
+    routeRows = [NAMED];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText(/last opened .* on Safari \(iOS\), with a passkey from another device/i)
+    ).toBeTruthy();
+  });
+
+  test("lists every device that has opened the route, not just the last", async () => {
+    // "It does not acknowledge that I used it on my phone" (Gary, 13 August 2026):
+    // last-opened is overwritten by whichever device unlocked most recently, so the
+    // phone's use disappeared as soon as the Mac unlocked again.
+    routes = 1;
+    routeRows = [
+      {
+        wrapId: "w1",
+        note: {
+          ...NAMED.note,
+          openedBy: ["Installed app (iOS)", "Installed app (macOS)"],
+        },
+      },
+    ];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText(
+        /opened on Installed app \(iOS\) and Installed app \(macOS\), most recently/i
+      )
+    ).toBeTruthy();
+  });
+
+  test("names the password manager in the title when it is known", async () => {
+    routes = 1;
+    routeRows = [
+      { wrapId: "w1", note: { ...NAMED.note, provider: "iCloud Keychain" } },
+    ];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText("Set up on Installed app (macOS), in iCloud Keychain")
+    ).toBeTruthy();
+  });
+
+  test("a route that has never opened the journal says exactly that", async () => {
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText(/has not opened this journal on any device yet/i)
+    ).toBeTruthy();
+  });
+
+  test("picks up a row another device filled in, without being reopened", async () => {
+    // The register arrives over sync, so the event that names a row is usually a
+    // *different* device unlocking. Until this was wired the list held whatever it had
+    // fetched, and a phone opening a wrap enrolled here changed nothing on screen.
+    const { noteUnlock } = await import("../../src/store/credentials");
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    await show();
+    await openList();
+    expect(screen.getByText("Not recognised")).toBeTruthy();
+
+    // What a sync delivers: the register changes under the screen.
+    routeRows = [NAMED];
+    noteUnlock({ wrapId: NAMED.wrapId, attachment: "cross-platform" });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Set up on Installed app \(macOS\)/i)).toBeTruthy()
+    );
+  });
+
+  test("removing a route corrects the count above it", async () => {
+    // Two halves of one box, and each used to refresh only itself: the list could be
+    // stale after an enrolment and the count stale after a removal.
+    routes = 2;
+    routeRows = [
+      { wrapId: "w1", note: null },
+      NAMED,
+    ];
+    await show();
+    expect(screen.getByText(/2 passkeys can open this journal/i)).toBeTruthy();
+    await openList();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^remove$/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /remove this route/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/1 passkey can open this journal/i)).toBeTruthy()
+    );
+    expect(removed).toEqual(["w1"]);
+  });
+
+  test("and says what removal is not, before it happens", async () => {
+    // §6.1h's limit has to travel with the action: this withdraws a saved route and
+    // takes nothing back from a device that already opened the journal.
+    routes = 1;
+    routeRows = [NAMED];
+    await show();
+    await openList();
+
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
+
+    expect(screen.getByText(/keeps its copy/i)).toBeTruthy();
+    expect(screen.getByText(/journal key still works/i)).toBeTruthy();
+    expect(removed).toEqual([]);
+  });
+});
+
+describe("notes whose route has gone (§6.1l)", () => {
+  const STRAY = {
+    wrapId: "w-gone",
+    enrolledAt: Date.now(),
+    enrolledOn: "Chrome (macOS)",
+    enrolledRoute: "this device",
+    credentialId: "abcdefghijklmn",
+    fingerprint: "0E6BC7E0",
+  };
+
+  test("is listed with what was known about it, and can be forgotten", async () => {
+    // Forgetting notes with their rows only helps from the day it shipped. Everything
+    // orphaned by an earlier "start again" was in the register with nothing able to
+    // reach it, which is how the device register got its forget on 12 August.
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    strayRows = [STRAY];
+    await show();
+    await openList();
+
+    expect(screen.getByText("No longer a saved route")).toBeTruthy();
+    expect(screen.getByText(/was set up on Chrome \(macOS\)/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /forget this note/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("No longer a saved route")).toBeNull()
+    );
+    expect(forgotten).toEqual(["w-gone"]);
+    // The routes themselves are untouched: forgetting is tidying and nothing else.
+    expect(removed).toEqual([]);
+    expect(screen.getByText("Not recognised")).toBeTruthy();
+  });
+
+  test("does not blame another device for what start again did here", async () => {
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    strayRows = [STRAY];
+    await show();
+    await openList();
+
+    expect(screen.getByText(/Removed here or on another device/i)).toBeTruthy();
+    expect(screen.queryByText(/most likely removed from another device/i)).toBeNull();
+  });
+
+  test("says a row is a passkey rather than a device", async () => {
+    // The count above says passkeys and the rows below read as devices, which is how
+    // one row and two devices came to look like a fault.
+    routes = 1;
+    routeRows = [{ wrapId: "w1", note: null }];
+    await show();
+    await openList();
+
+    expect(
+      screen.getByText(/One row for each saved passkey, not for each device/i)
+    ).toBeTruthy();
   });
 });

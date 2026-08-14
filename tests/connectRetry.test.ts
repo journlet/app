@@ -116,6 +116,9 @@ vi.mock("../src/store/journal", () => ({
   get devices() {
     return doc.getMap("devices");
   },
+  get credentials() {
+    return doc.getMap("credentials");
+  },
   REMOTE_ORIGIN: "remote",
   wipeLocalJournal: async () => {},
 }));
