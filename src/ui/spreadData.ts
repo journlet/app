@@ -47,6 +47,15 @@ export interface SpreadData {
   futureLogCount: number;
   /** Overdue and due-today reminders on open entries. */
   dueItems: { pk: string; entry: Entry }[];
+  /**
+   * Open task occurrences of each rule, by recurrence id, oldest page first
+   * (spec §11 Q15). An occurrence that was never completed stays open on its
+   * own page while the next one appears on the next page, which is what paper
+   * does; this is what lets an occurrence say how many of its predecessors
+   * are still outstanding, so the pile is never silent. Page keys of one rule
+   * always share a scope, so a plain string compare orders them.
+   */
+  earlierOpen: Record<string, { pk: string; entry: Entry }[]>;
 }
 
 export function buildSpreadData(
@@ -92,10 +101,13 @@ export function buildSpreadData(
     ...(() => {
       // A rule's next occurrence may already exist as a real entry (the
       // entry made recurring sits on a future page, or an instance was
-      // materialised) — skip the preview then, the real row covers it
+      // materialised) — skip the preview then, the real row covers it.
+      // A migrated copy is not an occurrence (store/recurrence.ts): it does
+      // not cover the preview, because the rule will still materialise that
+      // page's own occurrence when the day comes.
       const covered = new Set(
         futureItems
-          .filter((f) => f.entry.recurrenceId)
+          .filter((f) => f.entry.recurrenceId && !f.entry.migratedFrom)
           .map((f) => `${f.entry.recurrenceId}:${f.pk}`)
       );
       return recurrences
@@ -154,6 +166,19 @@ export function buildSpreadData(
   });
   dueItems.sort((a, b) => (a.entry.remindAt ?? 0) - (b.entry.remindAt ?? 0));
 
+  // Outstanding occurrences per rule. Only tasks: an event or a note is
+  // never outstanding, it simply happened or did not.
+  const earlierOpen: Record<string, { pk: string; entry: Entry }[]> = {};
+  Object.keys(days).forEach((k) => {
+    (days[k] || []).forEach((e) => {
+      if (!e.recurrenceId || e.type !== "task" || e.state !== "open") return;
+      (earlierOpen[e.recurrenceId] ||= []).push({ pk: k, entry: e });
+    });
+  });
+  Object.values(earlierOpen).forEach((list) =>
+    list.sort((a, b) => (a.pk < b.pk ? -1 : a.pk > b.pk ? 1 : 0))
+  );
+
   return {
     nowKeys,
     pastOpen,
@@ -163,5 +188,6 @@ export function buildSpreadData(
     futureLogGroups,
     futureLogCount,
     dueItems,
+    earlierOpen,
   };
 }

@@ -101,6 +101,7 @@ import { shouldOpenRow, type TapPoint } from "./lib/rowTap";
 import RuleActionsSheet from "./ui/RuleActionsSheet";
 import NewCollectionDialog from "./ui/NewCollectionDialog";
 import ReviewMigrateSheet from "./ui/ReviewMigrateSheet";
+import EarlierOccurrencesSheet from "./ui/EarlierOccurrencesSheet";
 import UndoToast from "./ui/UndoToast";
 import SpreadView from "./ui/SpreadView";
 import SearchView from "./ui/SearchView";
@@ -208,6 +209,10 @@ export default function App() {
     ruleId: string;
     dayKey: string;
   } | null>(null);
+  // "N earlier still open" on a repeating entry (spec §11 Q15). Keyed on the
+  // entry id rather than the list, so the list stays derived and shrinks as
+  // decisions are taken inside the sheet.
+  const [earlierSheet, setEarlierSheet] = useState<string | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
   // Draft details text while the sheet's "details" sub-form is open (null = closed)
   // Entry whose details are open in the full-screen view (null = closed).
@@ -475,10 +480,19 @@ export default function App() {
     futureLogGroups,
     futureLogCount,
     dueItems,
+    earlierOpen,
   } = useMemo(
     () => buildSpreadData(days, recurrences, today),
     [days, recurrences, today]
   );
+
+  // Occurrences of the same rule still open on pages before this entry's own
+  // (spec §11 Q15). Page keys within one rule share a scope, so the compare
+  // is a plain string compare.
+  const earlierOpenFor = (e: Entry): { pk: string; entry: Entry }[] =>
+    e.recurrenceId
+      ? (earlierOpen[e.recurrenceId] ?? []).filter((o) => o.pk < e.pageKey)
+      : [];
 
   // Collection currently open, if any
   const activeCol =
@@ -1095,6 +1109,24 @@ export default function App() {
             repeats
           </span>
         )}
+        {/* Earlier occurrences of this rule that were never finished (spec
+            §11 Q15). They sit on their own past pages, which the spread does
+            not show, so without this the pile is silent. Same 11.5px/13px
+            construction as the meta above and as "threaded to", so the row
+            stays one grid line; it wraps to a second line box on a narrow
+            screen, which is a full grid row and keeps the dots aligned. */}
+        {earlierOpenFor(e).length > 0 && (
+          <button
+            className="detailsToggle"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              setEarlierSheet(e.id);
+            }}
+            aria-label={`${earlierOpenFor(e).length} earlier occurrences still open — open the list`}
+          >
+            {earlierOpenFor(e).length} earlier still open
+          </button>
+        )}
         {e.details && (
           <button
             className="detailsToggle"
@@ -1693,6 +1725,27 @@ export default function App() {
           onClose={() => setReviewing(false)}
         />
       )}
+
+      {earlierSheet &&
+        (() => {
+          const owner = Object.values(days)
+            .flat()
+            .find((e) => e.id === earlierSheet);
+          if (!owner) return null;
+          const rule = recurrences.find((r) => r.id === owner.recurrenceId);
+          return (
+            <EarlierOccurrencesSheet
+              entry={owner}
+              occurrences={earlierOpenFor(owner)}
+              cadence={
+                rule
+                  ? `repeats ${cadenceLabel(rule.everyN, rule.unit)}`
+                  : "repeats"
+              }
+              onClose={() => setEarlierSheet(null)}
+            />
+          );
+        })()}
 
       {sheet && sheetEntry && (
         <EntryActionsSheet
