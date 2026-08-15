@@ -97,6 +97,7 @@ import FilterRow from "./ui/FilterRow";
 import FutureLogView from "./ui/FutureLogView";
 import CaptureForm from "./ui/CaptureForm";
 import EntryActionsSheet from "./ui/EntryActionsSheet";
+import { shouldOpenRow, type TapPoint } from "./lib/rowTap";
 import RuleActionsSheet from "./ui/RuleActionsSheet";
 import NewCollectionDialog from "./ui/NewCollectionDialog";
 import ReviewMigrateSheet from "./ui/ReviewMigrateSheet";
@@ -295,6 +296,10 @@ export default function App() {
   const foundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The id last scrolled to, so a re-render doesn't yank the page back
   const scrolledTo = useRef<string | null>(null);
+  // Where the pointer went down on an entry row, so the row's click can tell
+  // a tap from a scroll that happened to end on it. One ref for every row:
+  // there is only ever one pointer sequence in flight.
+  const rowDown = useRef<TapPoint | null>(null);
   // Drop the mark whenever you navigate: it answers "which line did I mean",
   // and once you have left that page the question is gone. Without this it
   // would still be waiting on the page days later if you came back inside
@@ -995,6 +1000,26 @@ export default function App() {
         (e.parentId ? " isSub" : "") +
         (foundEntry === e.id ? " isFound" : "")
       }
+      // Everything right of the bullet opens the entry's actions. The more
+      // button stays where it was, visible and labelled: this is a larger
+      // target over a plainly labelled control, not a gesture you have to
+      // know about. The bullet keeps its own click and stops it, so the two
+      // never fight, and the 10px gap between them belongs to the row — an
+      // ambiguous tap opens a sheet you dismiss rather than completing a
+      // task you did not mean to complete.
+      onPointerDown={(ev) => {
+        rowDown.current = { x: ev.clientX, y: ev.clientY };
+      }}
+      onClick={(ev) => {
+        const sel = window.getSelection();
+        const open = shouldOpenRow(
+          rowDown.current,
+          { x: ev.clientX, y: ev.clientY },
+          !!sel && !sel.isCollapsed
+        );
+        rowDown.current = null;
+        if (open) openSheet({ scope: sc, pk, id: e.id });
+      }}
       ref={(el) => {
         // Bring a searched-for entry into view once, when the page it lives
         // on renders. Guarded so later re-renders leave your scroll alone.
@@ -1016,9 +1041,13 @@ export default function App() {
           (e.state === "migrated" ? " isMigrated" : "") +
           (e.state === "scheduled" ? " isScheduled" : "")
         }
-        onClick={() =>
-          e.type === "task" ? toggleDone(e.id) : cycleType(e.id)
-        }
+        onClick={(ev) => {
+          // The one place on the row where a tap writes to the journal, so
+          // it must not also reach the row handler above
+          ev.stopPropagation();
+          if (e.type === "task") toggleDone(e.id);
+          else cycleType(e.id);
+        }}
         title={e.type === "task" ? "Tap to complete" : "Tap to change type"}
         aria-label={`${e.type}, ${e.state}`}
       >
@@ -1098,7 +1127,10 @@ export default function App() {
       <span className="actions">
         <button
           className="miniBtn moreBtn"
-          onClick={() => openSheet({ scope: sc, pk, id: e.id })}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            openSheet({ scope: sc, pk, id: e.id });
+          }}
           aria-label="Entry actions"
           aria-haspopup="dialog"
         >

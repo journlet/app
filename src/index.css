@@ -221,6 +221,9 @@ body {
   gap: 10px;
   padding: 0 4px;
   border-radius: 6px;
+  /* The row opens the entry's actions, so it points like the control it is.
+     Text selection still works, see lib/rowTap. */
+  cursor: pointer;
 }
 .entry:hover {
   background: var(--hover);
