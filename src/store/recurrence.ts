@@ -3,6 +3,17 @@
 // device materialises any occurrences due up to today. Instances are
 // normal entries tagged with recurrenceId; two devices racing offline can
 // double-create, so a deterministic dedupe pass keeps the earliest twin.
+//
+// One rule governs both passes (added 15 August 2026, spec §11 Q15): a
+// migrated copy carries recurrenceId for provenance — it says "repeats" and
+// belongs to its rule — but it is never the occurrence for the page it
+// landed on. Migrating Wednesday's unfinished occurrence onto today produced
+// two entries sharing rule+page, and the dedupe pass, which cannot tell a
+// deliberate migrate from an offline race twin, deleted the later one
+// (always the migrated copy), leaving Wednesday's entry reading › and
+// pointing at nothing. So migrated copies are skipped by the dedupe below,
+// and left out of `existing` so they never suppress the rule's own
+// occurrence either.
 
 import { dkey, periodKey, todayKey, toDate } from "../lib/dates";
 import type { Recurrence } from "../lib/types";
@@ -80,10 +91,13 @@ export const materialiseRecurrences = (): void => {
     const all = readAll();
 
     // Existing instances per rule+day (any state — a completed or struck
-    // occurrence must never be recreated)
+    // occurrence must never be recreated). Migrated copies are not
+    // occurrences (see the head of this file): a copy carried onto a page
+    // must not stand in for that page's own occurrence, or the rule would
+    // silently skip a day.
     const existing = new Set(
       all
-        .filter((e) => e.recurrenceId)
+        .filter((e) => e.recurrenceId && !e.migratedFrom)
         .map((e) => `${e.recurrenceId}:${e.pageKey}`)
     );
 
@@ -121,10 +135,13 @@ export const materialiseRecurrences = (): void => {
     }
 
     // Dedupe: concurrent materialisation on two offline devices — keep the
-    // earliest-created twin (tie-break on id) so every device converges
+    // earliest-created twin (tie-break on id) so every device converges.
+    // A migrated copy is exempt: it is a deliberate act with its own
+    // provenance (migratedFrom), not a twin, and deleting it would break
+    // the › on the entry it came from.
     const seen = new Map<string, { id: string; createdAt: number }>();
     for (const e of readAll()) {
-      if (!e.recurrenceId) continue;
+      if (!e.recurrenceId || e.migratedFrom) continue;
       const key = `${e.recurrenceId}:${e.pageKey}`;
       const prev = seen.get(key);
       if (!prev) {
