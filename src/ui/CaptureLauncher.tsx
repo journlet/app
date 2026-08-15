@@ -118,7 +118,7 @@ export default function CaptureLauncher({
         </button>
       </div>
       <div style={S.legend}>
-        tap a task's bullet to complete it · ⋯ for entry actions
+        tap a task's bullet to complete · tap the line for actions
       </div>
     </footer>
   );
