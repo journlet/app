@@ -528,24 +528,37 @@ export default function SyncView() {
               </div>
             </>
           ) : (
-            <div style={ST.row}>
-              <input
-                style={ST.input}
-                type="email"
-                value={email}
-                placeholder="you@example.com"
-                onChange={(ev) => setEmail(ev.target.value)}
-                onKeyDown={(ev) => ev.key === "Enter" && sendCode()}
-                aria-label="Email address"
-              />
-              <button
-                className="addBtn"
-                disabled={busy || !email.includes("@")}
-                onClick={sendCode}
-              >
-                Email me a sign-in code
-              </button>
-            </div>
+            <>
+              {/* §11 Q12, open since 4 August 2026 and unstated in the interface
+                  until now: the mailbox is the second single point of failure,
+                  sitting beside the journal key. One sentence and only here,
+                  because this is the one moment the address is being chosen and
+                  because §6.1g's lesson about first run applies to warnings as
+                  much as to gates. The full statement is on the Sync screen,
+                  where somebody has a reason to read it. */}
+              <p style={ST.p}>
+                Use an address you expect to keep. Signing in on a new device
+                means typing a code sent to it, and there is no other way in.
+              </p>
+              <div style={ST.row}>
+                <input
+                  style={ST.input}
+                  type="email"
+                  value={email}
+                  placeholder="you@example.com"
+                  onChange={(ev) => setEmail(ev.target.value)}
+                  onKeyDown={(ev) => ev.key === "Enter" && sendCode()}
+                  aria-label="Email address"
+                />
+                <button
+                  className="addBtn"
+                  disabled={busy || !email.includes("@")}
+                  onClick={sendCode}
+                >
+                  Email me a sign-in code
+                </button>
+              </div>
+            </>
           )}
         </>
       )}
@@ -734,6 +747,44 @@ export default function SyncView() {
                 show journal key
               </button>
             )}
+          </div>
+          {/* §11 Q12, raised 4 August 2026 with §4.7 and unstated here until
+              now. Its own box rather than a line beside "Signed in as", and
+              directly under the journal key, because the two are the same class
+              of thing: an account with no password has exactly two things worth
+              keeping, and a screen that gives one a box and the other a footnote
+              says they are of different weight when they are not.
+
+              The second paragraph is the one that had to be got right. The
+              comfortable wording is "you keep the devices you already have", and
+              §6.1j made it false the day it shipped: a lapsed session shows
+              SignedOutView rather than the journal, and getting back in needs a
+              code at this address. So the honest statement is that a lost
+              mailbox is a slow lockout rather than a bounded one, and it is said
+              here rather than discovered weeks later.
+
+              What this box does not say is how to change the address, because
+              nothing here can. That part of Q12 is still open: an operator
+              process would be owed the same care as deletion, since a change
+              requested from a mailbox somebody else has reached is the case it
+              would have to survive. */}
+          <div style={ST.keyBox}>
+            <div style={ST.keyLabel}>Sign-in address</div>
+            <p style={{ ...ST.p, marginTop: 0 }}>
+              Every device signs in with a code sent to{" "}
+              <strong>{getSessionEmail()}</strong>. There is no password and no
+              other route, so this address is worth keeping as carefully as the
+              journal key above.
+            </p>
+            <p style={ST.p}>
+              Losing the mailbox does not lock your journal. It stops you signing
+              in on a new device, and it stops you signing back in on one you
+              already have, which matters because sessions run out on their own
+              rather than only when you sign out.
+            </p>
+            <p style={ST.p}>
+              Nothing here can check that this address still reaches you.
+            </p>
           </div>
           <p style={ST.p}>
             To link a new device: install Journlet there, sign in with the
