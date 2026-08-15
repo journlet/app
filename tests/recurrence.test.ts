@@ -15,6 +15,7 @@ import {
   doc,
   entries,
   habits,
+  migrateEntry,
   readAll,
   readRecurrences,
   recurrences,
@@ -139,6 +140,39 @@ describe("materialiseRecurrences", () => {
     const first = readAll().length;
     materialiseRecurrences();
     expect(readAll().length).toBe(first);
+  });
+
+  // spec §11 Q15. Before 15 August 2026 the dedupe pass deleted the migrated
+  // copy — it shared rule+page with the day's own occurrence and was always
+  // the later of the two — so the › on the entry it came from pointed at
+  // nothing, silently and permanently.
+  test("a migrated copy survives on a page that already holds an occurrence", () => {
+    const r = addRecurrence({
+      text: "Standup",
+      type: "task",
+      priority: false,
+      everyN: 1,
+      unit: "day",
+      pageScope: "day",
+      anchor: "2026-07-20",
+      materialisedThrough: "2026-07-20",
+    });
+    materialiseRecurrences();
+
+    const stale = readAll().find((e) => e.pageKey === "2026-07-22");
+    expect(stale).toBeDefined();
+    migrateEntry(stale!.id, "2026-07-24");
+
+    materialiseRecurrences();
+
+    const onToday = readAll().filter((e) => e.pageKey === "2026-07-24");
+    expect(onToday).toHaveLength(2);
+    expect(onToday.filter((e) => e.migratedFrom === stale!.id)).toHaveLength(1);
+    expect(readAll().find((e) => e.id === stale!.id)?.state).toBe("migrated");
+    // and the copy does not stand in for the rule's own occurrence
+    expect(
+      onToday.filter((e) => e.recurrenceId === r.id && !e.migratedFrom)
+    ).toHaveLength(1);
   });
 
   test("a skipped occurrence stays struck and is never recreated", () => {

@@ -185,3 +185,48 @@ describe("filterRows", () => {
     ]);
   });
 });
+
+// spec §11 Q15: an occurrence never finished stays open on its own page while
+// the next one appears, so a rule can accumulate. earlierOpen is what lets an
+// occurrence say so rather than leaving the pile on pages nobody is looking at.
+describe("earlierOpen", () => {
+  test("collects open task occurrences per rule, oldest page first", () => {
+    const days = asDays([
+      entry({ id: "mon", pageKey: "2026-07-22", recurrenceId: "r1" }),
+      entry({ id: "tue", pageKey: "2026-07-23", recurrenceId: "r1" }),
+      entry({ id: "today", pageKey: "2026-07-24", recurrenceId: "r1" }),
+    ]);
+    const { earlierOpen } = buildSpreadData(days, [dailyRule()], TODAY);
+    expect(earlierOpen.r1.map((o) => o.pk)).toEqual([
+      "2026-07-22",
+      "2026-07-23",
+      "2026-07-24",
+    ]);
+  });
+
+  test("leaves out occurrences that were dealt with, and non-tasks", () => {
+    const days = asDays([
+      entry({ id: "done", pageKey: "2026-07-21", recurrenceId: "r1", state: "done" }),
+      entry({ id: "struck", pageKey: "2026-07-22", recurrenceId: "r1", state: "struck" }),
+      entry({ id: "migrated", pageKey: "2026-07-23", recurrenceId: "r1", state: "migrated" }),
+      entry({ id: "event", pageKey: "2026-07-23", recurrenceId: "r1", type: "event" }),
+      entry({ id: "open", pageKey: "2026-07-24", recurrenceId: "r1" }),
+      entry({ id: "unrelated", pageKey: "2026-07-20" }),
+    ]);
+    const { earlierOpen } = buildSpreadData(days, [dailyRule()], TODAY);
+    expect(earlierOpen.r1.map((o) => o.entry.id)).toEqual(["open"]);
+  });
+
+  test("a migrated copy still counts as outstanding — it is an open task", () => {
+    const days = asDays([
+      entry({
+        id: "copy",
+        pageKey: "2026-07-24",
+        recurrenceId: "r1",
+        migratedFrom: "mon",
+      }),
+    ]);
+    const { earlierOpen } = buildSpreadData(days, [dailyRule()], TODAY);
+    expect(earlierOpen.r1).toHaveLength(1);
+  });
+});
