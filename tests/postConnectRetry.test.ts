@@ -246,3 +246,24 @@ describe("a realtime channel that drops", () => {
     });
   }, 15_000);
 });
+
+describe("asking again by hand once connected", () => {
+  test("retryConnect actually retries", async () => {
+    // Through connect() this was a no-op: doConnect early-outs on
+    // `connectedUserId === session.user.id && channel` and returns having done
+    // nothing, so the Sync screen's button cleared its own spinner and reported
+    // success without a single request leaving the device.
+    const sync = await bootConnected();
+    failInsert = true;
+
+    write("buy milk");
+    await vi.waitFor(() => expect(sync.getSyncStatus()).toBe("pending"));
+    const before = insertAttempts;
+
+    failInsert = false;
+    await sync.retryConnect();
+
+    expect(insertAttempts).toBeGreaterThan(before);
+    expect(sync.getSyncStatus()).toBe("synced");
+  }, 15_000);
+});

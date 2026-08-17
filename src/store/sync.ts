@@ -1505,10 +1505,16 @@ const connect = (): Promise<void> =>
       connecting = null;
     }));
 
-/** Ask again now, for a "try again" button. */
+/**
+ * Ask again now, for a "try again" button.
+ *
+ * Through resync, so that a device which connected and then had a push refused
+ * actually retries the push. Through connect() this returned immediately having
+ * done nothing, and the button reported success by clearing its own spinner.
+ */
 export const retryConnect = async (): Promise<void> => {
   cancelRetry();
-  await connect();
+  await resync();
 };
 
 // ---------- public API ----------
