@@ -382,6 +382,13 @@ const pushPayload = (
 doc.on("update", (update: Uint8Array, origin: unknown) => {
   if (origin !== null || !session || !connectedUserId) return;
   void pushPayload(update, "live-edit").then((ok) => {
+    // No clearError() here, unlike the end of a reconcile. A successful push
+    // proves writing works, which is not the same as proving reading does: a
+    // device holding a stale epoch encrypts happily under the key it has while
+    // being unable to open rows written under the newer one. Clearing on a push
+    // would silently drop MISSING_EPOCH_KEY, the one diagnostic that tells the
+    // user to open Journlet on another device. The reconcile that re-derives it
+    // is the only honest place to clear it.
     if (ok && !dirty) setStatus("synced");
   });
 });
@@ -1288,6 +1295,20 @@ const reconcile = async (trigger: SyncTrigger): Promise<boolean> => {
       return insertPayload(diff, trigger);
     });
     if (!ok) return false;
+    // Before reportTally, never after: the round trip that just succeeded is
+    // what makes the last failure stale, but this same round trip may have found
+    // rows it cannot read, and reportTally is where that gets said. Clearing
+    // afterwards would wipe the diagnostic the fetch was for.
+    //
+    // Clearing at all, because nothing did. The error outlived every recovery
+    // and only doConnect ever reset it, so a failure that had long since mended
+    // stayed in the snapshot until the next sign-in. The next time status dipped
+    // to "pending" for a reason that sets no error of its own — a realtime
+    // channel wobbling is the common one — notSyncingReason read the corpse and
+    // told the user the server had refused their last change and would not clear
+    // by itself. On a phone with a flaky socket that is a banner cycling old
+    // messages about problems that no longer exist.
+    clearError();
     reportTally(tally);
     dirty = false;
     if (connectedUserId) setStatus("synced");

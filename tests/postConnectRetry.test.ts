@@ -247,6 +247,44 @@ describe("a realtime channel that drops", () => {
   }, 15_000);
 });
 
+describe("the last sync problem", () => {
+  test("is cleared once a sync succeeds", async () => {
+    // It never was. Only doConnect called clearError, so a failure that had long
+    // since mended stayed in the snapshot, and the next dip to "pending" — a
+    // channel wobble sets the status and no error of its own — was reported to
+    // the user as a fresh refusal that would not clear by itself.
+    const sync = await bootConnected();
+    failInsert = true;
+
+    write("buy milk");
+    await vi.waitFor(() => expect(sync.getSyncError()).toBeTruthy());
+
+    failInsert = false;
+    await sync.retryConnect();
+
+    expect(sync.getSyncStatus()).toBe("synced");
+    expect(sync.getSyncError()).toBeNull();
+  }, 15_000);
+
+  test("does not resurface as a refusal when the channel later wobbles", async () => {
+    const sync = await bootConnected();
+    failInsert = true;
+
+    write("buy milk");
+    await vi.waitFor(() => expect(sync.getSyncError()).toBeTruthy());
+
+    failInsert = false;
+    await sync.retryConnect();
+    channelCallback?.("CHANNEL_ERROR");
+
+    // Pending with no error is "behind, catching up", which the journal screen
+    // says nothing alarming about. Pending *with* an error is what the banner
+    // reads as "the server refused your last change".
+    expect(sync.getSyncStatus()).toBe("pending");
+    expect(sync.getSyncError()).toBeNull();
+  }, 15_000);
+});
+
 describe("asking again by hand once connected", () => {
   test("retryConnect actually retries", async () => {
     // Through connect() this was a no-op: doConnect early-outs on
