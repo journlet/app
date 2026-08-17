@@ -24,6 +24,7 @@ import {
   subscribeSync,
   provideJournalKey,
   removeDevice,
+  retryConnect,
   signIn,
   signOutAndWipe,
   takeJournalKey,
@@ -112,6 +113,10 @@ export default function SyncView() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Separate from `busy`, which every other action on this screen shares. A
+  // retry can be pressed while a sign-in code is in flight and neither should
+  // disable the other.
+  const [retrying, setRetrying] = useState(false);
 
   // The two credentials of onboarding get mistaken for each other, in both
   // directions (see lib/credentialShape). Derived rather than stored, so the
@@ -424,7 +429,27 @@ export default function SyncView() {
           meant the one thing worth reading on a device that could not load was
           the last thing anyone would find (reported 29 Jul). */}
       {sync.error && (
-        <p style={ST.error}>Last sync problem: {sync.error}</p>
+        <>
+          <p style={ST.error}>Last sync problem: {sync.error}</p>
+          {/* The journal's "not syncing" banner sends people here with "What
+              happened ›", and until now this is all they found: the problem
+              stated and no way to act on it. The app does keep trying on its
+              own, so say that too — a button with no account of what happens
+              if it is not pressed invites pressing it repeatedly. */}
+          <p style={ST.p}>
+            Journlet keeps trying on its own. You can also ask it to try now.
+          </p>
+          <button
+            className="miniBtn"
+            disabled={retrying}
+            onClick={() => {
+              setRetrying(true);
+              void retryConnect().finally(() => setRetrying(false));
+            }}
+          >
+            {retrying ? "Trying…" : "Try syncing again"}
+          </button>
+        </>
       )}
 
       {status === "disabled" && (
