@@ -323,6 +323,7 @@ type SyncTrigger =
   | "online"
   | "socket-rejoin"
   | "live-edit"
+  | "retry"
   | "sign-out";
 
 // The raw insert. Only ever called from inside the write queue — call
@@ -362,6 +363,11 @@ const insertPayload = async (
     dirty = true;
     setError(e);
     setStatus(navigator.onLine ? "pending" : "offline");
+    // Arm the retry here rather than leaving it to the caller. A push that
+    // fails after this device has connected once used to schedule nothing at
+    // all — see scheduleRetry — so the entry sat unsent until a foreground or a
+    // network event happened along.
+    scheduleRetry();
     return false;
   }
 };
@@ -1289,6 +1295,7 @@ const reconcile = async (trigger: SyncTrigger): Promise<boolean> => {
   } catch (e) {
     setError(e);
     setStatus(navigator.onLine ? "pending" : "offline");
+    scheduleRetry();
     return false;
   } finally {
     reconciling = false;
@@ -1323,8 +1330,15 @@ const subscribe = () => {
         if (everSubscribed) void reconcile("socket-rejoin");
         everSubscribed = true;
       }
-      if (state === "CHANNEL_ERROR" || state === "TIMED_OUT")
+      if (state === "CHANNEL_ERROR" || state === "TIMED_OUT") {
         setStatus(navigator.onLine ? "pending" : "offline");
+        // A dropped socket has no replay, so the events missed while it was
+        // down are only recovered by a reconcile. Supabase re-joins on its own
+        // and the "SUBSCRIBED" branch above catches that, but a channel that
+        // stays down leaves this device silently behind — which on a desktop
+        // tab that is never backgrounded means indefinitely.
+        scheduleRetry();
+      }
     });
 };
 
@@ -1402,13 +1416,27 @@ const doConnect = async (): Promise<void> => {
 let connecting: Promise<void> | null = null;
 
 /**
- * Retry a failed connect on a backoff.
+ * Retry a failed sync on a backoff.
  *
  * Before this, a connect that failed left the app in "pending" until something
  * incidental happened — a foreground, or the network dropping and returning. A
  * transient server error therefore became a stuck app with a working fix nobody
  * could reach: restarting the app was the only way out, which is exactly how the
  * clock-skew error was resolved on 29 Jul.
+ *
+ * It covered only failures *before* the first successful connect, because the
+ * one caller was connect()'s continuation and it armed the timer only when
+ * connectedUserId was still unset. Everything that can break afterwards — a
+ * refused push, a reconcile that throws, a realtime channel that errors — set
+ * "pending" and scheduled nothing. Two escape routes were left, the `online`
+ * and `visibilitychange` listeners, and a desktop tab that stays visible and
+ * stays online fires neither: reported 17 Aug as a "not syncing" banner that sat
+ * there until the tab was reloaded. A phone hits visibilitychange every few
+ * minutes, which is why the same fault appeared to clear itself there and gave
+ * the two platforms opposite symptoms from one cause.
+ *
+ * So every failure path arms this now, and the attempt it makes depends on
+ * where the device got to (see resync).
  *
  * Backoff rather than a fixed interval, capped, and only while signed in, so a
  * server having a bad minute is not hammered by every device at once.
@@ -1424,6 +1452,26 @@ const cancelRetry = () => {
   retryDelay = RETRY_START_MS;
 };
 
+/**
+ * One attempt at getting back in step, whichever half is broken.
+ *
+ * Before a first successful connect the thing to retry is the connect. After
+ * one, the session and the channel are already established and what failed was
+ * a push or a fetch, so the thing to retry is a reconcile — and calling
+ * connect() there is not merely the wrong choice but a no-op, because doConnect
+ * early-outs on `connectedUserId === session.user.id && channel` and returns
+ * having done nothing. That is why retryConnect, the "try again" button's
+ * implementation, did nothing at all in the state a user is most likely to press
+ * it from.
+ */
+const resync = async (): Promise<void> => {
+  if (connectedUserId && channel) {
+    await reconcile("retry");
+    return;
+  }
+  await connect();
+};
+
 const scheduleRetry = () => {
   // Only for states a retry can actually mend. "needs-key" waits on the user,
   // and retrying it would re-read the journal row every minute for nothing.
@@ -1434,7 +1482,16 @@ const scheduleRetry = () => {
   retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
   retryTimer = setTimeout(() => {
     retryTimer = null;
-    void connect();
+    void resync().finally(() => {
+      // Re-arm from here as well as from the failure sites, because a reconcile
+      // that fails inside its own catch has already armed the next attempt,
+      // while one that fails some other way has not. scheduleRetry reads the
+      // status to decide, so "is it still broken" is answered in exactly one
+      // place; a success resets the backoff so the next outage starts at two
+      // seconds again rather than at a minute.
+      if (getSyncStatus() === "synced") cancelRetry();
+      else scheduleRetry();
+    });
   }, delay);
 };
 
