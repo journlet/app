@@ -8,6 +8,7 @@ import {
   addCollection,
   addEntry,
   addHabit,
+  adoptEntryState,
   collections,
   cycleType,
   doc,
@@ -447,5 +448,17 @@ describe("toggleThread (page references)", () => {
     expect(readAll().find((x) => x.id === e.id)?.threads).toEqual([
       colPageKey(c.id),
     ]);
+  });
+});
+
+describe("adoptEntryState (recurrence dedupe only)", () => {
+  test("moves a state onto an entry and says it landed", () => {
+    const e = addEntry("2026-07-24", "task", "Standup", false);
+    expect(adoptEntryState(e.id, "done")).toBe(true);
+    expect(readAll().find((x) => x.id === e.id)?.state).toBe("done");
+  });
+
+  test("answers false for an entry that is no longer in the journal", () => {
+    expect(adoptEntryState("gone", "done")).toBe(false);
   });
 });

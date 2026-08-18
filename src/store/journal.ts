@@ -430,11 +430,17 @@ export const strikeEntry = (id: string): void => {
  * onto the copy it keeps, or a completion made on one device disappears when
  * another device's twin merges in (reported 18 August 2026). Deliberately not
  * offered to the UI, which has the named actions.
+ *
+ * Answers whether the entry now holds that state, which is false only when it is
+ * no longer in the document. The dedupe treats that as a reason to delete
+ * nothing: carrying a state onto an entry that has gone is how a completion
+ * disappears, and it is the one failure here worth refusing rather than logging.
  */
-export const adoptEntryState = (id: string, state: EntryState): void => {
+export const adoptEntryState = (id: string, state: EntryState): boolean => {
   const m = findMap(id);
-  if (!m || m.get("state") === state) return;
-  doc.transact(() => m.set("state", state));
+  if (!m) return false;
+  if (m.get("state") !== state) doc.transact(() => m.set("state", state));
+  return true;
 };
 
 // ---------- collections ----------
