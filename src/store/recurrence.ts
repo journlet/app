@@ -96,6 +96,60 @@ const remindAtFor = (r: Recurrence, dayKey: string): number | undefined => {
 };
 
 /**
+ * What the dedupe pass discarded, and why it was safe to.
+ *
+ * The same instrument as recordPush in store/sync.ts, for the same reason. That
+ * one exists because duplicate rows had been chased twice on timing and length
+ * alone, which cannot distinguish one update sent twice from two that happen to
+ * be the same size, so it records what was actually sent and the question becomes
+ * answerable rather than inferable. This pass is the only code in the app that
+ * destroys the person's content on its own initiative and it had no such record
+ * at all: the completion lost on 18 August 2026 left no trace anywhere, and
+ * finding out why cost a bug report and a read of the whole sync engine. It is
+ * also the second policy error in this one function, after the one Q15 fixed on
+ * 15 August, which is the argument for instrumenting the function rather than
+ * trusting the next policy to be right.
+ *
+ * One record per discarded twin rather than per group, because the question asked
+ * of it is always about a single entry that went missing.
+ *
+ * Readable on a phone via window.__journletDedupeLog, and from code via
+ * recentDedupes() below.
+ */
+export interface DedupeRecord {
+  at: string;
+  /** the rule and page whose twins these were */
+  rule: string;
+  page: string;
+  kept: string;
+  keptState: EntryState;
+  discarded: string;
+  discardedState: EntryState;
+  /** the state moved onto the survivor, absent when it already held it */
+  carried?: EntryState;
+}
+
+const DEDUPE_LOG_MAX = 50;
+const dedupeLog: DedupeRecord[] = [];
+
+/** The recent dedupe decisions, oldest first. */
+export const recentDedupes = (): DedupeRecord[] => [...dedupeLog];
+
+const recordDedupe = (r: DedupeRecord): void => {
+  dedupeLog.push(r);
+  if (dedupeLog.length > DEDUPE_LOG_MAX) dedupeLog.shift();
+  console.info(
+    `journlet dedupe ${r.rule}:${r.page} kept ${r.kept} (${r.keptState}) ` +
+      `discarded ${r.discarded} (${r.discardedState})` +
+      (r.carried ? ` carried ${r.carried}` : "") +
+      ` ${r.at}`
+  );
+  if (typeof window !== "undefined")
+    (window as unknown as { __journletDedupeLog?: DedupeRecord[] })
+      .__journletDedupeLog = dedupeLog;
+};
+
+/**
  * How closed an occurrence is.
  *
  * A dedupe cannot ask which twin the person meant, so it converges on the
@@ -177,8 +231,39 @@ const dedupeOccurrences = (): void => {
     const strongest = [keep, ...losers].reduce((a, b) =>
       CLOSED_RANK[b.state] > CLOSED_RANK[a.state] ? b : a
     );
-    adoptEntryState(keep.id, strongest.state);
-    losers.forEach((e) => removeEntry(e.id));
+    /**
+     * The invariant this pass now has to hold: nothing is discarded until what it
+     * said is on the entry that survives. adoptEntryState answers false only when
+     * the survivor is no longer in the document, which the snapshot above cannot
+     * see: a concurrent delete, or a future caller reordering the two halves.
+     * Deleting the twins then would put a completion nowhere, which is the fault
+     * of 18 August 2026 exactly, so it discards nothing and says so at the level a
+     * developer will actually see. A visible duplicate is the safe failure here.
+     */
+    if (!adoptEntryState(keep.id, strongest.state)) {
+      console.error(
+        `journlet dedupe: the survivor of ${keep.recurrenceId}:${keep.pageKey} ` +
+          `(${keep.id}) is no longer in the journal, so ${losers.length} ` +
+          `twin(s) were left in place rather than discarded`
+      );
+      continue;
+    }
+    const at = new Date().toISOString();
+    const carried =
+      strongest.state === keep.state ? undefined : strongest.state;
+    losers.forEach((e) => {
+      removeEntry(e.id);
+      recordDedupe({
+        at,
+        rule: e.recurrenceId as string,
+        page: e.pageKey,
+        kept: keep.id,
+        keptState: strongest.state,
+        discarded: e.id,
+        discardedState: e.state,
+        carried,
+      });
+    });
   }
 };
 

@@ -7,6 +7,7 @@ import type { Recurrence } from "../src/lib/types";
 import {
   materialiseRecurrences,
   nextOccurrence,
+  recentDedupes,
   skipOccurrence,
 } from "../src/store/recurrence";
 import {
@@ -333,5 +334,44 @@ describe("materialiseRecurrences", () => {
     expect(
       readAll().find((e) => e.migratedFrom === "twin")
     ).toBeDefined();
+  });
+
+  // The pass is the only code in the app that destroys content on its own
+  // initiative, and until 18 August 2026 it did so without leaving a trace.
+  test("what it discarded is recorded, with the state it carried across", () => {
+    const r = addRecurrence({
+      text: "Standup",
+      type: "task",
+      priority: false,
+      everyN: 1,
+      unit: "day",
+      pageScope: "day",
+      anchor: "2026-07-23",
+      materialisedThrough: "2026-07-23",
+    });
+    materialiseRecurrences();
+    const mine = readAll().find((e) => e.pageKey === "2026-07-24")!;
+    insertEntry({
+      id: "twin",
+      type: "task",
+      text: "Standup",
+      priority: false,
+      state: "done",
+      pageKey: "2026-07-24",
+      createdAt: mine.createdAt + 1000,
+      recurrenceId: r.id,
+    });
+
+    materialiseRecurrences();
+
+    expect(recentDedupes().at(-1)).toMatchObject({
+      rule: r.id,
+      page: "2026-07-24",
+      kept: mine.id,
+      keptState: "done",
+      discarded: "twin",
+      discardedState: "done",
+      carried: "done",
+    });
   });
 });
