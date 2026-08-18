@@ -420,6 +420,23 @@ export const strikeEntry = (id: string): void => {
   doc.transact(() => m.set("state", "struck"));
 };
 
+/**
+ * Set an entry's state outright, for the recurrence dedupe and nothing else.
+ *
+ * Every other writer in this file is a named human action — complete, strike,
+ * migrate — because a state is a thing somebody said about an entry. The dedupe
+ * pass is the one caller that has to move a state rather than make one: when it
+ * discards a twin of an occurrence it must carry what was said about that twin
+ * onto the copy it keeps, or a completion made on one device disappears when
+ * another device's twin merges in (reported 18 August 2026). Deliberately not
+ * offered to the UI, which has the named actions.
+ */
+export const adoptEntryState = (id: string, state: EntryState): void => {
+  const m = findMap(id);
+  if (!m || m.get("state") === state) return;
+  doc.transact(() => m.set("state", state));
+};
+
 // ---------- collections ----------
 
 const toCollection = (m: Y.Map<unknown>): Collection => ({

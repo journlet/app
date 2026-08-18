@@ -15,10 +15,12 @@ import {
   doc,
   entries,
   habits,
+  insertEntry,
   migrateEntry,
   readAll,
   readRecurrences,
   recurrences,
+  toggleStruck,
 } from "../src/store/journal";
 
 const rule = (over: Partial<Recurrence>): Recurrence => ({
@@ -193,5 +195,143 @@ describe("materialiseRecurrences", () => {
     const onDay = readAll().filter((e) => e.pageKey === "2026-07-22");
     expect(onDay).toHaveLength(1);
     expect(onDay[0].state).toBe("struck");
+  });
+
+  // Reported 18 August 2026 (Gary): "I marked something as complete and an hour
+  // or two later the item had re-appeared without any sign as to why."
+  test("a completion survives the dedupe of a twin created elsewhere", () => {
+    const r = addRecurrence({
+      text: "Standup",
+      type: "task",
+      priority: false,
+      everyN: 1,
+      unit: "day",
+      pageScope: "day",
+      anchor: "2026-07-23",
+      materialisedThrough: "2026-07-23",
+    });
+    materialiseRecurrences(); // this device's occurrence for today
+    const mine = readAll().find((e) => e.pageKey === "2026-07-24");
+    expect(mine).toBeDefined();
+
+    // Another device materialised its own twin for the same day while the two
+    // were out of touch, and that is the one that got ticked off there.
+    insertEntry({
+      id: "twin",
+      type: "task",
+      text: "Standup",
+      priority: false,
+      state: "done",
+      pageKey: "2026-07-24",
+      createdAt: mine!.createdAt + 1000,
+      recurrenceId: r.id,
+    });
+
+    materialiseRecurrences(); // dedupe runs on the merged pair
+
+    const onDay = readAll().filter((e) => e.pageKey === "2026-07-24");
+    expect(onDay).toHaveLength(1);
+    expect(onDay[0].state).toBe("done");
+  });
+
+  test("the strongest state wins when both twins were closed differently", () => {
+    const r = addRecurrence({
+      text: "Standup",
+      type: "task",
+      priority: false,
+      everyN: 1,
+      unit: "day",
+      pageScope: "day",
+      anchor: "2026-07-23",
+      materialisedThrough: "2026-07-23",
+    });
+    materialiseRecurrences();
+    const mine = readAll().find((e) => e.pageKey === "2026-07-24")!;
+    toggleStruck(mine.id);
+    insertEntry({
+      id: "twin",
+      type: "task",
+      text: "Standup",
+      priority: false,
+      state: "done",
+      pageKey: "2026-07-24",
+      createdAt: mine.createdAt + 1000,
+      recurrenceId: r.id,
+    });
+
+    materialiseRecurrences();
+
+    const onDay = readAll().filter((e) => e.pageKey === "2026-07-24");
+    expect(onDay).toHaveLength(1);
+    expect(onDay[0].state).toBe("done");
+  });
+
+  test("a twin carrying details of its own is kept rather than deleted", () => {
+    const r = addRecurrence({
+      text: "Standup",
+      type: "task",
+      priority: false,
+      everyN: 1,
+      unit: "day",
+      pageScope: "day",
+      anchor: "2026-07-23",
+      materialisedThrough: "2026-07-23",
+    });
+    materialiseRecurrences();
+    const mine = readAll().find((e) => e.pageKey === "2026-07-24")!;
+    insertEntry({
+      id: "twin",
+      type: "task",
+      text: "Standup",
+      priority: false,
+      details: "ask about the release date",
+      state: "open",
+      pageKey: "2026-07-24",
+      createdAt: mine.createdAt + 1000,
+      recurrenceId: r.id,
+    });
+
+    materialiseRecurrences();
+
+    const onDay = readAll().filter((e) => e.pageKey === "2026-07-24");
+    expect(onDay).toHaveLength(2);
+    expect(onDay.find((e) => e.id === "twin")?.details).toBe(
+      "ask about the release date"
+    );
+  });
+
+  // The mirror image of the fault §11 Q15 fixed: deleting a twin that has been
+  // migrated leaves the copy's `migratedFrom` pointing at nothing.
+  test("a twin that has been migrated is never deleted", () => {
+    const r = addRecurrence({
+      text: "Standup",
+      type: "task",
+      priority: false,
+      everyN: 1,
+      unit: "day",
+      pageScope: "day",
+      anchor: "2026-07-23",
+      materialisedThrough: "2026-07-23",
+    });
+    materialiseRecurrences();
+    const mine = readAll().find((e) => e.pageKey === "2026-07-24")!;
+    insertEntry({
+      id: "twin",
+      type: "task",
+      text: "Standup",
+      priority: false,
+      state: "open",
+      pageKey: "2026-07-24",
+      createdAt: mine.createdAt + 1000,
+      recurrenceId: r.id,
+    });
+    migrateEntry("twin", "2026-07-25");
+
+    materialiseRecurrences();
+
+    expect(readAll().find((e) => e.id === "twin")?.state).toBe("scheduled");
+    expect(
+      readAll().find((e) => e.migratedFrom === "twin")
+    ).toBeDefined();
   });
 });
