@@ -69,6 +69,14 @@ export const needsOnboarding = (i: OnboardingInput): boolean =>
  * exactly one of this and `needsOnboarding` is true whenever a configured,
  * loaded device is signed out. The test pins that, because a state with no
  * screen renders an empty journal and a state with two renders both.
+ *
+ * What made this the most costly gate to get wrong is that "signed out" was, for
+ * the first moments of every launch, a guess. The status was seeded "signed-out"
+ * before Supabase had been asked, so this screen — the one offering to erase the
+ * journal — was what a device with a valid session showed while the check ran,
+ * for up to thirty seconds on a bad connection (reported 19 August 2026, with a
+ * screen recording). The status now starts as "starting" and only becomes this
+ * when Supabase says so, which is what makes the condition mean what it reads as.
  */
 export const needsSignInChoice = (i: OnboardingInput): boolean =>
   i.configured && i.loaded && i.status === "signed-out" && i.hasLocalContent;
@@ -101,6 +109,31 @@ export const needsJournalKey = (i: OnboardingInput): boolean =>
   i.loaded &&
   i.status === "needs-key" &&
   (!i.hasLocalContent || i.removed === true);
+
+/**
+ * Nothing is known yet: the journal is still coming out of IndexedDB, or Supabase
+ * has not said who is signed in (19 August 2026).
+ *
+ * The screens below all answer a question. This one is the absence of an answer,
+ * and it has to be a gate of its own because every other gate here reads false
+ * while it holds — so without it the journal renders, which is the failure this
+ * module keeps finding in new forms. The old shape of it was an empty spread for
+ * a second; the new one was worse, because seeding the status as "signed-out"
+ * made the *sign-in-or-erase* screen the thing that flashed, offering to delete a
+ * journal whose session was fine.
+ *
+ * `loaded` belongs here rather than beside it in App for the same reason: two
+ * conditions that both mean "not yet" reading as one screen is what stops a
+ * launch flickering through three states on the way to the journal.
+ *
+ * An unconfigured build has no account to check, so only the journal load counts
+ * — the development mode must not sit behind a question nobody will answer.
+ */
+export const isStarting = (i: {
+  configured: boolean;
+  status: SyncStatus;
+  loaded: boolean;
+}): boolean => !i.loaded || (i.configured && i.status === "starting");
 
 export interface LoadGateInput {
   configured: boolean;

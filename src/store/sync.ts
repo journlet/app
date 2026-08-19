@@ -73,6 +73,11 @@ import {
 } from "../lib/pendingKey";
 import { markKeySaved } from "../lib/keySaved";
 import { markRecoveryPending } from "../lib/recoveryAck";
+import {
+  forgetSession,
+  markSessionSeen,
+  sessionSeen,
+} from "../lib/sessionMark";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import {
   clearError,
@@ -1540,26 +1545,112 @@ export const retryConnect = async (): Promise<void> => {
 
 // ---------- public API ----------
 
+/**
+ * How long a launch waits on Supabase before opening the journal anyway.
+ *
+ * Supabase's own ceiling is its auto-refresh tick, thirty seconds, and it will
+ * use all of it retrying a token refresh on a network that half works. Half a
+ * minute of splash screen is not a launch, and this app's first duty on opening
+ * is to be ready to take an entry.
+ *
+ * Four seconds is long enough that a working network never reaches it — a
+ * refresh on 4G is a few hundred milliseconds — and short enough to feel like a
+ * launch rather than a hang. Reaching it is not a decision about the session:
+ * the journal opens offline and the answer, whenever it lands, is still obeyed.
+ */
+const AUTH_WAIT_MS = 4000;
+
 export const startSync = (): void => {
   if (started || !supabase) return;
   started = true;
   enforcePendingKeyExpiry();
   stashKeyFromUrl();
 
-  supabase.auth.onAuthStateChange((_event, s) => {
+  // Everything below is about one question: has Supabase answered yet? Until it
+  // has, the status is "starting" and the app shows the splash rather than
+  // guessing (see store/syncStatus.ts).
+  let answered = false;
+  /**
+   * Has Supabase destroyed the session itself?
+   *
+   * It fires SIGNED_OUT whenever it does, and it only does so when the session
+   * is genuinely dead: a refresh token the server rejected, or stored session
+   * data that will not parse. A refresh that failed on the network is explicitly
+   * not one of those — Supabase keeps the session and retries — so this flag is
+   * what separates "you are signed out" from "I could not check".
+   */
+  let destroyed = false;
+
+  /**
+   * Stop waiting and open the journal, offline.
+   *
+   * Only for a device that has held a session before. One that has not is a
+   * fresh install, where opening the journal early would skip onboarding and
+   * start writing entries into a keyring that may yet have to be replaced by the
+   * account's own (decision 3) — it keeps waiting instead, and Supabase's own
+   * ceiling bounds that.
+   *
+   * "offline" rather than "pending" because it is the honest word: the server
+   * could not be reached. It is also a state the rest of the app already knows —
+   * capture works, nothing warns, and the Sync screen says what it is waiting
+   * for — where a status invented for this moment would need answers everywhere.
+   */
+  const openOffline = (): void => {
+    if (answered || getSyncStatus() !== "starting" || !sessionSeen()) return;
+    setStatus("offline");
+  };
+
+  // Offline at launch is not worth waiting four seconds to discover: a token
+  // refresh cannot succeed with no network, so the journal opens now. This is
+  // §6.1b's aeroplane, and it should look like an app that opens.
+  if (!navigator.onLine) openOffline();
+  const waiting = setTimeout(openOffline, AUTH_WAIT_MS);
+
+  supabase.auth.onAuthStateChange((event, s) => {
     const wasUser = session?.user.id;
+    if (event === "SIGNED_OUT") destroyed = true;
     session = s;
-    if (!s) {
+    if (s) {
+      answered = true;
+      clearTimeout(waiting);
+      markSessionSeen();
+      if (s.user.id !== wasUser || !connectedUserId) void connect();
+      return;
+    }
+    // No session, and the two reasons for that need opposite screens.
+    if (destroyed || !sessionSeen()) {
+      answered = true;
+      clearTimeout(waiting);
+      forgetSession();
       teardown();
       // signOutAndWipe() signs out locally, so this fires straight after it.
       // "Not signed in" would be true and useless — it would read as a
       // spontaneous logout with no cause given, which is precisely the
       // confusion this whole change exists to remove.
       setStatus("signed-out");
-    } else if (s.user.id !== wasUser || !connectedUserId) {
-      void connect();
+      return;
     }
+    // Supabase could not tell us. Nothing is torn down and nothing is claimed:
+    // the journal stays on screen, capture keeps working, and the check is made
+    // again the moment there is a network or the app is looked at (below).
+    clearTimeout(waiting);
+    setStatus("offline");
   });
+
+  /**
+   * Ask again, for a device whose session could not be verified.
+   *
+   * refreshSession() rather than getSession(), because getSession() would hand
+   * back the same unverified answer from storage without going near the server.
+   * Whichever way it resolves, the auth listener above is what acts on it: a
+   * session arrives as an event and connects, and a refresh token the server
+   * rejects makes Supabase destroy the session and fire SIGNED_OUT, which is the
+   * signed-out screen appearing at the first honest opportunity to show it.
+   */
+  const recheck = (): void => {
+    if (session || answered || !sessionSeen()) return;
+    void supabase.auth.refreshSession();
+  };
 
   // Removal is a mark in the encrypted register since §12.1 phase 7, so this is where
   // a removed device finds out: the mark arrives as ordinary journal content, on the
@@ -1575,6 +1666,7 @@ export const startSync = (): void => {
 
   window.addEventListener("online", () => {
     if (session) void connect().then(() => dirty && reconcile("online"));
+    else recheck();
   });
   window.addEventListener("offline", () => {
     if (session) setStatus("offline");
@@ -1583,7 +1675,14 @@ export const startSync = (): void => {
   // Suspended devices (iOS PWAs especially) miss realtime events with no
   // replay — catch up whenever the app comes back to the foreground
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible" || !session) return;
+    if (document.visibilityState !== "visible") return;
+    if (!session) {
+      // An unverified device is the case that matters here: an iOS PWA resumed
+      // hours later is exactly where a launch-time network failure would
+      // otherwise persist, since nothing else would ask again.
+      recheck();
+      return;
+    }
     if (connectedUserId) void reconcile("visibility");
     else void connect();
   });
@@ -1637,6 +1736,11 @@ export const verifyEmailCode = async (
 const wipeThisDevice = async (): Promise<void> => {
   session = null;
   ring = null;
+  // Explicitly, rather than leaving it to the SIGNED_OUT the sign-out fires.
+  // That event does clear it, but signing out offline never reaches Supabase to
+  // raise one, and a mark left behind would tell the next launch to wait for a
+  // session on a device that has just erased everything it had.
+  forgetSession();
   await wipeLocalJournal();
   await wipeKeys();
   // Reminders track fired entry ids that no longer exist; reset the active

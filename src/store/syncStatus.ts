@@ -25,6 +25,7 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 
 export type SyncStatus =
   | "disabled" // no Supabase config in the build
+  | "starting" // configured, and Supabase has not yet said who is signed in
   | "signed-out"
   | "connecting"
   | "needs-key" // remote journal uses a different journal key
@@ -54,8 +55,26 @@ export interface SyncSnapshot {
   readonly removed: boolean;
 }
 
+/**
+ * "starting" rather than "signed-out", which is the whole of the 19 August 2026
+ * fix in one line.
+ *
+ * A launch begins knowing nothing: Supabase reads the stored session
+ * asynchronously and, whenever the access token is inside its expiry margin,
+ * refreshes it over the network before it will name the user. Seeding
+ * "signed-out" stated the answer to that question before it had been asked, and
+ * the gates in lib/onboarding could not tell the guess from a fact — so a device
+ * with a perfectly good session showed the sign-in-or-erase screen for as long as
+ * the check took. On a network that half works, that is up to thirty seconds of
+ * Supabase's own retry backoff.
+ *
+ * The state is separate rather than encoded as a null status because every
+ * consumer has to choose what to do with it, and a Record over SyncStatus makes
+ * them: no gate treats it as signed out, and the screen it shows says which
+ * question is outstanding rather than answering it.
+ */
 const initial = (): SyncSnapshot => ({
-  status: isConfigured() ? "signed-out" : "disabled",
+  status: isConfigured() ? "starting" : "disabled",
   error: null,
   removed: false,
 });

@@ -32,6 +32,10 @@ import type { SyncStatus } from "../store/sync";
  */
 const WARNS: Record<SyncStatus, boolean> = {
   disabled: false,
+  // Nothing is known yet, so there is nothing honest to warn about — and the
+  // journal is behind the starting splash in this state anyway, which is where
+  // the question this banner would ask is already being answered.
+  starting: false,
   "signed-out": true,
   connecting: false,
   "needs-key": false,

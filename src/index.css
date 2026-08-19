@@ -186,6 +186,23 @@ body {
     transform: rotate(360deg);
   }
 }
+/* The step currently running, on the React-rendered half of the launch screen
+   (ui/StartingView). Absent from the markup in index.html deliberately: before
+   the bundle runs there is nothing truthful to put here, and a line that
+   appeared a beat after the spinner would read as something having gone wrong.
+
+   --ink-soft rather than --ink: the wordmark is what the eye should land on,
+   and this is a caption to it. That colour carries the small-text contrast
+   burden across both palettes (see the palette note above), which is why the
+   size stops at 13px. */
+.boot-status {
+  margin: -8px 0 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink-soft);
+  text-align: center;
+  padding: 0 24px;
+}
 /* Reduced motion means no rotation — an indefinitely spinning object is
    exactly what that preference is asking to be spared. The element still has
    to say "working", so it breathes on opacity instead: the ring is complete

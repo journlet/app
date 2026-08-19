@@ -89,6 +89,7 @@ const coarseTime = (ms: number): string => {
 
 const STATUS_LABEL: Record<SyncStatus, string> = {
   disabled: "sync not configured in this build",
+  starting: "checking your account…",
   "signed-out": "not signed in",
   connecting: "connecting…",
   "needs-key": "journal key needed",
