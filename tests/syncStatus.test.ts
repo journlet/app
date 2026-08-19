@@ -44,8 +44,16 @@ describe("the snapshot as useSyncExternalStore needs it", () => {
     const held = getSyncSnapshot();
     setStatus("connecting");
     setError("something went wrong");
-    expect(held.status).toBe("signed-out");
+    expect(held.status).toBe("starting");
     expect(held.error).toBeNull();
+  });
+
+  test("a configured build begins knowing nothing, not signed out", () => {
+    // The 19 August 2026 fix, at its source. Seeding "signed-out" answered a
+    // question Supabase had not been asked yet, and lib/onboarding could not
+    // tell that guess from a fact — so a device with a valid session was shown
+    // the screen offering to erase its journal while the account check ran.
+    expect(getSyncStatus()).toBe("starting");
   });
 });
 

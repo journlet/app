@@ -113,10 +113,12 @@ import SignedOutView from "./ui/SignedOutView";
 import RecoveryCodeView from "./ui/RecoveryCodeView";
 import UnlockView from "./ui/UnlockView";
 import CannotLoadView from "./ui/CannotLoadView";
+import StartingView from "./ui/StartingView";
 import NotSyncingBanner, { notSyncingReason } from "./ui/NotSyncingBanner";
 import {
   cannotLoadYet,
   isSettling,
+  isStarting,
   needsJournalKey,
   needsOnboarding,
   needsRecoveryCode,
@@ -741,6 +743,16 @@ export default function App() {
   // both mean entries are reaching nothing, and they need different words.
   const stalled = notSyncingReason(syncStatus, sync.error);
 
+  // Nothing decided yet: the journal is still opening, or Supabase has not said
+  // who is signed in. First, because every gate below reads false while it holds
+  // — including the one that offers to erase the journal, which is what a valid
+  // session used to be shown while the account check ran (19 August 2026).
+  const starting = isStarting({
+    configured: isConfigured(),
+    status: syncStatus,
+    loaded,
+  });
+
   // Fresh install with sync configured: sign in before there is a journal at
   // all (decision 3, spec device-identity-design.md). A signed-out device that
   // already holds content gets the screen below instead — see lib/onboarding.
@@ -826,7 +838,13 @@ export default function App() {
   // two that matter most are the capture launcher and the capture form, where the
   // consequence is an entry written into a journal nobody is looking at.
   const journalOnScreen =
-    !onboarding && !choosing && !unlocking && !showRecovery && !stuck && !settling;
+    !starting &&
+    !onboarding &&
+    !choosing &&
+    !unlocking &&
+    !showRecovery &&
+    !stuck &&
+    !settling;
   useEffect(() => {
     if (!showRecovery || recoveryCode) return;
     // If the code cannot be read there is nothing useful to show, so let the
@@ -1362,7 +1380,13 @@ export default function App() {
         {journalOnScreen && stalled && hasLocalContent && view !== "sync" && (
           <NotSyncingBanner reason={stalled} onOpenSync={() => setView("sync")} />
         )}
-        {!loaded && <div style={S.empty}>opening journal…</div>}
+        {/* Covers the whole screen, so it continues the pre-JS splash in
+            index.html rather than appearing beneath a header. What it replaced
+            was a bare "opening journal…" line with the empty journal already
+            drawn around it. */}
+        {starting && (
+          <StartingView loaded={loaded} checkingAccount={syncStatus === "starting"} />
+        )}
         {onboarding && (
           <OnboardingView>
             <SyncView />
@@ -1384,10 +1408,10 @@ export default function App() {
             <SyncView />
           </SignedOutView>
         )}
-        {!onboarding && !unlocking && settling && (
+        {!starting && !onboarding && !unlocking && settling && (
           <div style={S.empty}>opening your journal…</div>
         )}
-        {!onboarding && !unlocking && !settling && stuck && (
+        {!starting && !onboarding && !unlocking && !settling && stuck && (
           <CannotLoadView
             error={sync.error}
             offline={syncStatus === "offline"}

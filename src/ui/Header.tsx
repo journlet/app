@@ -12,6 +12,7 @@ import { S } from "./styles";
 // attention colour when something needs the user.
 const SYNC_BADGE: Record<SyncStatus, string> = {
   disabled: "sync",
+  starting: "sync · starting…",
   "signed-out": "sync · signed out",
   connecting: "sync · connecting…",
   "needs-key": "sync · key needed",

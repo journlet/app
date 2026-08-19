@@ -9,6 +9,7 @@ import { describe, expect, test } from "vitest";
 import {
   cannotLoadYet,
   isSettling,
+  isStarting,
   needsJournalKey,
   needsOnboarding,
   needsRecoveryCode,
@@ -65,6 +66,7 @@ describe("what must never be gated", () => {
     // a session and is being asked for the journal key, and starting it over
     // at the email step would strand it.
     for (const status of [
+      "starting",
       "connecting",
       "needs-key",
       "synced",
@@ -121,6 +123,7 @@ describe("a signed-in device that cannot open the journal", () => {
 
   test("no other state asks for a key", () => {
     for (const status of [
+      "starting",
       "signed-out",
       "connecting",
       "synced",
@@ -136,6 +139,7 @@ describe("a signed-in device that cannot open the journal", () => {
     // They render different screens in the same place, so overlapping would be
     // a bug whichever won.
     for (const status of [
+      "starting",
       "signed-out",
       "needs-key",
       "connecting",
@@ -194,6 +198,16 @@ describe("signed out with a journal already on the device", () => {
     ] as const) {
       expect(needsSignInChoice({ ...lapsed, status })).toBe(false);
     }
+  });
+
+  test("and never before Supabase has said whether there is one", () => {
+    // The 19 August 2026 report, as a predicate. This screen offers to erase the
+    // journal, and it was what a device with a perfectly good session showed for
+    // as long as the account check took — seconds, on a connection that half
+    // works, because the status was seeded "signed-out" before anything had been
+    // asked. "starting" is that question staying open until it has an answer.
+    expect(needsSignInChoice({ ...lapsed, status: "starting" })).toBe(false);
+    expect(needsOnboarding({ ...fresh, status: "starting" })).toBe(false);
   });
 
   test("exactly one screen answers a signed-out device", () => {
@@ -360,6 +374,7 @@ describe("a device that cannot load the journal", () => {
     // screen, except "synced", where an empty journal really is empty, and
     // "disabled", which is the development build.
     for (const status of [
+      "starting",
       "signed-out",
       "needs-key",
       "connecting",
@@ -368,6 +383,7 @@ describe("a device that cannot load the journal", () => {
     ] as const) {
       const base = { configured: true, loaded: true, hasLocalContent: false };
       const claimed =
+        isStarting({ ...base, status }) ||
         needsOnboarding({ ...base, status }) ||
         needsJournalKey({ ...base, status }) ||
         cannotLoadYet({ ...base, status, syncedOnce: false }) ||
@@ -379,6 +395,7 @@ describe("a device that cannot load the journal", () => {
   test("never overlaps the other gates", () => {
     // Four screens compete for one slot, so any overlap is a bug whichever wins.
     for (const status of [
+      "starting",
       "signed-out",
       "needs-key",
       "connecting",
@@ -392,7 +409,50 @@ describe("a device that cannot load the journal", () => {
       const onboard = needsOnboarding({ ...base, status });
       const key = needsJournalKey({ ...base, status });
       const settle = isSettling({ ...base, status, syncedOnce: false });
-      expect([load, onboard, key, settle].filter(Boolean).length).toBeLessThan(2);
+      const start = isStarting({ ...base, status });
+      expect(
+        [load, onboard, key, settle, start].filter(Boolean).length
+      ).toBeLessThan(2);
     }
+  });
+});
+
+describe("a launch that has not decided anything yet", () => {
+  /** Configured, signed in, journal open: nothing outstanding. */
+  const running: OnboardingInput = { ...fresh, status: "synced" };
+
+  test("holds the screen while the journal is still opening", () => {
+    expect(isStarting({ ...running, loaded: false })).toBe(true);
+  });
+
+  test("holds it while Supabase has not said who is signed in", () => {
+    // The state the 19 August 2026 fix introduced, and the reason it needed a
+    // gate of its own: every other predicate here reads false for it, so without
+    // this one the journal renders before anything is known.
+    expect(isStarting({ ...running, status: "starting" })).toBe(true);
+  });
+
+  test("lets go the moment both are answered", () => {
+    for (const status of [
+      "signed-out",
+      "needs-key",
+      "connecting",
+      "synced",
+      "pending",
+      "offline",
+    ] as const) {
+      expect(isStarting({ ...running, status })).toBe(false);
+    }
+  });
+
+  test("a build without sync waits only for the journal", () => {
+    // The development mode has no account to check, so holding it behind one
+    // would be holding it behind a question nobody is going to answer.
+    expect(isStarting({ configured: false, status: "disabled", loaded: true })).toBe(
+      false
+    );
+    expect(isStarting({ configured: false, status: "disabled", loaded: false })).toBe(
+      true
+    );
   });
 });
