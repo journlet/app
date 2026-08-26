@@ -29,6 +29,7 @@ const renderMenu = (over: Partial<Parameters<typeof MenuView>[0]> = {}) => {
     onOpenIndex: vi.fn(),
     onOpenSearch: vi.fn(),
     onOpenSync: vi.fn(),
+    onOpenFeedback: vi.fn(),
     onExport: vi.fn(),
     onBackup: vi.fn(),
     onRestore: vi.fn(async () => "Restored 3 entries from that backup."),

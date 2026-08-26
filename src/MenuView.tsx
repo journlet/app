@@ -59,6 +59,7 @@ interface Props {
   onOpenIndex: () => void;
   onOpenSearch: () => void;
   onOpenSync: () => void;
+  onOpenFeedback: () => void;
   onExport: () => void;
   onBackup: () => void;
   /** Returns what to tell the user, whether it worked or not. */
@@ -75,6 +76,7 @@ export default function MenuView({
   onOpenIndex,
   onOpenSearch,
   onOpenSync,
+  onOpenFeedback,
   onExport,
   onBackup,
   onRestore,
@@ -406,6 +408,29 @@ export default function MenuView({
                 {o.label}
               </button>
             ))}
+          </div>
+        </div>
+      </section>
+      {/* Last, and its own section rather than a line in Preferences: it is not a
+          setting, and burying the one route by which somebody can say the app is
+          wrong would be a strange thing to optimise for. The address is written out
+          as well as linked, because a device with no mail client configured needs
+          something it can copy (spec §13.1). */}
+      <section style={ST.group}>
+        <div style={ST.groupLabel}>Feedback</div>
+        <div style={ST.row}>
+          <div style={ST.rowText}>
+            <div style={ST.rowLabel}>Send feedback</div>
+            <div style={ST.rowDesc}>
+              Report something broken, or say what you would change. Composed here
+              and sent from your own mail app to hello@journlet.com, so you read it
+              before it leaves. Nothing from your journal is attached.
+            </div>
+          </div>
+          <div style={ST.rowBtn}>
+            <button className="miniBtn" onClick={onOpenFeedback}>
+              send feedback
+            </button>
           </div>
         </div>
       </section>

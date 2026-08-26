@@ -21,6 +21,7 @@ import IndexView from "./IndexView";
 import CollectionView from "./CollectionView";
 import SyncView from "./SyncView";
 import MenuView from "./MenuView";
+import FeedbackView from "./ui/FeedbackView";
 import { download } from "./lib/download";
 import { buildMarkdown } from "./lib/exportMd";
 import {
@@ -141,6 +142,7 @@ type View =
   | "menu"
   | "future"
   | "search"
+  | "feedback"
   | { col: string };
 
 // Future log fold state is a device preference, not journal content —
@@ -1490,6 +1492,17 @@ export default function App() {
         {journalOnScreen && loaded && view === "sync" && (
           <SyncView />
         )}
+        {/* Reached from the Menu, so it needs a journal on screen like the rest.
+            The case this cannot serve is somebody stuck before that point, on the
+            unlock or sign-in screen, which is why the site carries the address too
+            (spec §13.1). */}
+        {journalOnScreen && loaded && view === "feedback" && (
+          <FeedbackView
+            syncStatus={syncStatus}
+            syncError={sync.error}
+            installed={install.mode === "hidden"}
+          />
+        )}
         {journalOnScreen && loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
@@ -1501,6 +1514,7 @@ export default function App() {
             onOpenIndex={() => setView("index")}
             onOpenSearch={openSearch}
             onOpenSync={() => setView("sync")}
+            onOpenFeedback={() => setView("feedback")}
             onExport={() => {
               const md = buildMarkdown(days, collections, habits);
               download(
@@ -1597,6 +1611,9 @@ export default function App() {
       {journalOnScreen &&
         view !== "sync" &&
         view !== "menu" &&
+        // Writing feedback is not writing in the journal, and the launcher would
+        // sit over the message box with the keyboard already up.
+        view !== "feedback" &&
         // Search is a screen for finding, not writing: the bar would sit over
         // the results and the keyboard has the room instead. It is also the
         // one page where a Find button would point at itself.

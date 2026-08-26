@@ -32,6 +32,7 @@ const renderMenu = () =>
       onOpenIndex={vi.fn()}
       onOpenSearch={vi.fn()}
       onOpenSync={vi.fn()}
+      onOpenFeedback={vi.fn()}
       onExport={vi.fn()}
       onBackup={vi.fn()}
       onRestore={vi.fn(async () => "")}
@@ -66,7 +67,12 @@ describe("approaching the cap", () => {
     await waitFor(() =>
       expect(screen.getByText(/Nearly full/)).toBeTruthy()
     );
-    expect(screen.getByText(/hello@journlet.com/)).toBeTruthy();
+    // Read out of the warning itself rather than off the page. The feedback row
+    // added on 26 August 2026 names the same mailbox, so a page-wide match now
+    // finds two and fails on the count, which would say nothing about this row.
+    expect(screen.getByText(/Nearly full/).textContent).toContain(
+      "hello@journlet.com"
+    );
     // And says what does not stop, because the alarming reading is the wrong one.
     expect(screen.getByText(/Writing here keeps working/)).toBeTruthy();
   });
