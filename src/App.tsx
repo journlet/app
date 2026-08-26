@@ -157,8 +157,9 @@ type View =
   | "feedback"
   | { col: string };
 
-// Future log fold state is a device preference, not journal content —
-// kept local like sticky capture state, never synced
+// Fold state is a device preference, not journal content — kept local like
+// sticky capture state, never synced. Keys are namespaced: a Future log month
+// is its own page key, the spread's repeating group is `later:<month>`.
 const FOLDS_KEY = "journlet-futurelog-folds";
 
 // Honour the OS "reduce motion" setting for scripted scrolling, as the CSS
@@ -241,7 +242,8 @@ export default function App() {
   // floor and may reach back into the past.
   const [moveAnchor, setMoveAnchor] = useState(todayKey());
   const [moveGran, setMoveGran] = useState<Scope>("day");
-  // Folded Future log month groups (device preference, see FOLDS_KEY)
+  // Folded groups: Future log months and the spread's repeating group
+  // (device preference, see FOLDS_KEY)
   const [folds, setFolds] = useState<Record<string, boolean>>(() => {
     try {
       return JSON.parse(localStorage.getItem(FOLDS_KEY) || "{}");
@@ -249,9 +251,13 @@ export default function App() {
       return {};
     }
   });
-  const toggleFold = (gk: string) =>
+  // `defaultFolded` carries the group's own default, because they differ: a
+  // Future log month starts open, "Later this month"'s repeats start folded
+  // (spec §11 Q19). Without it the first tap on a folded-by-default group
+  // flips `undefined` to `true` and nothing appears to happen.
+  const toggleFold = (gk: string, defaultFolded = false) =>
     setFolds((f) => {
-      const next = { ...f, [gk]: !f[gk] };
+      const next = { ...f, [gk]: !(f[gk] ?? defaultFolded) };
       try {
         localStorage.setItem(FOLDS_KEY, JSON.stringify(next));
       } catch {
@@ -1641,6 +1647,8 @@ export default function App() {
             scheduledRows={scheduledRows}
             laterThisMonth={laterThisMonth}
             futureLogCount={futureLogCount}
+            folds={folds}
+            onToggleFold={toggleFold}
             filter={filter}
             filterRow={
               filterOpen ? (
