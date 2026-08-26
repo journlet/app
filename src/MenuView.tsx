@@ -423,8 +423,9 @@ export default function MenuView({
             <div style={ST.rowLabel}>Send feedback</div>
             <div style={ST.rowDesc}>
               Report something broken, or say what you would change. Composed here
-              and sent from your own mail app to hello@journlet.com, so you read it
-              before it leaves. Nothing from your journal is attached.
+              and sent to hello@journlet.com from wherever you write email, in a
+              browser or in a mail app, so you read it before it leaves. Nothing
+              from your journal is attached.
             </div>
           </div>
           <div style={ST.rowBtn}>

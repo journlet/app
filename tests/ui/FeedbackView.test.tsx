@@ -2,11 +2,14 @@
 //
 // The feedback screen (spec §13.1).
 //
-// What these tests hold in place is the not-overclaiming. The report has to be on
-// screen and editable, because a described block is one nobody can consent to; the
-// confirmation has to stop at "your mail app should be open", because this app
-// cannot see a sent message; and the draft has to come back, because the moment
-// somebody wants to report a fault is often the moment they get interrupted.
+// What these tests hold in place is the not-overclaiming, and one thing that had to
+// be learned the hard way. The routes are plural: the first version of this screen
+// made a mailto: the primary action and the clipboard a footnote, and the first
+// person to use it had no mail client and got macOS Mail's Add Account dialog. So
+// there is a test here that all three routes are offered at once, and a test that
+// a report too long for a mail link does not take the browser composer down with
+// it. The rest is the honesty: the report on screen and editable, a confirmation
+// that stops at "a composer should be open", and a draft that comes back.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -32,9 +35,13 @@ const renderView = (over: { syncError?: string | null; installed?: boolean } = {
     />
   );
 
-const messageBox = () => screen.getByLabelText("Your message");
+const messageBox = () => screen.getByLabelText("Your message") as HTMLTextAreaElement;
 const reportBox = () =>
   screen.getByLabelText("The report that will be attached") as HTMLTextAreaElement;
+const gmailLink = () => screen.getByText("open Gmail") as HTMLAnchorElement;
+const mailLink = () => screen.getByText("open mail app") as HTMLAnchorElement;
+const write = (text: string) =>
+  fireEvent.change(messageBox(), { target: { value: text } });
 
 beforeEach(() => {
   vi.unstubAllGlobals();
@@ -54,11 +61,11 @@ describe("the report", () => {
 
   test("can be emptied, and then nothing of it is attached", () => {
     renderView();
-    fireEvent.change(messageBox(), { target: { value: "the week page scrolls oddly" } });
+    write("the week page scrolls oddly");
     fireEvent.change(reportBox(), { target: { value: "" } });
-    const link = screen.getByText("Open my mail app") as HTMLAnchorElement;
-    expect(decodeURIComponent(link.href)).toContain("the week page scrolls oddly");
-    expect(decodeURIComponent(link.href)).not.toContain("Journlet report");
+    const sent = decodeURIComponent(mailLink().href);
+    expect(sent).toContain("the week page scrolls oddly");
+    expect(sent).not.toContain("Journlet report");
   });
 
   test("says in words that no journal content is in it", () => {
@@ -67,64 +74,121 @@ describe("the report", () => {
   });
 });
 
-describe("sending", () => {
-  test("the link goes to the feedback mailbox and carries the message", () => {
+describe("the ways to send it", () => {
+  // The finding, as a test. Somebody who reads email in a browser and has no mail
+  // client must not meet a screen whose only real action is a mailto:.
+  test("offers a browser composer, a mail app and the clipboard, all at once", () => {
     renderView();
-    fireEvent.change(messageBox(), { target: { value: "a thought" } });
-    const link = screen.getByText("Open my mail app") as HTMLAnchorElement;
-    expect(link.href.startsWith("mailto:hello@journlet.com?")).toBe(true);
+    write("a thought");
+    expect(gmailLink()).toBeTruthy();
+    expect(mailLink()).toBeTruthy();
+    expect(screen.getByText("copy the report")).toBeTruthy();
+  });
+
+  test("Gmail opens its own composer, in another tab, carrying the message", () => {
+    renderView();
+    write("a thought");
+    const link = gmailLink();
+    expect(link.href.startsWith("https://mail.google.com/mail/?view=cm")).toBe(true);
     expect(decodeURIComponent(link.href)).toContain("a thought");
+    expect(decodeURIComponent(link.href)).toContain("hello@journlet.com");
+    // A new tab, or the app would navigate away from an unsent draft.
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toContain("noreferrer");
   });
 
-  test("the subject follows the chosen kind", () => {
+  test("the mail app route goes to the feedback mailbox", () => {
     renderView();
-    fireEvent.change(messageBox(), { target: { value: "a thought" } });
+    write("a thought");
+    expect(mailLink().href.startsWith("mailto:hello@journlet.com?")).toBe(true);
+  });
+
+  test("the subject follows the chosen kind, on both routes", () => {
+    renderView();
+    write("a thought");
     fireEvent.click(screen.getByText("An idea"));
-    const link = screen.getByText("Open my mail app") as HTMLAnchorElement;
-    expect(decodeURIComponent(link.href)).toContain("Journlet: an idea");
+    expect(decodeURIComponent(gmailLink().href)).toContain("Journlet: an idea");
+    expect(decodeURIComponent(mailLink().href)).toContain("Journlet: an idea");
   });
 
-  test("an empty message cannot be sent, so no blank email arrives", () => {
+  test("an empty message cannot be sent by any route, so no blank email arrives", () => {
     renderView();
-    const link = screen.getByText("Open my mail app");
-    expect(link.getAttribute("aria-disabled")).toBe("true");
+    expect(gmailLink().getAttribute("aria-disabled")).toBe("true");
+    expect(mailLink().getAttribute("aria-disabled")).toBe("true");
+    expect((screen.getByText("copy the report") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  test("claims only that a mail app was opened, never that anything was sent", () => {
+  test("a report too long for a mail link does not take Gmail down with it", () => {
+    // The two limits are different because the constraints are: a mail client's
+    // URL handler is not a browser address bar. Refusing both would send somebody
+    // to the clipboard for no reason.
     renderView();
-    fireEvent.change(messageBox(), { target: { value: "a thought" } });
-    fireEvent.click(screen.getByText("Open my mail app"));
+    fireEvent.change(reportBox(), { target: { value: "x".repeat(2000) } });
+    write("a thought");
+    expect(screen.queryByText("open mail app")).toBeNull();
+    expect(screen.getByText("too long")).toBeTruthy();
+    expect(gmailLink()).toBeTruthy();
+  });
+
+  test("the clipboard is always there, whatever the length", () => {
+    renderView();
+    fireEvent.change(reportBox(), { target: { value: "x".repeat(20000) } });
+    write("a thought");
+    expect((screen.getByText("copy the report") as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("what it claims afterwards", () => {
+  test("says a composer should be open, never that anything was sent", () => {
+    renderView();
+    write("a thought");
+    fireEvent.click(mailLink());
     expect(screen.getByText(/Nothing has been sent until you send it there/)).toBeTruthy();
     // The words a screen like this usually reaches for, and cannot honestly use.
     expect(screen.queryByText(/thank you for your feedback/i)).toBeNull();
   });
 
-  test("a report too long for a mail link is refused, not truncated", () => {
+  test("the mail app note names the dead end that started all this", () => {
     renderView();
-    fireEvent.change(reportBox(), { target: { value: "x".repeat(2000) } });
-    fireEvent.change(messageBox(), { target: { value: "a thought" } });
-    expect(screen.queryByText("Open my mail app")).toBeNull();
-    expect(screen.getByText(/longer than a mail link can carry/)).toBeTruthy();
+    write("a thought");
+    fireEvent.click(mailLink());
+    expect(screen.getByText(/asked to set up an account instead/)).toBeTruthy();
+  });
+
+  test("each route says what it actually did", () => {
+    renderView();
+    write("a thought");
+    fireEvent.click(gmailLink());
+    expect(screen.getByText(/Gmail should now be open in another tab/)).toBeTruthy();
+    expect(screen.queryByText(/Your mail app should now be open/)).toBeNull();
+  });
+
+  test("editing after sending drops the note, which would now describe the old text", () => {
+    renderView();
+    write("a thought");
+    fireEvent.click(gmailLink());
+    write("a different thought");
+    expect(screen.queryByText(/Gmail should now be open/)).toBeNull();
   });
 });
 
 describe("the draft", () => {
   test("comes back on the next visit, which is what being interrupted needs", () => {
     renderView();
-    fireEvent.change(messageBox(), { target: { value: "half a sentence" } });
+    write("half a sentence");
     cleanup();
     renderView();
-    expect((messageBox() as HTMLTextAreaElement).value).toBe("half a sentence");
+    expect(messageBox().value).toBe("half a sentence");
   });
 
   test("clearing it empties the box and leaves nothing stored", () => {
     renderView();
-    fireEvent.change(messageBox(), { target: { value: "never mind" } });
+    write("never mind");
     fireEvent.click(screen.getByText("clear this draft"));
-    expect((messageBox() as HTMLTextAreaElement).value).toBe("");
+    expect(messageBox().value).toBe("");
     cleanup();
     renderView();
-    expect((messageBox() as HTMLTextAreaElement).value).toBe("");
+    expect(messageBox().value).toBe("");
   });
 
   test("the diagnostics are not carried over, since a stale block would misreport", () => {
@@ -132,10 +196,10 @@ describe("the draft", () => {
     // describe that day's build and sync state and be read as describing this one.
     renderView();
     fireEvent.change(reportBox(), { target: { value: "edited to nothing useful" } });
-    fireEvent.change(messageBox(), { target: { value: "keep me" } });
+    write("keep me");
     cleanup();
     renderView();
-    expect((messageBox() as HTMLTextAreaElement).value).toBe("keep me");
+    expect(messageBox().value).toBe("keep me");
     expect(reportBox().value).toContain("sync: synced");
   });
 });

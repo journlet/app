@@ -2,14 +2,22 @@
 // tell the operator something, and the reasoning for it being email rather than a
 // table is in lib/feedback.ts.
 //
-// Three things this screen has to get right, all of them about not overclaiming.
+// Four things this screen has to get right, and the first was got wrong for a day.
 //
-// It cannot know whether anything was sent. Handing a mailto: URL to the platform
-// is the last thing this app does; whether a mail client opened, and whether the
-// person then pressed send, is invisible here. So the button says what it does,
-// "Open my mail app", and the line after it says plainly that nothing has gone
-// anywhere until they send it there. A "thanks, we got that" would be a lie a
-// good half of the time.
+// There is more than one way to send an email, and this screen used to assume one.
+// The primary action was a mailto: link, with the clipboard as a footnote for
+// "a device with no mail client configured". On the first use by anybody but the
+// author that footnote turned out to be the ordinary case: Gmail in a browser, no
+// mail client, and the button produced macOS Mail's Add Account dialog. So the
+// routes are now three plainly labelled rows, in this app's usual idiom, and none
+// of them is guessed at, because nothing here can detect which one will work and a
+// wrong guess costs somebody their report.
+//
+// It cannot know whether anything was sent. Handing a URL to the platform is the
+// last thing this app does; whether a composer opened, and whether the person then
+// pressed send, is invisible here. So each button says what it does and the line
+// after it says plainly that nothing has gone anywhere yet. A "thanks, we got
+// that" would be a lie a good half of the time.
 //
 // The report has to be readable before it travels. It is shown in an editable box
 // rather than described in a sentence, because "diagnostic information" is a
@@ -32,6 +40,7 @@ import {
   clearDraft,
   diagnosticText,
   feedbackBody,
+  feedbackGmail,
   feedbackMailto,
   loadDraft,
   saveDraft,
@@ -50,6 +59,9 @@ const KINDS: { value: FeedbackKind; label: string }[] = [
   { value: "idea", label: "An idea" },
   { value: "other", label: "Something else" },
 ];
+
+/** Which route was taken, so the note afterwards describes what actually happened. */
+type Taken = "gmail" | "mail" | "copy" | null;
 
 export default function FeedbackView({
   syncStatus,
@@ -76,8 +88,7 @@ export default function FeedbackView({
       docBytes: vol.docBytes,
     });
   });
-  const [copied, setCopied] = useState(false);
-  const [opened, setOpened] = useState(false);
+  const [taken, setTaken] = useState<Taken>(null);
 
   // Every keystroke. The alternative, saving on unmount, loses the case this
   // exists for: an app closed or reloaded mid-sentence never unmounts cleanly.
@@ -86,31 +97,43 @@ export default function FeedbackView({
   }, [message]);
 
   const body = feedbackBody(message, report);
-  const { url, tooLong } = feedbackMailto(kind, body);
+  const gmail = feedbackGmail(kind, body);
+  const mailto = feedbackMailto(kind, body);
   const empty = message.trim().length === 0;
+
+  // Editing after sending: the note would be describing a composer holding the
+  // previous text, so it goes rather than lingering as a false reassurance.
+  const edited = () => setTaken(null);
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(body);
-      setCopied(true);
+      setTaken("copy");
     } catch {
       // Clipboard blocked or unavailable. The text is on screen to be selected,
       // and nothing claims to have been copied, because nothing was.
-      setCopied(false);
+      setTaken(null);
     }
   };
+
+  /** A send route: disabled while there is nothing to send, never hidden. */
+  const linkStyle = (): CSSProperties => ({
+    opacity: empty ? 0.4 : 1,
+    pointerEvents: empty ? "none" : undefined,
+    textDecoration: "none",
+  });
 
   return (
     <section style={{ maxWidth: 480 }}>
       <div style={ST.head}>
         <h2 style={ST.title}>Send feedback</h2>
-        <span style={ST.sub}>by email, from your own mail app</span>
+        <span style={ST.sub}>by email, however you send email</span>
       </div>
 
       <p style={S.onboardLede}>
         Tell me what is wrong, what is missing, or what you would change. It goes
-        to {FEEDBACK_ADDRESS} as an ordinary email, written in your own mail app,
-        so you can read every word of it before it leaves.
+        to {FEEDBACK_ADDRESS} as an ordinary email, written wherever you write
+        email, so you can read every word of it before it leaves.
       </p>
 
       <div style={ST.groupLabel}>What is this about</div>
@@ -142,8 +165,7 @@ export default function FeedbackView({
         value={message}
         onChange={(ev) => {
           setMessage(ev.target.value);
-          setOpened(false);
-          setCopied(false);
+          edited();
         }}
         placeholder={
           kind === "broken"
@@ -173,66 +195,132 @@ export default function FeedbackView({
           value={report}
           onChange={(ev) => {
             setReport(ev.target.value);
-            setOpened(false);
-            setCopied(false);
+            edited();
           }}
           aria-label="The report that will be attached"
         />
       </div>
 
-      {/* Over the limit the link is not offered at all, rather than offered and
-          quietly truncated by whichever client opens it. */}
-      {tooLong ? (
-        <p style={S.onboardNote}>
-          This is longer than a mail link can carry reliably. Copy it and paste it
-          into an email to {FEEDBACK_ADDRESS} instead, or shorten it.
-        </p>
-      ) : (
-        <a
-          className="addBtn"
-          style={{
-            display: "inline-block",
-            textDecoration: "none",
-            opacity: empty ? 0.5 : 1,
-            pointerEvents: empty ? "none" : undefined,
-          }}
-          href={url}
-          aria-disabled={empty}
-          onClick={() => setOpened(true)}
-        >
-          Open my mail app
-        </a>
-      )}
+      {/* Three rows rather than one button and a footnote, and in this order: the
+          browser composer first because most email is read in one, the device's
+          mail app second, and copy and paste last as the one that always works.
+          Nothing here is detected. A page cannot ask the platform whether a
+          mailto: handler exists, so offering the most likely route and calling it
+          the only one is how the first version of this screen failed. */}
+      <div style={ST.groupLabel}>How to send it</div>
 
       <div style={ST.row}>
-        <button className="miniBtn" disabled={empty} onClick={() => void copy()}>
-          {copied ? "copied" : "copy the report"}
-        </button>
-        {message.trim() && (
+        <div style={ST.rowText}>
+          <div style={ST.rowLabel}>Gmail in a browser</div>
+          <div style={ST.rowDesc}>
+            Opens Gmail's own compose window with this already in it, using
+            whichever Google account that browser is signed in to. Nothing is sent
+            to Google unless you tap it.
+          </div>
+        </div>
+        <div style={ST.rowBtn}>
+          {gmail.tooLong ? (
+            <span style={ST.rowDesc}>too long</span>
+          ) : (
+            <a
+              className="miniBtn"
+              style={linkStyle()}
+              href={gmail.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-disabled={empty}
+              onClick={() => setTaken("gmail")}
+            >
+              open Gmail
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div style={ST.row}>
+        <div style={ST.rowText}>
+          <div style={ST.rowLabel}>A mail app on this device</div>
+          <div style={ST.rowDesc}>
+            For Apple Mail, Outlook, Thunderbird or whatever else this device opens
+            email links with. If nothing is set up, this offers to set one up
+            instead of composing anything: cancel it and use one of the others.
+          </div>
+        </div>
+        <div style={ST.rowBtn}>
+          {mailto.tooLong ? (
+            <span style={ST.rowDesc}>too long</span>
+          ) : (
+            <a
+              className="miniBtn"
+              style={linkStyle()}
+              href={mailto.url}
+              aria-disabled={empty}
+              onClick={() => setTaken("mail")}
+            >
+              open mail app
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div style={ST.row}>
+        <div style={ST.rowText}>
+          <div style={ST.rowLabel}>Copy it and paste it yourself</div>
+          <div style={ST.rowDesc}>
+            Works everywhere, and it is the route for any other webmail: Outlook,
+            Proton, Fastmail, a work account. Copy this, then paste it into a new
+            email to {FEEDBACK_ADDRESS}.
+          </div>
+        </div>
+        <div style={ST.rowBtn}>
+          <button
+            className="miniBtn"
+            disabled={empty}
+            onClick={() => void copy()}
+          >
+            {taken === "copy" ? "copied" : "copy the report"}
+          </button>
+        </div>
+      </div>
+
+      {/* The honest version of a confirmation. This app cannot see a composer, let
+          alone a sent message, so it reports what it did and leaves the claim
+          about sending to the person who can make it. Each route gets its own
+          words because the thing that can go wrong differs. */}
+      {taken === "gmail" && (
+        <p style={S.onboardNote}>
+          Gmail should now be open in another tab with this in it. Nothing has been
+          sent until you send it there, and your draft stays here either way.
+        </p>
+      )}
+      {taken === "mail" && (
+        <p style={S.onboardNote}>
+          Your mail app should now be open with this in it. Nothing has been sent
+          until you send it there, and your draft stays here either way. If you
+          were asked to set up an account instead, this device has no mail app:
+          cancel that and use Gmail or copy and paste above.
+        </p>
+      )}
+      {taken === "copy" && (
+        <p style={S.onboardNote}>
+          Copied. Paste it into a new email to {FEEDBACK_ADDRESS} wherever you
+          write email. Your draft stays here.
+        </p>
+      )}
+
+      {message.trim() && (
+        <div style={ST.actions}>
           <button
             className="miniBtn"
             onClick={() => {
               clearDraft();
               setMessage("");
-              setOpened(false);
-              setCopied(false);
+              setTaken(null);
             }}
           >
             clear this draft
           </button>
-        )}
-      </div>
-
-      {/* The honest version of a confirmation. This app cannot see a mail client,
-          let alone a sent message, so it reports what it did and leaves the claim
-          about sending to the person who can make it. */}
-      {opened && (
-        <p style={S.onboardNote}>
-          Your mail app should now be open with this in it. Nothing has been sent
-          until you send it there, and your draft stays here either way. If no mail
-          app opened, this device has none set up: copy the report and send it from
-          wherever you do read email.
-        </p>
+        </div>
       )}
 
       <p style={{ ...S.onboardNote, marginTop: 14 }}>
@@ -295,7 +383,31 @@ const ST = {
     color: "var(--ink-soft)",
     marginBottom: 5,
   },
+  // The Menu's row, deliberately: these are the same kind of thing, a named
+  // action with a sentence saying what it does and a control on the right.
   row: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: "4px 0",
+  },
+  rowText: { flex: 1, minWidth: 0 },
+  rowLabel: { fontSize: 14, lineHeight: `${GRID}px` },
+  rowDesc: {
+    fontSize: 11.5,
+    lineHeight: "16px",
+    color: "var(--ink-soft)",
+    paddingBottom: 4,
+  },
+  // Height matches the label's line box so the control lines up with the label
+  // rather than floating above a wrapped description.
+  rowBtn: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    height: GRID,
+  },
+  actions: {
     display: "flex",
     gap: 8,
     alignItems: "center",
