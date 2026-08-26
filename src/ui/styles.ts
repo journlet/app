@@ -615,6 +615,25 @@ export const S = {
     borderTop: `1px solid ${LINE}`,
   },
   // Prose inside a sub-view — what this step does before anything is tapped
+  // The answer to what was just chosen, in the "when it ends" control. Bordered
+  // on one side rather than boxed: it is the consequence of the field above it,
+  // not a separate thing to read (spec §11 Q17).
+  endsResolved: {
+    border: `1px solid ${LINE}`,
+    borderLeft: `3px solid ${INK}`,
+    borderRadius: 8,
+    background: "var(--surface)",
+    padding: "10px 12px",
+    fontSize: 13.5,
+    lineHeight: 1.5,
+    margin: "4px 0 2px",
+  },
+  endsWhy: {
+    display: "block",
+    color: INK_SOFT,
+    fontSize: 12,
+    marginTop: 4,
+  },
   subLede: {
     fontSize: 13,
     lineHeight: 1.55,

@@ -8,7 +8,7 @@ import type { Scope } from "../lib/dates";
 import type { Entry, Recurrence } from "../lib/types";
 import { entryVisible } from "../lib/filter";
 import type { EntryFilter } from "../lib/filter";
-import { nextOccurrence } from "../store/recurrence";
+import { isSpent, lastOccurrence, nextOccurrence } from "../store/recurrence";
 import type { ScheduledRow } from "./types";
 
 /**
@@ -111,7 +111,9 @@ export function buildSpreadData(
           .map((f) => `${f.entry.recurrenceId}:${f.pk}`)
       );
       return recurrences
-        .filter((r) => !r.endedAt)
+        // A rule with nothing left to make has no next occurrence to preview
+        // (spec §11 Q17); isSpent covers both a manual stop and a passed end.
+        .filter((r) => !isSpent(r, today))
         .map((r) => {
           const occKey = nextOccurrence(r, periodKey(r.pageScope, today));
           // sort by the period's first day so week/month/year previews
@@ -123,7 +125,15 @@ export function buildSpreadData(
             rule: r,
           };
         })
-        .filter((row) => !covered.has(`${row.rule.id}:${row.dayKey}`));
+        .filter((row) => {
+          // Never preview past the rule's own end: the occurrence after the
+          // last one does not exist (spec §11 Q17).
+          const last = lastOccurrence(row.rule);
+          return (
+            (!last || row.dayKey <= last) &&
+            !covered.has(`${row.rule.id}:${row.dayKey}`)
+          );
+        });
     })(),
   ].sort((a, b) => (a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0));
 

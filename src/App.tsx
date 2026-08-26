@@ -63,9 +63,15 @@ import {
   restoreCollection,
   setParent,
   setReminder,
+  setRecurrenceEnd,
   tagEntryRecurrence,
 } from "./store/journal";
-import type { RecurrenceUnit } from "./lib/types";
+import {
+  cadenceLabel,
+  endClause,
+  repeatCaption,
+  ruleSentence,
+} from "./store/recurrence";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -128,7 +134,12 @@ import {
 import { acknowledgeRecovery, recoveryPending } from "./lib/recoveryAck";
 import { buildSpreadData } from "./ui/spreadData";
 import { buildMigrationHistory } from "./ui/migrationHistory";
-import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
+import type {
+  EditEnds,
+  EditRepeat,
+  ScheduledRow,
+  SheetTarget,
+} from "./ui/types";
 
 interface DeletedToast {
   entry?: Entry;
@@ -262,6 +273,10 @@ export default function App() {
   // an action that appears to do nothing is the app lying about what happened.
   const [nestRefused, setNestRefused] = useState<string | null>(null);
   const [editRepeat, setEditRepeat] = useState<EditRepeat | null>(null);
+  // Draft for the "when it ends" step (spec §11 Q17). Held here beside the other
+  // sheet drafts rather than in the view, because the row that opens it is one
+  // of sixteen and the view is unmounted every time the sheet closes.
+  const [editEnds, setEditEnds] = useState<EditEnds | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
   // Entry visibility filter (remediation item 7). A device preference like
@@ -675,6 +690,7 @@ export default function App() {
     setEditText(null);
     setEditRemind(null);
     setEditRepeat(null);
+    setEditEnds(null);
     setThreadFilter(null);
     setNestFilter(null);
     setNestRefused(null);
@@ -688,8 +704,28 @@ export default function App() {
     setDetailsEntry(entry);
   };
 
-  const cadenceLabel = (n: number, unit: RecurrenceUnit) =>
-    `every ${n > 1 ? `${n} ` : ""}${unit}${n > 1 ? "s" : ""}`;
+  /**
+   * Write the end the step was left on (spec §11 Q17).
+   *
+   * The two forms are stored as they were given rather than one being converted
+   * into the other, and "never" clears both. Nothing already on a page is
+   * touched: an end only stops the materialiser going further, which is why
+   * this needs no pass over the entries.
+   */
+  const saveEnds = () => {
+    if (!sheet || !sheetEntry || !editEnds) return;
+    const rule = recurrences.find((r) => r.id === sheetEntry.recurrenceId);
+    if (!rule) return;
+    setRecurrenceEnd(
+      rule.id,
+      editEnds.mode === "date"
+        ? { on: editEnds.date }
+        : editEnds.mode === "count"
+          ? { after: Math.max(1, parseInt(editEnds.count, 10) || 1) }
+          : null
+    );
+    setEditEnds(null);
+  };
 
   const saveRepeat = () => {
     if (!sheet || !sheetEntry || !editRepeat) return;
@@ -701,6 +737,10 @@ export default function App() {
       scope === "day" && /^\d{2}:\d{2}$/.test(editRepeat.time)
         ? editRepeat.time
         : undefined;
+    // The end set in the same step, if any (spec §11 Q17). Stored as the form
+    // it was given in: a count is not turned into the date it implies, since
+    // "ten of these" and "nothing after September" are different statements.
+    const ends = editRepeat.ends;
     const rule = addRecurrence({
       text: sheetEntry.text,
       type: sheetEntry.type,
@@ -719,6 +759,11 @@ export default function App() {
       // their own anchor so occurrences still begin after them.
       materialisedThrough:
         sheet.pk > nowKeys[scope] ? sheet.pk : nowKeys[scope],
+      endsOn: ends.mode === "date" ? ends.date : undefined,
+      endsAfter:
+        ends.mode === "count"
+          ? Math.max(1, parseInt(ends.count, 10) || 1)
+          : undefined,
     });
     tagEntryRecurrence(sheet.id, rule.id);
     if (time && !sheetEntry.remindAt) {
@@ -1126,7 +1171,15 @@ export default function App() {
               marginLeft: 8,
             }}
           >
-            repeats
+            {/* "repeats" alone until the rule has an end, then "repeats until
+                30 Sept", and "repeats, last one" on the final occurrence. The
+                cadence stays out of it: this page has never carried it, and the
+                longer form wrapped on most rows at 375px (spec §11 Q17). */}
+            {repeatCaption(
+              recurrences.find((r) => r.id === e.recurrenceId),
+              e.pageKey,
+              today
+            )}
           </span>
         )}
         {/* Earlier occurrences of this rule that were never finished (spec
@@ -1274,7 +1327,10 @@ export default function App() {
                   (r) => r.id === row.entry.recurrenceId && !r.endedAt
                 );
               return rule
-                ? ` — repeats ${cadenceLabel(rule.everyN, rule.unit)}`
+                ? ` — repeats ${cadenceLabel(
+                    rule.everyN,
+                    rule.unit
+                  )}${endClause(rule, row.pk)}`
                 : null;
             })()}
           </span>
@@ -1320,6 +1376,7 @@ export default function App() {
           >
             {whenLabel(row.dayKey, grouped)} — repeats{" "}
             {cadenceLabel(row.rule.everyN, row.rule.unit)}
+            {endClause(row.rule, row.dayKey)}
           </span>
         </span>
         <span className="actions">
@@ -1640,8 +1697,8 @@ export default function App() {
             <RuleActionsSheet
               rule={rule}
               dayKey={ruleSheet.dayKey}
+              today={today}
               onClose={() => setRuleSheet(null)}
-              cadenceLabel={cadenceLabel}
             />
           );
         })()}
@@ -1778,11 +1835,7 @@ export default function App() {
             <EarlierOccurrencesSheet
               entry={owner}
               occurrences={earlierOpenFor(owner)}
-              cadence={
-                rule
-                  ? `repeats ${cadenceLabel(rule.everyN, rule.unit)}`
-                  : "repeats"
-              }
+              cadence={rule ? ruleSentence(rule, today) : "repeats"}
               onClose={() => setEarlierSheet(null)}
             />
           );
@@ -1812,6 +1865,8 @@ export default function App() {
           today={today}
           nowKeys={nowKeys}
           editRepeat={editRepeat}
+          editEnds={editEnds}
+          setEditEnds={setEditEnds}
           setEditRepeat={setEditRepeat}
           threadFilter={threadFilter}
           setThreadFilter={setThreadFilter}
@@ -1828,8 +1883,8 @@ export default function App() {
           setMoveGran={setMoveGran}
           closeSheet={closeSheet}
           saveRepeat={saveRepeat}
+          saveEnds={saveEnds}
           saveReminder={saveReminder}
-          cadenceLabel={cadenceLabel}
           deleteWithUndo={deleteWithUndo}
           fmtRemind={fmtRemind}
           toLocalInput={toLocalInput}

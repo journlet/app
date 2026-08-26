@@ -30,6 +30,7 @@ import {
   SCOPE_LABEL,
   defaultRemindAt,
   keyScope,
+  keyToAnchor,
   pageLabel,
   periodKey,
   periodName,
@@ -56,11 +57,18 @@ import {
   toggleStruck,
   toggleThread,
 } from "../store/journal";
-import { nextOccurrence } from "../store/recurrence";
+import {
+  cadenceLabel,
+  isSpent,
+  lastOccurrence,
+  nextOccurrence,
+  ruleSentence,
+} from "../store/recurrence";
 import { notificationPermission } from "../store/reminders";
+import EndsForm, { endsDraftFor, resolveEnds } from "./EndsForm";
 import PagePicker from "./PagePicker";
 import { S } from "./styles";
-import type { EditRepeat, SheetTarget } from "./types";
+import type { EditEnds, EditRepeat, SheetTarget } from "./types";
 
 /** Which step is open. The five App-owned ones are named by the draft state
  *  that opens them; the three added here are held locally, since their drafts
@@ -68,6 +76,7 @@ import type { EditRepeat, SheetTarget } from "./types";
 type Step =
   | "text"
   | "repeat"
+  | "ends"
   | "remind"
   | "thread"
   | "nest"
@@ -79,6 +88,7 @@ type Step =
 const STEP_TITLE: Record<Exclude<Step, null>, string> = {
   text: "Edit text",
   repeat: "Repeat",
+  ends: "When it ends",
   remind: "Reminder",
   thread: "Thread to a page",
   nest: "Nest under",
@@ -114,6 +124,9 @@ interface EntryActionsSheetProps {
   nowKeys: Record<Scope, string>;
   editRepeat: EditRepeat | null;
   setEditRepeat: Dispatch<SetStateAction<EditRepeat | null>>;
+  /** draft for the "when it ends" step (spec §11 Q17) */
+  editEnds: EditEnds | null;
+  setEditEnds: Dispatch<SetStateAction<EditEnds | null>>;
   editRemind: string | null;
   setEditRemind: Dispatch<SetStateAction<string | null>>;
   /** thread picker sub-view: null = closed, otherwise its filter text */
@@ -133,8 +146,8 @@ interface EntryActionsSheetProps {
   setMoveGran: Dispatch<SetStateAction<Scope>>;
   closeSheet: () => void;
   saveRepeat: () => void;
+  saveEnds: () => void;
   saveReminder: () => Promise<void>;
-  cadenceLabel: (n: number, unit: RecurrenceUnit) => string;
   deleteWithUndo: (id: string) => void;
   fmtRemind: (ts: number) => string;
   toLocalInput: (ts: number) => string;
@@ -160,6 +173,8 @@ export default function EntryActionsSheet({
   nowKeys,
   editRepeat,
   setEditRepeat,
+  editEnds,
+  setEditEnds,
   editRemind,
   setEditRemind,
   threadFilter,
@@ -175,8 +190,8 @@ export default function EntryActionsSheet({
   setMoveGran,
   closeSheet,
   saveRepeat,
+  saveEnds,
   saveReminder,
-  cadenceLabel,
   deleteWithUndo,
   fmtRemind,
   toLocalInput,
@@ -201,13 +216,16 @@ export default function EntryActionsSheet({
             ? "thread"
             : nestFilter !== null
               ? "nest"
-              : localStep;
+              : editEnds !== null
+                ? "ends"
+                : localStep;
 
   // One way back from every step, so the header button means the same thing
   // wherever you are: leave this step, or close the view if you are at the top.
   const back = () => {
     setEditText(null);
     setEditRepeat(null);
+    setEditEnds(null);
     setEditRemind(null);
     setThreadFilter(null);
     setNestFilter(null);
@@ -217,9 +235,43 @@ export default function EntryActionsSheet({
   const onPeriodPage = keyScope(sheet.pk) !== null;
   const canSchedule =
     sheetEntry.type === "task" && sheetEntry.state === "open" && onPeriodPage;
-  const activeRule = sheetEntry.recurrenceId
-    ? recurrences.find((r) => r.id === sheetEntry.recurrenceId && !r.endedAt)
+  const rule = sheetEntry.recurrenceId
+    ? recurrences.find((r) => r.id === sheetEntry.recurrenceId)
     : undefined;
+  // A rule that has passed its planned end has nothing left to stop or to
+  // change, so it offers no actions — but it is still what made this entry, and
+  // the note below says so rather than leaving the row silent (spec §11 Q17).
+  const activeRule = rule && !isSpent(rule, today) ? rule : undefined;
+  const spentRule = rule && isSpent(rule, today) ? rule : undefined;
+
+  const scope = keyScope(sheet.pk);
+  /** The rule the Repeat step is about to make, so its Ends control can resolve
+   *  a date or a count against a cadence that does not exist yet. */
+  const repeatBase: Recurrence | null =
+    editRepeat && scope
+      ? {
+          id: "draft",
+          text: sheetEntry.text,
+          type: sheetEntry.type,
+          priority: sheetEntry.priority,
+          inspiration: sheetEntry.inspiration,
+          everyN: Math.max(1, parseInt(editRepeat.n, 10) || 1),
+          unit: scope === "day" ? editRepeat.unit : scope,
+          pageScope: scope,
+          anchor: keyToAnchor(sheet.pk),
+          materialisedThrough: sheet.pk,
+          createdAt: 0,
+        }
+      : null;
+  const endsBase: Recurrence | null = activeRule
+    ? { ...activeRule, endsOn: undefined, endsAfter: undefined }
+    : null;
+  const endsError =
+    editEnds && endsBase
+      ? resolveEnds(endsBase, editEnds, today).error
+      : editRepeat && repeatBase
+        ? resolveEnds(repeatBase, editRepeat.ends, today).error
+        : null;
 
   /** The entry itself, glyph and words both — never the symbol alone */
   const entryLine = (
@@ -424,9 +476,55 @@ export default function EntryActionsSheet({
               )}
               . Completing one occurrence never touches the next.
             </p>
-            <button className="sheetBtn" onClick={saveRepeat}>
+            {repeatBase && (
+              <>
+                <div style={S.formLbl}>Ends</div>
+                <EndsForm
+                  base={repeatBase}
+                  value={editRepeat.ends}
+                  onChange={(ends) => setEditRepeat({ ...editRepeat, ends })}
+                  today={today}
+                  idPrefix="repeat"
+                />
+              </>
+            )}
+            <button
+              className="sheetBtn"
+              onClick={saveRepeat}
+              disabled={endsError !== null}
+            >
               Start repeating
             </button>
+          </>
+        )}
+
+        {step === "ends" && editEnds !== null && (
+          <>
+            {endsBase ? (
+              <>
+                <div style={S.formLbl}>When this repeat ends</div>
+                <EndsForm
+                  base={endsBase}
+                  value={editEnds}
+                  onChange={setEditEnds}
+                  today={today}
+                  idPrefix="ends"
+                />
+                <button
+                  className="sheetBtn"
+                  onClick={saveEnds}
+                  disabled={endsError !== null}
+                >
+                  {editEnds.mode === "never"
+                    ? "Save: no end"
+                    : "Save when it ends"}
+                </button>
+              </>
+            ) : (
+              <p style={S.sheetNote}>
+                That repeat is no longer here, so there is nothing to end.
+              </p>
+            )}
           </>
         )}
 
@@ -784,8 +882,31 @@ export default function EntryActionsSheet({
                   time: sheetEntry.remindAt
                     ? new Date(sheetEntry.remindAt).toTimeString().slice(0, 5)
                     : "",
+                  // No end unless one is asked for: a repeat with an end is the
+                  // exception, and the default must be today's behaviour
+                  // (spec §11 Q17).
+                  // A default the control can express and that means
+                  // something: twelve more of whatever cadence was just
+                  // chosen, on one of the rule's own days (see endsDraftFor).
+                  ends: {
+                    mode: "never",
+                    date: shiftAnchor(
+                      sc && sc !== "day" ? sc : "week",
+                      today,
+                      12
+                    ),
+                    count: "12",
+                  },
                 });
               })}
+            {activeRule &&
+              row(
+                lastOccurrence(activeRule)
+                  ? "Change when it ends…"
+                  : "Set when it ends…",
+                () => setEditEnds(endsDraftFor(activeRule, today)),
+                ruleSentence(activeRule, today)
+              )}
             {activeRule &&
               row(
                 `Stop repeating (${cadenceLabel(
@@ -796,16 +917,18 @@ export default function EntryActionsSheet({
                   endRecurrence(activeRule.id);
                   closeSheet();
                 },
-                `repeats ${cadenceLabel(
-                  activeRule.everyN,
-                  activeRule.unit
-                )} — next ${pageLabel(
+                `next ${pageLabel(
                   nextOccurrence(
                     activeRule,
                     periodKey(activeRule.pageScope, today)
                   )
                 )}`
               )}
+            {spentRule && (
+              <p style={S.sheetNote}>
+                {`${ruleSentence(spentRule, today)}. Nothing more will be made.`}
+              </p>
+            )}
 
             {/* ── Where it goes ───────────────────────────────────────────── */}
             <div style={S.formLbl}>Where it goes</div>
