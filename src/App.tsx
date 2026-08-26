@@ -90,6 +90,8 @@ import {
   saveFilterOpen,
 } from "./lib/filter";
 import type { EntryFilter } from "./lib/filter";
+import { loadOrder, saveOrder } from "./lib/order";
+import type { EntryOrder } from "./lib/order";
 import { loadSticky, saveSticky } from "./lib/sticky";
 import {
   addEntry,
@@ -101,7 +103,7 @@ import {
 import { useJournal } from "./store/useJournal";
 import { applyUpdate, getUpdateReady, onUpdateReady } from "./store/appUpdate";
 import { S } from "./ui/styles";
-import FilterRow from "./ui/FilterRow";
+import ReadingBlock from "./ui/ReadingBlock";
 import FutureLogView from "./ui/FutureLogView";
 import CaptureForm from "./ui/CaptureForm";
 import EntryActionsSheet from "./ui/EntryActionsSheet";
@@ -298,6 +300,15 @@ export default function App() {
   // row you opened yourself stays open across launches. Closing it never
   // changes what is filtered — the badge keeps saying which filter is on, so
   // a filtered page is still explained with the control out of sight.
+  // Reading order (spec §4.9a, §11 Q16). A device preference exactly like the
+  // filter above: it rearranges what is drawn and writes nothing, so one
+  // device reading "priority" doesn't change what another shows, and no entry
+  // is touched. Sub-bullets are unaffected — they follow their parent.
+  const [order, setOrderState] = useState<EntryOrder>(loadOrder);
+  const changeOrder = useCallback((o: EntryOrder) => {
+    setOrderState(o);
+    saveOrder(o);
+  }, []);
   const [filterOpen, setFilterOpen] = useState<boolean>(loadFilterOpen);
   const toggleFilterRow = useCallback(() => {
     setFilterOpen((o) => {
@@ -1522,10 +1533,19 @@ export default function App() {
             review banner, while the other two pages, which carry no banner,
             take it here. */}
         {journalOnScreen && loaded &&
-          filterOpen &&
           (view === "future" ||
             (activeCol !== null && activeCol.kind === "list")) && (
-          <FilterRow filter={filter} onChange={changeFilter} />
+          <ReadingBlock
+            open={filterOpen}
+            filter={filter}
+            onChangeFilter={changeFilter}
+            order={order}
+            onChangeOrder={changeOrder}
+            /* The Future log's rows are occurrences drawn from other pages,
+               not this page's own entries, so there is no page sequence to
+               re-read and no order row is offered (spec §4.9a). */
+            showOrder={view !== "future"}
+          />
         )}
         {journalOnScreen && loaded && view === "index" && (
           <IndexView
@@ -1625,6 +1645,7 @@ export default function App() {
             habits={habits.filter((h) => h.collectionId === activeCol.id)}
             renderEntry={(e) => renderEntry(e, colPageKey(activeCol.id), null)}
             filter={filter}
+            order={order}
             threadedHere={renderThreadedHere(colPageKey(activeCol.id))}
             onDelete={() => {
               const snap = removeCollection(activeCol.id);
@@ -1650,10 +1671,16 @@ export default function App() {
             folds={folds}
             onToggleFold={toggleFold}
             filter={filter}
+            order={order}
             filterRow={
-              filterOpen ? (
-                <FilterRow filter={filter} onChange={changeFilter} />
-              ) : null
+              <ReadingBlock
+                open={filterOpen}
+                filter={filter}
+                onChangeFilter={changeFilter}
+                order={order}
+                onChangeOrder={changeOrder}
+                showOrder
+              />
             }
             onReview={() => setReviewing(true)}
             onOpenFutureLog={() => setView("future")}

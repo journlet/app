@@ -19,6 +19,8 @@ import {
 } from "../lib/dates";
 import type { Scope } from "../lib/dates";
 import { applyFilter, entryVisible } from "../lib/filter";
+import { applyOrder } from "../store/pageOrder";
+import type { EntryOrder } from "../lib/order";
 import type { EntryFilter } from "../lib/filter";
 import type { Entry } from "../lib/types";
 import { filterRows, rowIsPredicted } from "./spreadData";
@@ -48,6 +50,9 @@ interface SpreadViewProps {
   /** entry visibility filter (remediation item 7) — applied to every section,
    *  the Due list and the within-period scheduled rows */
   filter: EntryFilter;
+  /** reading order (spec §4.9a) — the four scope sections only. The Due list
+   *  and the scheduled rows are drawn from other pages, so they keep theirs. */
+  order: EntryOrder;
   /** the filter control itself, built by App. Placed here rather than above
    *  the whole view because the review banner is an alert about the journal
    *  and alerts belong at the top: banners first, then the way you are
@@ -73,6 +78,7 @@ export default function SpreadView({
   folds,
   onToggleFold,
   filter,
+  order,
   filterRow,
   onReview,
   onOpenFutureLog,
@@ -115,7 +121,8 @@ export default function SpreadView({
             const isCurrent = pk === nowKeys[sc];
             const isFuture = pk > nowKeys[sc];
             const onPage = days[pk] || [];
-            const entries = applyFilter(onPage, filter);
+            // Filter, then re-read what is left in the chosen order (§4.9a)
+            const entries = applyOrder(applyFilter(onPage, filter), order);
             const hidden = onPage.length - entries.length;
             const step = (delta: number) =>
               setAnchors((a) => ({
