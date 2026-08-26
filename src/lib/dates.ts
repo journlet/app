@@ -209,6 +209,18 @@ export const defaultRemindAt = (pageKey: string, now = Date.now()): number => {
 };
 
 // Human label for a page key (used for past/future references)
+/** An end date as a caption names it: "30 Sept", with the year only when it is
+ *  not the current one, since a caption is read beside a page that already says
+ *  which year it is. Non-day keys keep pageLabel's own wording, which is
+ *  already the shortest honest form of a week, month or year. */
+export const endLabel = (pk: string, now: Date = new Date()): string => {
+  if (keyScope(pk) !== "day") return pageLabel(pk);
+  const d = toDate(pk);
+  return d.getFullYear() === now.getFullYear()
+    ? fmt(d, { day: "numeric", month: "short" })
+    : fmt(d, { day: "numeric", month: "short", year: "numeric" });
+};
+
 export const pageLabel = (pk: string): string => {
   const sc = keyScope(pk);
   if (sc === "day")

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import EntryActionsSheet from "../../src/ui/EntryActionsSheet";
-import type { Entry } from "../../src/lib/types";
+import type { Entry, Recurrence } from "../../src/lib/types";
 import type { Scope } from "../../src/lib/dates";
 
 // The sheet calls store mutators directly (they are module-level, stateless
@@ -18,7 +18,11 @@ vi.mock("../../src/store/journal", () => ({
   toggleStruck: vi.fn(),
   toggleThread: vi.fn(),
 }));
-vi.mock("../../src/store/recurrence", () => ({
+// The end helpers (lastOccurrence, isSpent, ruleSentence, occurrencesThrough)
+// are pure walks over a rule and are exercised for real here: mocking them
+// would leave the rows they caption asserting nothing (spec §11 Q17).
+vi.mock("../../src/store/recurrence", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/store/recurrence")>()),
   nextOccurrence: vi.fn(() => "2026-08-01"),
 }));
 vi.mock("../../src/store/reminders", () => ({
@@ -82,6 +86,8 @@ const setup = (
     nowKeys,
     editRepeat: null,
     setEditRepeat: vi.fn(),
+    editEnds: null,
+    setEditEnds: vi.fn(),
     editRemind: null,
     setEditRemind: vi.fn(),
     threadFilter: null,
@@ -97,8 +103,8 @@ const setup = (
     setMoveGran: vi.fn(),
     closeSheet: vi.fn(),
     saveRepeat: vi.fn(),
+    saveEnds: vi.fn(),
     saveReminder: vi.fn().mockResolvedValue(undefined),
-    cadenceLabel: (n: number, u: string) => `every ${n} ${u}`,
     deleteWithUndo: vi.fn(),
     fmtRemind: () => "10:00",
     toLocalInput: () => "2026-07-24T10:00",
@@ -474,7 +480,14 @@ test("reminder mode saves via the async saveReminder handler", () => {
 });
 
 test("repeat mode starts the rule via saveRepeat", () => {
-  const props = setup({ editRepeat: { n: "1", unit: "week", time: "" } });
+  const props = setup({
+    editRepeat: {
+      n: "1",
+      unit: "week",
+      time: "",
+      ends: { mode: "never", date: "2026-10-24", count: "8" },
+    },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Start repeating" }));
   expect(props.saveRepeat).toHaveBeenCalledTimes(1);
 });
@@ -620,5 +633,102 @@ describe("nesting", () => {
     setup({ sheetHasChildren: true, sheetNestTargets: [] });
     expect(screen.getByText(/has sub-bullets of its own/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Nest under/ })).toBeNull();
+  });
+});
+
+// An end on the repeat (spec §11 Q17). The row sits above Stop repeating, and
+// carries the whole sentence, so the row below it only has to say when the next
+// one is.
+describe("when the repeat ends", () => {
+  const repeating: Entry = { ...openTask, recurrenceId: "r1" };
+  const daily = (over: Partial<Recurrence> = {}): Recurrence => ({
+    id: "r1",
+    text: "Antibiotics",
+    type: "task",
+    priority: false,
+    everyN: 1,
+    unit: "day",
+    pageScope: "day",
+    anchor: "2026-07-20",
+    materialisedThrough: "2026-07-24",
+    createdAt: 0,
+    ...over,
+  });
+
+  test("a repeat with no end offers to set one", () => {
+    setup({ sheetEntry: repeating, recurrences: [daily()] });
+    expect(
+      screen.getByRole("button", { name: /Set when it ends…/ })
+    ).toBeTruthy();
+    expect(screen.getByText("repeats every day")).toBeTruthy();
+  });
+
+  test("a repeat with an end offers to change it, and names the last one", () => {
+    setup({
+      sheetEntry: repeating,
+      recurrences: [daily({ endsOn: "2026-07-31" })],
+    });
+    expect(
+      screen.getByRole("button", { name: /Change when it ends…/ })
+    ).toBeTruthy();
+    expect(
+      screen.getByText("repeats every day, last one 31 Jul")
+    ).toBeTruthy();
+  });
+
+  test("a count is said as a count, with how many have come round", () => {
+    setup({ sheetEntry: repeating, recurrences: [daily({ endsAfter: 10 })] });
+    expect(
+      screen.getByText(
+        "repeats every day, stops after 10 (5 have come round), last one 29 Jul"
+      )
+    ).toBeTruthy();
+  });
+
+  test("opening the row hands App the rule's current end as a draft", () => {
+    const props = setup({
+      sheetEntry: repeating,
+      recurrences: [daily({ endsAfter: 10 })],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Change when it ends…/ }));
+    expect(props.setEditEnds).toHaveBeenCalledWith({
+      mode: "count",
+      date: "2026-08-05",
+      count: "10",
+    });
+  });
+
+  test("the step saves through App, which owns the write", () => {
+    const props = setup({
+      sheetEntry: repeating,
+      recurrences: [daily()],
+      editEnds: { mode: "date", date: "2026-07-31", count: "6" },
+    });
+    expect(screen.getByRole("group", { name: "When it ends" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save when it ends" }));
+    expect(props.saveEnds).toHaveBeenCalledTimes(1);
+  });
+
+  test("a spent repeat offers nothing, and says why rather than going quiet", () => {
+    setup({
+      sheetEntry: repeating,
+      recurrences: [daily({ endsOn: "2026-07-22" })],
+    });
+    expect(screen.queryByRole("button", { name: /when it ends/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Stop repeating/ })).toBeNull();
+    expect(screen.getByText(/Nothing more will be made/)).toBeTruthy();
+  });
+
+  test("the Repeat step can set an end at the same moment", () => {
+    setup({
+      editRepeat: {
+        n: "1",
+        unit: "week",
+        time: "",
+        ends: { mode: "never", date: "2026-10-24", count: "8" },
+      },
+    });
+    expect(screen.getByRole("group", { name: "When it ends" })).toBeTruthy();
+    expect(screen.getByText(/No end/)).toBeTruthy();
   });
 });

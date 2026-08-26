@@ -56,7 +56,17 @@ export interface Recurrence {
   remindTime?: string;
   /** occurrences up to and including this day already exist */
   materialisedThrough: string;
-  /** set when the user stops the recurrence */
+  /** planned end, as a date: the last day an occurrence may fall on (spec §11
+   *  Q17). Stored as the day that was picked and projected onto the rule's
+   *  pageScope when compared, so "until 30 September" means September is the
+   *  last one on a monthly rule. Never set alongside endsAfter by intent. */
+  endsOn?: string;
+  /** planned end, as a count: how many occurrences in total, counted from the
+   *  anchor in cadence steps rather than from rows in the journal, which can
+   *  differ (spec §11 Q17). Never set alongside endsOn by intent. */
+  endsAfter?: number;
+  /** set when the user stops the recurrence by hand. A rule that has simply
+   *  passed its planned end is spent without this being written (§11 Q17). */
   endedAt?: number;
   createdAt: number;
 }

@@ -563,6 +563,8 @@ const toRecurrence = (m: Y.Map<unknown>): Recurrence => ({
   anchor: m.get("anchor") as string,
   remindTime: (m.get("remindTime") as string | undefined) ?? undefined,
   materialisedThrough: m.get("materialisedThrough") as string,
+  endsOn: (m.get("endsOn") as string | undefined) ?? undefined,
+  endsAfter: (m.get("endsAfter") as number | undefined) ?? undefined,
   endedAt: (m.get("endedAt") as number | undefined) ?? undefined,
   createdAt: m.get("createdAt") as number,
 });
@@ -592,10 +594,41 @@ export const addRecurrence = (
   m.set("pageScope", rule.pageScope);
   m.set("anchor", rule.anchor);
   if (rule.remindTime) m.set("remindTime", rule.remindTime);
+  if (rule.endsOn) m.set("endsOn", rule.endsOn);
+  if (rule.endsAfter) m.set("endsAfter", rule.endsAfter);
   m.set("materialisedThrough", rule.materialisedThrough);
   m.set("createdAt", rule.createdAt);
   doc.transact(() => recurrences.push([m]));
   return rule;
+};
+
+/**
+ * Set or clear a rule's planned end (spec §11 Q17).
+ *
+ * Exactly one form is stored, so setting either clears the other in the same
+ * transaction. Both can still end up present, because Yjs resolves each key on
+ * its own and two devices can set different ends while apart; `lastOccurrence`
+ * settles that by taking the earlier of the two, identically on every device,
+ * rather than this write trying to guess which one was meant.
+ *
+ * This is the first edit a rule has ever had. Everything else about a rule is
+ * written once at creation, `materialisedThrough` is advanced only by the
+ * materialiser, and `endedAt` is a one-way switch; an end that can be changed
+ * after the fact is the reason this function exists at all.
+ */
+export const setRecurrenceEnd = (
+  id: string,
+  end: { on: string } | { after: number } | null
+): void => {
+  const m = findRecurrenceMap(id);
+  if (!m) return;
+  doc.transact(() => {
+    m.delete("endsOn");
+    m.delete("endsAfter");
+    if (end && "on" in end) m.set("endsOn", end.on);
+    if (end && "after" in end)
+      m.set("endsAfter", Math.max(1, Math.floor(end.after)));
+  });
 };
 
 export const endRecurrence = (id: string): void => {
