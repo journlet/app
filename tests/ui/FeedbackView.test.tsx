@@ -130,6 +130,24 @@ describe("the ways to send it", () => {
     expect(gmailLink()).toBeTruthy();
   });
 
+  test("what is copied carries the subject, which a paste cannot", () => {
+    // The finding of 26 August 2026: pasted into iCloud Mail, the report arrived as
+    // "(no subject)", because the kind lives in a header field the clipboard has no
+    // equivalent of.
+    const written: string[] = [];
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText: async (t: string) => void written.push(t) },
+    });
+    renderView();
+    write("a thought");
+    fireEvent.click(screen.getByText("copy the report"));
+    return Promise.resolve().then(() => {
+      expect(written[0]?.startsWith("Subject: Journlet: something is broken")).toBe(true);
+      expect(written[0]).toContain("a thought");
+    });
+  });
+
   test("the clipboard is always there, whatever the length", () => {
     renderView();
     fireEvent.change(reportBox(), { target: { value: "x".repeat(20000) } });

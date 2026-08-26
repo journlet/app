@@ -19,6 +19,7 @@ import {
   diagnosticLines,
   diagnosticText,
   feedbackBody,
+  feedbackClipboard,
   feedbackGmail,
   feedbackMailto,
   loadDraft,
@@ -180,6 +181,42 @@ describe("the Gmail composer", () => {
   test("encodes newlines and ampersands, which would otherwise end the parameter", () => {
     const { url } = feedbackGmail("other", "one & two\nthree");
     expect(url).toContain("one%20%26%20two%0Athree");
+  });
+});
+
+describe("the copied text", () => {
+  // Added 26 August 2026, from a report pasted into iCloud Mail that arrived as
+  // "(no subject)". The links hand over a subject field; the clipboard hands over
+  // characters, so the kind chosen on the screen was dropped by the one route that
+  // works everywhere.
+  test("carries the subject as its first line", () => {
+    const text = feedbackClipboard("broken", feedbackBody("it scrolls oddly", ""));
+    expect(text.split("\n")[0]).toBe("Subject: Journlet: something is broken");
+  });
+
+  test("the subject follows the kind, like the links do", () => {
+    expect(feedbackClipboard("idea", "x")).toContain("Journlet: an idea");
+    expect(feedbackClipboard("other", "x")).toContain("Journlet: feedback");
+  });
+
+  test("keeps the message and the report below it, unchanged", () => {
+    const body = feedbackBody("it scrolls oddly", "build: x");
+    const text = feedbackClipboard("broken", body);
+    expect(text.endsWith(body)).toBe(true);
+    expect(text).toContain("it scrolls oddly");
+    expect(text).toContain("--- Journlet report ---");
+  });
+
+  test("the links do not carry it as well, which would say it twice", () => {
+    // A mailto: with "Subject: ..." in its body puts the subject in the message
+    // twice, once in the field and once in the text, which reads as a bug.
+    const body = feedbackBody("hello", "");
+    expect(decodeURIComponent(feedbackMailto("broken", body).url)).not.toContain(
+      "Subject: Journlet"
+    );
+    expect(decodeURIComponent(feedbackGmail("broken", body).url)).not.toContain(
+      "Subject: Journlet"
+    );
   });
 });
 
