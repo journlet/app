@@ -43,6 +43,7 @@ import { GLYPH, STATE_GLYPH, STATE_WORD } from "../lib/types";
 import type {
   Collection,
   Entry,
+  EntryType,
   Recurrence,
   RecurrenceUnit,
 } from "../lib/types";
@@ -50,8 +51,10 @@ import {
   endRecurrence,
   migrateEntry,
   moveTo,
+  setEntryType,
   setParent,
   setReminder,
+  setSignifier,
   setText,
   toggleDone,
   toggleStruck,
@@ -79,6 +82,8 @@ import type { EditEnds, EditRepeat, SheetTarget } from "./types";
  *  (schedDate, moveAnchor/moveGran) already live in App and outlive nothing. */
 type Step =
   | "text"
+  | "sig"
+  | "type"
   | "repeat"
   | "ends"
   | "remind"
@@ -91,6 +96,8 @@ type Step =
 
 const STEP_TITLE: Record<Exclude<Step, null>, string> = {
   text: "Edit text",
+  sig: "Signifiers",
+  type: "Type",
   repeat: "Repeat",
   ends: "When it ends",
   remind: "Reminder",
@@ -203,9 +210,14 @@ export default function EntryActionsSheet({
 }: EntryActionsSheetProps) {
   // The three steps whose drafts App already holds but which used to unfold in
   // place. Nothing else needs to know they exist: closing the view unmounts it.
-  const [localStep, setLocalStep] = useState<"migrate" | "move" | "schedule" | null>(
-    null
-  );
+  const [localStep, setLocalStep] = useState<
+    "sig" | "type" | "migrate" | "move" | "schedule" | null
+  >(null);
+  /** Which type the Type step has selected but not yet saved. Local, unlike the
+   *  other drafts: it outlives nothing — the view unmounts when it closes — and
+   *  App has no use for it. The Signifiers step needs no draft at all, because
+   *  it writes on tap. */
+  const [typeDraft, setTypeDraft] = useState<EntryType | null>(null);
   // Prefix for the row-caption ids the rows point their aria-describedby at
   const rowIds = useId();
 
@@ -234,7 +246,22 @@ export default function EntryActionsSheet({
     setThreadFilter(null);
     setNestFilter(null);
     setLocalStep(null);
+    setTypeDraft(null);
   };
+
+  /** What is lit now, for the row caption: the state the step would change has
+   *  to be legible before it is opened (the rule the reminder row follows). */
+  const signifierWords = (e: Entry): string => {
+    const lit: string[] = [];
+    if (e.priority) lit.push("* priority");
+    if (e.inspiration) lit.push("! inspiration");
+    return lit.length > 0 ? lit.join(", ") : "none";
+  };
+  /** › and ‹ pair this row with a live copy on another page, so a type change
+   *  here cannot be honestly applied — see setEntryType. The row is offered and
+   *  refused in place, with the reason on it, rather than hidden. */
+  const typeIsPinned =
+    sheetEntry.state === "migrated" || sheetEntry.state === "scheduled";
 
   const onPeriodPage = keyScope(sheet.pk) !== null;
   const canSchedule =
@@ -297,6 +324,19 @@ export default function EntryActionsSheet({
             sheetEntry.state === "struck" ? "line-through" : undefined,
         }}
       >
+        {/* The signifiers are drawn here as they are on the page, not just
+            named in the state word: the Signifiers step writes on tap, and
+            what it wrote has to be visible on the line above the chips. */}
+        {sheetEntry.priority && (
+          <span className="prio">
+            <i>*</i>
+          </span>
+        )}
+        {sheetEntry.inspiration && (
+          <span className="prio">
+            <i>!</i>
+          </span>
+        )}
         {sheetEntry.text}
       </span>
       <span style={S.entryCtxState}>
@@ -402,6 +442,118 @@ export default function EntryActionsSheet({
             >
               Save changes
             </button>
+          </>
+        )}
+
+        {/* Signifiers (spec §4.1a). No draft and no save button: lighting or
+            clearing * loses nothing and tapping again undoes it exactly, so
+            the step writes straight through, the way the capture form these
+            chips came from does. The entry line above updates with it. */}
+        {step === "sig" && (
+          <>
+            <p style={S.subLede}>
+              Signifiers sit in front of the text: <b>*</b> marks a priority,{" "}
+              <b>!</b> marks an inspiration. Either, both or neither. The bullet
+              is untouched — a signifier is a mark on an entry, not a kind of
+              entry.
+            </p>
+            <div style={S.formLbl}>Signifiers</div>
+            <div style={S.sheetRow}>
+              <button
+                className={"capChoice" + (sheetEntry.priority ? " isLit" : "")}
+                aria-pressed={sheetEntry.priority}
+                onClick={() =>
+                  setSignifier(sheet.id, "priority", !sheetEntry.priority)
+                }
+              >
+                <span style={{ fontSize: 15, fontWeight: 700 }}>*</span>
+                priority
+              </button>
+              <button
+                className={
+                  "capChoice" + (sheetEntry.inspiration ? " isLit" : "")
+                }
+                aria-pressed={Boolean(sheetEntry.inspiration)}
+                onClick={() =>
+                  setSignifier(
+                    sheet.id,
+                    "inspiration",
+                    !sheetEntry.inspiration
+                  )
+                }
+              >
+                <span style={{ fontSize: 15, fontWeight: 700 }}>!</span>
+                inspiration
+              </button>
+            </div>
+            <p style={S.sheetNote}>
+              Saved as you tap. The line above is this entry as it now reads on
+              the page.
+            </p>
+            {rule && (
+              <p style={S.sheetNote}>
+                This entry came from a repeat. This occurrence changes on its
+                own — later ones come out of the rule as before.
+              </p>
+            )}
+          </>
+        )}
+
+        {/* Type (spec §4.1a). This one keeps the save button: a completed task
+            that stops being a task stops being complete, and tapping "task"
+            again brings the bullet back but not the ×. So the consequence is
+            said in words and read before the save, never found afterwards on
+            the page. */}
+        {step === "type" && (
+          <>
+            <p style={S.subLede}>
+              Only the bullet changes. The text, the page, the signifiers and a
+              strikethrough all stay as they are.
+            </p>
+            <div style={S.formLbl}>Type</div>
+            <div style={S.sheetRow}>
+              {(["task", "event", "note"] as const).map((t) => {
+                const chosen = (typeDraft ?? sheetEntry.type) === t;
+                return (
+                  <button
+                    key={t}
+                    className={"capChoice" + (chosen ? " isLit" : "")}
+                    aria-pressed={chosen}
+                    onClick={() => setTypeDraft(t)}
+                  >
+                    <span style={{ fontSize: 15 }}>{GLYPH[t]}</span>
+                    {t}
+                  </button>
+                );
+              })}
+            </div>
+            {sheetEntry.state === "done" &&
+              typeDraft !== null &&
+              typeDraft !== "task" && (
+                <p style={S.sheetWarn} role="status">
+                  This task is complete. × means a completed task, and there is
+                  no such thing as a completed {typeDraft}, so the × goes and
+                  this becomes an open {GLYPH[typeDraft]} {typeDraft}.
+                </p>
+              )}
+            <button
+              className="sheetBtn"
+              disabled={typeDraft === null || typeDraft === sheetEntry.type}
+              onClick={() => {
+                if (typeDraft) setEntryType(sheet.id, typeDraft);
+                closeSheet();
+              }}
+            >
+              {typeDraft === null || typeDraft === sheetEntry.type
+                ? "No change to save"
+                : "Save changes"}
+            </button>
+            {rule && (
+              <p style={S.sheetNote}>
+                This entry came from a repeat. This occurrence changes on its
+                own — later ones come out of the rule as before.
+              </p>
+            )}
           </>
         )}
 
@@ -862,6 +1014,31 @@ export default function EntryActionsSheet({
                   : "drawn as × on this page"
               )}
             {row("Edit text", () => setEditText(sheetEntry.text))}
+            {/* Changing a signifier and changing the type, added 26 August
+                2026 (spec §4.1a). Both were capture-only: a non-priority that
+                becomes a priority had no way to say so, and a task's glyph tap
+                completes it, so a task logged by mistake could not become a
+                note at all. */}
+            {row("Signifiers…", () => setLocalStep("sig"), signifierWords(sheetEntry))}
+            {typeIsPinned
+              ? row(
+                  "Type…",
+                  () => {},
+                  `not while this is ${STATE_WORD[sheetEntry.state]} — ${
+                    STATE_GLYPH[
+                      sheetEntry.state as "migrated" | "scheduled"
+                    ]
+                  } belongs to a task, and the copy it carries is the live one`,
+                  { disabled: true }
+                )
+              : row(
+                  "Type…",
+                  () => {
+                    setTypeDraft(sheetEntry.type);
+                    setLocalStep("type");
+                  },
+                  `currently ${GLYPH[sheetEntry.type]} ${sheetEntry.type}`
+                )}
             {row(
               sheetEntry.details ? "Edit details" : "Add details",
               onEditDetails,
