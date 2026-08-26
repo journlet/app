@@ -25,6 +25,8 @@ The app is well past the initial shell. What works today:
 
 **Server-side storage quota.** Each account is capped, 5 MB by default and held per row in `public.user_usage` so one account can be raised without a migration. A trigger on `journal_updates` accumulates payload sizes and refuses past the cap; the total is recomputed from the log every time `schema.sql` is applied, so it cannot drift permanently. This exists because registration is open and the update log is append-only: without it one account could consume a free-tier project and every other account's writes would start failing. The Menu warns past 80%, which is roughly a year of writing before the cap at observed rates.
 
+**Feedback.** *Menu → Send feedback* composes a report and hands it to your own mail app as a `mailto:` to hello@journlet.com. The diagnostics block is shown in an editable box before it goes anywhere and carries no journal content: build, commit, installed or tab, user agent, window size, network, sync state, the last server error, and a count and size for the journal. The draft is kept in local storage on that device so being offline or closing the app does not lose it, and it is never added to the journal or sent to the server. The screen claims only that a mail app was opened, because that is all it can know. A report too long for a mail link is refused rather than truncated, with the clipboard offered instead. Deliberately not a Supabase table: see spec §13.1 for the three reasons, and §11 Q18 for the aggregate signal this route does not provide.
+
 Persistence is a Yjs CRDT document stored in IndexedDB via y-indexeddb — the same document that is encrypted client-side and synced through Supabase, so the server only ever holds ciphertext.
 
 ## Stack

@@ -64,6 +64,14 @@ export default function CannotLoadView({
         Nothing you write is lost while this is on screen, but hold off until it
         clears: this device has no copy of the journal to add to yet.
       </p>
+      {/* The Menu's feedback screen needs a journal on screen, and this screen is
+          the state where there is not one. So the address is written out here
+          rather than linked to a route that cannot be reached from here, and the
+          error above is the thing worth quoting into it (spec §13.1). */}
+      <p style={S.onboardNote}>
+        If this does not clear on its own, email hello@journlet.com. Anything shown
+        above is worth quoting.
+      </p>
     </section>
   );
 }
