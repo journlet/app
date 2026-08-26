@@ -72,6 +72,7 @@ const setup = (
     futureLogCount: 0,
     folds: {} as Record<string, boolean>,
     filter: "all" as const,
+    order: "logged" as const,
     filterRow: <div data-testid="filter-row">filter row</div>,
     ...over,
     ...spies(),
