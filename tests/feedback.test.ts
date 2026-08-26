@@ -14,10 +14,12 @@ import {
   FEEDBACK_ADDRESS,
   KIND_SUBJECT,
   MAILTO_LIMIT,
+  WEB_LIMIT,
   clearDraft,
   diagnosticLines,
   diagnosticText,
   feedbackBody,
+  feedbackGmail,
   feedbackMailto,
   loadDraft,
   saveDraft,
@@ -140,6 +142,44 @@ describe("the mail link", () => {
       feedbackBody("The capture bar covers the last entry on a short page.", diagnosticText(facts()))
     );
     expect(tooLong).toBe(false);
+  });
+});
+
+describe("the Gmail composer", () => {
+  // Added 26 August 2026, after the mailto: route met somebody with no mail client
+  // and produced an account-setup wizard. A browser composer is not a nicety here,
+  // it is the route most people actually have.
+  test("addresses the feedback mailbox and carries the subject and body", () => {
+    const { url } = feedbackGmail("broken", "the week page scrolls oddly");
+    expect(url.startsWith("https://mail.google.com/mail/?view=cm&fs=1")).toBe(true);
+    expect(url).toContain(`to=${encodeURIComponent(FEEDBACK_ADDRESS)}`);
+    expect(url).toContain(encodeURIComponent(KIND_SUBJECT.broken));
+    expect(decodeURIComponent(url)).toContain("the week page scrolls oddly");
+  });
+
+  test("uses Gmail's own parameter names, not a mailto's", () => {
+    // su and body, not subject: Gmail ignores what it does not recognise, so this
+    // would fail by arriving with an empty subject rather than by erroring.
+    const { url } = feedbackGmail("idea", "hello");
+    expect(url).toContain("&su=");
+    expect(url).not.toContain("&subject=");
+  });
+
+  test("tolerates a far longer report than a mail link does", () => {
+    // The constraint is a browser and a server, not a third-party mail client, so
+    // refusing at the mailto: limit would send people to the clipboard for nothing.
+    const body = "x".repeat(MAILTO_LIMIT + 500);
+    expect(feedbackMailto("broken", body).tooLong).toBe(true);
+    expect(feedbackGmail("broken", body).tooLong).toBe(false);
+  });
+
+  test("still refuses one long enough to be truncated in transit", () => {
+    expect(feedbackGmail("broken", "x".repeat(WEB_LIMIT + 1)).tooLong).toBe(true);
+  });
+
+  test("encodes newlines and ampersands, which would otherwise end the parameter", () => {
+    const { url } = feedbackGmail("other", "one & two\nthree");
+    expect(url).toContain("one%20%26%20two%0Athree");
   });
 });
 

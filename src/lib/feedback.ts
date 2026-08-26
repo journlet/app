@@ -14,10 +14,31 @@
 // architecture: the report is composed in the person's own mail client, they can
 // see every character before it goes, and nothing new is stored anywhere.
 //
-// What that costs, and it is not nothing. A mailto: link does nothing useful on a
-// device with no mail client configured, which is why the address is on screen as
-// text and the whole report can be copied instead. And this app cannot know
-// whether anything was sent, so nothing here ever says it was.
+// What that costs, and it is not nothing. And the first cost was understated here
+// for a day, which is worth leaving in rather than editing out.
+//
+// "A mailto: link does nothing useful on a device with no mail client configured"
+// was written as a footnote with the clipboard as its answer. On 26 August 2026, the
+// first time anybody but the author used this screen, that turned out to describe the
+// ordinary case rather than an edge: Gary reads email in Gmail in a browser, has no
+// mail client, and the link produced macOS Mail's Add Account dialog. A route whose
+// primary action opens an account-setup wizard for software you do not use is not a
+// route with a caveat, it is a dead end, and "you can always copy it" is not a
+// primary action.
+//
+// So the routes are plural, plainly labelled, and none of them is guessed at. A
+// browser composer, because most email is read in one. A mailto:, because plenty of
+// people do have a mail client and it is the only thing that works for the rest of
+// the webmail providers there is no point enumerating. And copy and paste, which
+// works everywhere and is now stated as a route rather than as a fallback.
+//
+// Nothing is detected: a page cannot tell whether a mailto: handler exists, and a
+// wrong guess here costs somebody their report. The interface rule this app already
+// follows, every action plainly labelled, no guessing, happens to be the only honest
+// answer available.
+//
+// This app also cannot know whether anything was sent, so nothing here ever says it
+// was.
 //
 // Nothing in this module touches the network, the journal, or the database. CSP
 // does not enter into it either: `form-action 'none'` governs form submissions
@@ -118,21 +139,64 @@ export const feedbackBody = (message: string, diagnostics: string): string => {
  */
 export const MAILTO_LIMIT = 1800;
 
-export interface MailtoResult {
+/**
+ * The same question for an https composer, which is a different number.
+ *
+ * A browser URL is not passed to a third-party mail client with its own ideas: the
+ * constraint is the browser and the receiving server, and 8,000 characters is the
+ * conventional floor for those. This sits well under it. A report is a few hundred
+ * characters, so neither limit is reached by anything but a pasted log.
+ */
+export const WEB_LIMIT = 7000;
+
+export interface ComposeRoute {
   url: string;
-  /** Over the limit: send by copy and paste rather than by this link. */
+  /** Over this route's limit: it would arrive truncated, so it is not offered. */
   tooLong: boolean;
 }
 
 export const feedbackMailto = (
   kind: FeedbackKind,
   body: string
-): MailtoResult => {
+): ComposeRoute => {
   const url =
     `mailto:${FEEDBACK_ADDRESS}` +
     `?subject=${encodeURIComponent(KIND_SUBJECT[kind])}` +
     `&body=${encodeURIComponent(body)}`;
   return { url, tooLong: url.length > MAILTO_LIMIT };
+};
+
+/**
+ * Gmail's own composer, prefilled.
+ *
+ * Named rather than generic because there is no generic. There is no registry a page
+ * can ask "which webmail does this person use", and the two candidates for guessing,
+ * the mailto: handler and the address domain, are both wrong often enough to lose
+ * somebody's report. So one provider is offered by name, on the grounds that it is
+ * the one most people read email in, and everybody else gets copy and paste, which is
+ * a worse experience honestly labelled rather than a broken link.
+ *
+ * Outlook was considered and left out: outlook.live.com and outlook.office.com are
+ * different composers for personal and work accounts, nothing here can tell which
+ * somebody has, and two rows that might both be wrong is worse than one row that says
+ * copy it.
+ *
+ * Nothing is requested from Google unless the person taps this: it is a link, not a
+ * fetch, and index.html sets `referrer: no-referrer` so following it discloses no
+ * page. The report travels in the URL, so it reaches Google either way once tapped,
+ * which is true of sending mail through Gmail at all and is the person's own
+ * arrangement rather than a new disclosure this app introduces.
+ */
+export const feedbackGmail = (
+  kind: FeedbackKind,
+  body: string
+): ComposeRoute => {
+  const url =
+    "https://mail.google.com/mail/?view=cm&fs=1" +
+    `&to=${encodeURIComponent(FEEDBACK_ADDRESS)}` +
+    `&su=${encodeURIComponent(KIND_SUBJECT[kind])}` +
+    `&body=${encodeURIComponent(body)}`;
+  return { url, tooLong: url.length > WEB_LIMIT };
 };
 
 // The draft, held on this device.
