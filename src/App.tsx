@@ -11,6 +11,7 @@ import {
   dkey,
   fmt,
   keyScope,
+  endLabel,
   keyToAnchor,
   pageLabel,
   periodKey,
@@ -500,6 +501,7 @@ export default function App() {
     futureLogCount,
     dueItems,
     earlierOpen,
+    endedRules,
   } = useMemo(
     () => buildSpreadData(days, recurrences, today),
     [days, recurrences, today]
@@ -1652,6 +1654,11 @@ export default function App() {
         {journalOnScreen && loaded && view === "future" && (
           <FutureLogView
             count={futureLogCount}
+            finished={endedRules.map(({ rule, last }) => ({
+              id: rule.id,
+              text: rule.text,
+              last: endLabel(last),
+            }))}
             groups={futureLogGroups}
             folds={folds}
             onToggleFold={toggleFold}

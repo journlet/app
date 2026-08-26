@@ -685,7 +685,7 @@ describe("when the repeat ends", () => {
     ).toBeTruthy();
   });
 
-  test("opening the row hands App the rule's current end as a draft", () => {
+  test("opening the row hands App the end in both forms, so switching moves nothing", () => {
     const props = setup({
       sheetEntry: repeating,
       recurrences: [daily({ endsAfter: 10 })],
@@ -693,7 +693,8 @@ describe("when the repeat ends", () => {
     fireEvent.click(screen.getByRole("button", { name: /Change when it ends…/ }));
     expect(props.setEditEnds).toHaveBeenCalledWith({
       mode: "count",
-      date: "2026-08-05",
+      // the tenth occurrence of a daily rule anchored 20 July
+      date: "2026-07-29",
       count: "10",
     });
   });

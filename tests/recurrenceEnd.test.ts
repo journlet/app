@@ -285,3 +285,48 @@ describe("the Scheduled ahead preview", () => {
     expect(preview(rule({ endsOn: TODAY }))).toHaveLength(0);
   });
 });
+
+// A repeat that reaches its end vanishes from the Future log, which is where
+// "what is next" is asked. It leaves a line behind for a fortnight (§11 Q17,
+// added after a day's use).
+describe("repeats that have just finished", () => {
+  const finished = (r: Recurrence, today = TODAY) =>
+    buildSpreadData({}, [r], today).endedRules;
+
+  test("a repeat that ended this month is named, with its last occurrence", () => {
+    const rows = finished(rule({ endsOn: "2026-08-19" }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].last).toBe("2026-08-19");
+  });
+
+  test("a repeat still running is not", () => {
+    expect(finished(rule({ endsOn: "2026-09-30" }))).toHaveLength(0);
+    expect(finished(rule())).toHaveLength(0);
+  });
+
+  test("today's last occurrence is not yet finished", () => {
+    expect(finished(rule({ endsOn: TODAY }))).toHaveLength(0);
+  });
+
+  test("it stops being mentioned after a fortnight", () => {
+    // 5 August is three weeks before 26 August.
+    expect(finished(rule({ endsOn: "2026-08-05" }))).toHaveLength(0);
+    expect(finished(rule({ endsOn: "2026-08-12" }))).toHaveLength(1);
+  });
+
+  test("a repeat stopped by hand keeps no receipt: you were standing there", () => {
+    expect(finished(rule({ endedAt: 1 }))).toHaveLength(0);
+  });
+
+  test("the most recently finished is named first", () => {
+    const rows = buildSpreadData(
+      {},
+      [
+        rule({ id: "old", endsOn: "2026-08-12" }),
+        rule({ id: "new", endsOn: "2026-08-19" }),
+      ],
+      TODAY
+    ).endedRules;
+    expect(rows.map((r) => r.rule.id)).toEqual(["new", "old"]);
+  });
+});

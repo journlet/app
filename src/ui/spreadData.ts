@@ -3,7 +3,7 @@
 // writes, so recurrence rows here are display-only previews. Extracted from
 // App so the grouping/scheduling logic can be unit-tested directly.
 
-import { SCOPES, keyScope, keyToAnchor, periodKey } from "../lib/dates";
+import { SCOPES, keyScope, keyToAnchor, periodKey, toDate } from "../lib/dates";
 import type { Scope } from "../lib/dates";
 import type { Entry, Recurrence } from "../lib/types";
 import { entryVisible } from "../lib/filter";
@@ -56,7 +56,25 @@ export interface SpreadData {
    * always share a scope, so a plain string compare orders them.
    */
   earlierOpen: Record<string, { pk: string; entry: Entry }[]>;
+  /**
+   * Repeats that have just finished, most recent first (spec §11 Q17, added
+   * 26 August 2026 after a day's use).
+   *
+   * A rule that reaches its end leaves the future log silently: the caption
+   * saying `repeats, last one` is on the occurrence's own page, which is a page
+   * you have finished with by the time you go looking for the next one. So the
+   * Future log carries the fact for a fortnight, where the question is actually
+   * asked. Only rules with a planned end are listed: *Stop repeating* is a
+   * deliberate act with a visible effect on the row in front of you, and does
+   * not need a receipt.
+   */
+  endedRules: { rule: Recurrence; last: string }[];
 }
+
+/** How long a finished repeat stays named in the Future log. A fortnight: long
+ *  enough to cover "it should have gone out this week", short enough that the
+ *  page does not become a graveyard. */
+export const ENDED_RULE_DAYS = 14;
 
 export function buildSpreadData(
   days: Record<string, Entry[]>,
@@ -189,6 +207,21 @@ export function buildSpreadData(
     list.sort((a, b) => (a.pk < b.pk ? -1 : a.pk > b.pk ? 1 : 0))
   );
 
+  // Repeats that finished recently (see endedRules above). Measured in days
+  // from the last occurrence's own page, so a monthly rule's last month counts
+  // from the day that page began.
+  const endedRules = recurrences
+    .filter((r) => {
+      const last = lastOccurrence(r);
+      if (!last || last >= periodKey(r.pageScope, today)) return false;
+      const gone =
+        (toDate(today).getTime() - toDate(keyToAnchor(last)).getTime()) /
+        86400000;
+      return gone <= ENDED_RULE_DAYS;
+    })
+    .map((r) => ({ rule: r, last: lastOccurrence(r) as string }))
+    .sort((a, b) => (a.last < b.last ? 1 : -1));
+
   return {
     nowKeys,
     pastOpen,
@@ -199,5 +232,6 @@ export function buildSpreadData(
     futureLogCount,
     dueItems,
     earlierOpen,
+    endedRules,
   };
 }
