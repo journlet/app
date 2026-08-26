@@ -634,6 +634,17 @@ export const S = {
     fontSize: 12,
     marginTop: 4,
   },
+  // "Repeat finished: …" on the Future log (spec §11 Q17). One --grid line box
+  // so the page keeps its rhythm, and quiet: it is a fact about something that
+  // has stopped, sitting above the things that have not.
+  finishedNote: {
+    fontSize: 12.5,
+    lineHeight: `${GRID}px`,
+    color: INK_SOFT,
+    margin: 0,
+    padding: "0 4px",
+  },
+  finishedWhen: { fontSize: 11.5 },
   subLede: {
     fontSize: 13,
     lineHeight: 1.55,

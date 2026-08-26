@@ -21,7 +21,11 @@ import {
   ruleSentence,
   skipOccurrence,
 } from "../store/recurrence";
-import EndsForm, { endsDraftFor, resolveEnds } from "./EndsForm";
+import EndsForm, {
+  endsDraftFor,
+  endsSaveLabel,
+  resolveEnds,
+} from "./EndsForm";
 import { S } from "./styles";
 import type { EditEnds } from "./types";
 
@@ -40,7 +44,7 @@ export default function RuleActionsSheet({
 }: RuleActionsSheetProps) {
   const [ends, setEnds] = useState<EditEnds | null>(null);
   const base: Recurrence = { ...rule, endsOn: undefined, endsAfter: undefined };
-  const endsError = ends ? resolveEnds(base, ends, today).error : null;
+  const endsRes = ends ? resolveEnds(base, ends, today) : null;
 
   return (
     <div style={S.sheetBackdrop} onClick={onClose}>
@@ -85,7 +89,7 @@ export default function RuleActionsSheet({
             />
             <button
               className="sheetBtn"
-              disabled={endsError !== null}
+              disabled={endsRes?.error != null}
               onClick={() => {
                 setRecurrenceEnd(
                   rule.id,
@@ -98,7 +102,7 @@ export default function RuleActionsSheet({
                 onClose();
               }}
             >
-              {ends.mode === "never" ? "Save: no end" : "Save when it ends"}
+              {endsRes ? endsSaveLabel(endsRes, base) : "Save when it ends"}
             </button>
             <button
               className="sheetBtn isQuiet"

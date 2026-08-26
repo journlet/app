@@ -65,7 +65,11 @@ import {
   ruleSentence,
 } from "../store/recurrence";
 import { notificationPermission } from "../store/reminders";
-import EndsForm, { endsDraftFor, resolveEnds } from "./EndsForm";
+import EndsForm, {
+  endsDraftFor,
+  endsSaveLabel,
+  resolveEnds,
+} from "./EndsForm";
 import PagePicker from "./PagePicker";
 import { S } from "./styles";
 import type { EditEnds, EditRepeat, SheetTarget } from "./types";
@@ -266,12 +270,15 @@ export default function EntryActionsSheet({
   const endsBase: Recurrence | null = activeRule
     ? { ...activeRule, endsOn: undefined, endsAfter: undefined }
     : null;
-  const endsError =
-    editEnds && endsBase
-      ? resolveEnds(endsBase, editEnds, today).error
-      : editRepeat && repeatBase
-        ? resolveEnds(repeatBase, editRepeat.ends, today).error
-        : null;
+  // One resolution per surface, so the box, the button's words and the save all
+  // describe the same answer (spec §11 Q17).
+  const endsRes =
+    editEnds && endsBase ? resolveEnds(endsBase, editEnds, today) : null;
+  const repeatRes =
+    editRepeat && repeatBase
+      ? resolveEnds(repeatBase, editRepeat.ends, today, true)
+      : null;
+  const endsError = endsRes?.error ?? repeatRes?.error ?? null;
 
   /** The entry itself, glyph and words both — never the symbol alone */
   const entryLine = (
@@ -484,6 +491,7 @@ export default function EntryActionsSheet({
                   value={editRepeat.ends}
                   onChange={(ends) => setEditRepeat({ ...editRepeat, ends })}
                   today={today}
+                  creating
                   idPrefix="repeat"
                 />
               </>
@@ -515,8 +523,8 @@ export default function EntryActionsSheet({
                   onClick={saveEnds}
                   disabled={endsError !== null}
                 >
-                  {editEnds.mode === "never"
-                    ? "Save: no end"
+                  {endsRes && endsBase
+                    ? endsSaveLabel(endsRes, endsBase)
                     : "Save when it ends"}
                 </button>
               </>
@@ -887,7 +895,10 @@ export default function EntryActionsSheet({
                   // (spec §11 Q17).
                   // A default the control can express and that means
                   // something: twelve more of whatever cadence was just
-                  // chosen, on one of the rule's own days (see endsDraftFor).
+                  // chosen, counted from this entry, which is the first
+                  // (see endsDraftFor for the same reasoning on an existing
+                  // rule). Well clear of the count's floor, which is the
+                  // answer "this is the only one".
                   ends: {
                     mode: "never",
                     date: shiftAnchor(
@@ -895,7 +906,7 @@ export default function EntryActionsSheet({
                       today,
                       12
                     ),
-                    count: "12",
+                    count: "13",
                   },
                 });
               })}
