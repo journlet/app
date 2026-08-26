@@ -116,6 +116,23 @@ export const diagnosticText = (f: FeedbackFacts): string =>
 const REPORT_RULE = "--- Journlet report ---";
 
 /**
+ * The subject, written into the text itself.
+ *
+ * The two link routes hand the platform a subject field and a body field. The
+ * clipboard has no fields: it carries characters. So the kind chosen on the screen,
+ * which is the whole of the triage this route offers, was silently dropped by the
+ * one route that works everywhere, and a report pasted into iCloud Mail on
+ * 26 August 2026 arrived as "(no subject)".
+ *
+ * The fix is to put it in the text, prefixed the way people already write it when
+ * they paste a message somewhere. Whoever wants a real subject can cut this line
+ * into the field; whoever pastes the lot into the body loses nothing, which is the
+ * likelier thing to happen and the case this is for.
+ */
+export const subjectLine = (kind: FeedbackKind): string =>
+  `Subject: ${KIND_SUBJECT[kind]}`;
+
+/**
  * The message body: what the person wrote, then the block they have had the
  * chance to edit or empty.
  *
@@ -148,6 +165,17 @@ export const MAILTO_LIMIT = 1800;
  * characters, so neither limit is reached by anything but a pasted log.
  */
 export const WEB_LIMIT = 7000;
+
+/**
+ * What the copy button puts on the clipboard: the same message as the links, with
+ * the subject line above it.
+ *
+ * Deliberately not the same string the links send. A `mailto:` carrying
+ * "Subject: ..." as the first line of its body would put it in the message twice,
+ * once in the field and once in the text, which reads as a bug rather than as care.
+ */
+export const feedbackClipboard = (kind: FeedbackKind, body: string): string =>
+  `${subjectLine(kind)}\n\n${body}`;
 
 export interface ComposeRoute {
   url: string;

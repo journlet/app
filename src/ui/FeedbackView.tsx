@@ -40,6 +40,7 @@ import {
   clearDraft,
   diagnosticText,
   feedbackBody,
+  feedbackClipboard,
   feedbackGmail,
   feedbackMailto,
   loadDraft,
@@ -107,7 +108,9 @@ export default function FeedbackView({
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(body);
+      // Not `body`: the clipboard has no subject field, so the subject travels as
+      // the first line or not at all. See lib/feedback.ts.
+      await navigator.clipboard.writeText(feedbackClipboard(kind, body));
       setTaken("copy");
     } catch {
       // Clipboard blocked or unavailable. The text is on screen to be selected,
@@ -268,8 +271,9 @@ export default function FeedbackView({
           <div style={ST.rowLabel}>Copy it and paste it yourself</div>
           <div style={ST.rowDesc}>
             Works everywhere, and it is the route for any other webmail: Outlook,
-            Proton, Fastmail, a work account. Copy this, then paste it into a new
-            email to {FEEDBACK_ADDRESS}.
+            Proton, Fastmail, iCloud, a work account. Copy this, then paste it into
+            a new email to {FEEDBACK_ADDRESS}. The subject comes with it as the
+            first line, since a pasted message cannot carry one of its own.
           </div>
         </div>
         <div style={ST.rowBtn}>
@@ -303,8 +307,10 @@ export default function FeedbackView({
       )}
       {taken === "copy" && (
         <p style={S.onboardNote}>
-          Copied. Paste it into a new email to {FEEDBACK_ADDRESS} wherever you
-          write email. Your draft stays here.
+          Copied, with the subject as its first line. Paste all of it into a new
+          email to {FEEDBACK_ADDRESS} wherever you write email, and leave the
+          subject field alone if that is easier: nothing is lost either way. Your
+          draft stays here.
         </p>
       )}
 
