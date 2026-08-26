@@ -30,6 +30,35 @@ const SYNC_ATTENTION: SyncStatus[] = [
   "offline",
 ];
 
+/** Does this status want something from the reader? */
+const needsYou = (s: SyncStatus): boolean => SYNC_ATTENTION.includes(s);
+
+/**
+ * What the badge shows (spec §4.5, shortened 26 August 2026).
+ *
+ * The bare noun while nothing needs you, the state named in full when
+ * something does — the rule the filter badge already follows, where "filter"
+ * alone means nothing is hidden and "filter · open only" means something is.
+ * The accessible name carries the whole wording either way, exactly as it does
+ * for the filter's shortened label.
+ *
+ * The reason is width, and it was measured rather than felt. This row is the
+ * brand plus `menu`, the filter badge and this one, all of them .miniBtn pills
+ * whose padding and border cost 14px before any text. At 375px, allowing 10px
+ * of clear air after the brand: `sync · synced` is 84px and leaves 13px spare,
+ * and `sync · connecting…` — the longest thing SYNC_BADGE can say, and a
+ * status every launch passes through — does not fit at all, overrunning by
+ * 14px. A bare `sync` is 38px and leaves 59px. Nothing else in the header
+ * changes; §4.9's filter badge already shortens its own wording below 480px
+ * for the same reason.
+ *
+ * What this trades away is the standing reassurance of the word "synced" while
+ * everything is well. That is deliberate: a badge that says the same thing
+ * every time you look at it is one you stop reading, and the Sync screen this
+ * button opens says the whole of it. Reverting is this function.
+ */
+const syncLabel = (s: SyncStatus): string => (needsYou(s) ? SYNC_BADGE[s] : "sync");
+
 // Search deliberately does not live here. It sits bottom-left on the capture
 // bar (CaptureLauncher), within a thumb's reach and in one fixed place on
 // every journal page; a second copy up here would be the same action in two
@@ -121,13 +150,16 @@ export default function Header({
           <button
             className="miniBtn"
             style={
-              SYNC_ATTENTION.includes(syncStatus)
+              needsYou(syncStatus)
                 ? { color: "var(--danger)", borderColor: "var(--danger-line)" }
                 : undefined
             }
+            // Visible text is the bare noun while nothing needs you; the
+            // accessible name always says which status it is
+            aria-label={SYNC_BADGE[syncStatus]}
             onClick={onSyncClick}
           >
-            {SYNC_BADGE[syncStatus]}
+            {syncLabel(syncStatus)}
           </button>
         </span>
       </div>
