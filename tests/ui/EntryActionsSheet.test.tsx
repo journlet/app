@@ -11,8 +11,10 @@ vi.mock("../../src/store/journal", () => ({
   endRecurrence: vi.fn(),
   migrateEntry: vi.fn(),
   moveTo: vi.fn(),
+  setEntryType: vi.fn(),
   setParent: vi.fn(),
   setReminder: vi.fn(),
+  setSignifier: vi.fn(),
   setText: vi.fn(),
   toggleDone: vi.fn(),
   toggleStruck: vi.fn(),
@@ -32,7 +34,9 @@ vi.mock("../../src/store/reminders", () => ({
 import {
   migrateEntry,
   moveTo,
+  setEntryType,
   setParent,
+  setSignifier,
   setText,
   toggleDone,
   toggleStruck,
@@ -455,7 +459,14 @@ describe("the shape of the view (6 August 2026)", () => {
     // and the pages are chosen inside its step. The same entry in the old sheet
     // put well over twenty controls on screen, because the migrate row, the page
     // picker and the schedule field were all expanded at once.
-    expect(screen.getAllByRole("button").length).toBeLessThanOrEqual(16);
+    //
+    // Raised from 16 on 26 August 2026, when Signifiers and Type were added
+    // (spec §4.1a). The bound is on the shape, not the number: two rows is
+    // what those actions cost as rows, and it is the whole of what they cost —
+    // both keep their controls inside a step, so this worst case is still
+    // fixed and still one screen. Anything that would raise it again by
+    // unfolding in place is the thing this guard is for.
+    expect(screen.getAllByRole("button").length).toBeLessThanOrEqual(18);
   });
 
   test("a completed task is offered no schedule step", () => {
@@ -731,5 +742,123 @@ describe("when the repeat ends", () => {
     });
     expect(screen.getByRole("group", { name: "When it ends" })).toBeTruthy();
     expect(screen.getByText(/No end/)).toBeTruthy();
+  });
+});
+
+// Changing what an entry says (spec §4.1a, 26 August 2026). The two steps
+// deliberately behave differently, and the difference is the thing under test:
+// a signifier writes on tap because it loses nothing, a type change waits for
+// a save because it can drop a ×.
+describe("Signifiers step", () => {
+  test("the row says what is lit now, before it is opened", () => {
+    setup({ sheetEntry: { ...openTask, priority: true, inspiration: true } });
+    const row = screen.getByRole("button", { name: "Signifiers…" });
+    expect(row.textContent).toContain("* priority, ! inspiration");
+  });
+
+  test("nothing lit says so rather than saying nothing", () => {
+    setup();
+    expect(
+      screen.getByRole("button", { name: "Signifiers…" }).textContent
+    ).toContain("none");
+  });
+
+  test("lighting a priority writes on tap, with no save step", () => {
+    const props = setup();
+    openStep("Signifiers…");
+    fireEvent.click(screen.getByRole("button", { name: /priority/ }));
+    expect(setSignifier).toHaveBeenCalledWith("e1", "priority", true);
+    // the step stays open and the view stays put: the change is done
+    expect(props.closeSheet).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+  });
+
+  test("tapping a lit chip clears it", () => {
+    setup({ sheetEntry: { ...openTask, priority: true } });
+    openStep("Signifiers…");
+    const chip = screen.getByRole("button", { name: /priority/ });
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(chip);
+    expect(setSignifier).toHaveBeenCalledWith("e1", "priority", false);
+  });
+
+  test("an occurrence of a repeat says only this one changes", () => {
+    setup({
+      sheetEntry: { ...openTask, recurrenceId: "r1" },
+      recurrences: [
+        {
+          id: "r1",
+          text: "write report",
+          type: "task",
+          priority: false,
+          everyN: 1,
+          unit: "week",
+          pageScope: "week",
+          anchor: "2026-07-24",
+          materialisedThrough: "2026-07-24",
+          createdAt: 0,
+        } as Recurrence,
+      ],
+    });
+    openStep("Signifiers…");
+    expect(screen.getByText(/This occurrence changes on its own/)).toBeTruthy();
+  });
+});
+
+describe("Type step", () => {
+  test("the row names the type it would change", () => {
+    setup();
+    expect(
+      screen.getByRole("button", { name: "Type…" }).textContent
+    ).toContain("currently • task");
+  });
+
+  test("a type is chosen, then saved — and only then does it write", () => {
+    const props = setup();
+    openStep("Type…");
+    expect(
+      (screen.getByRole("button", { name: "No change to save" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /note/ }));
+    expect(setEntryType).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(setEntryType).toHaveBeenCalledWith("e1", "note");
+    expect(props.closeSheet).toHaveBeenCalledTimes(1);
+  });
+
+  test("a completed task is told the × goes, before the save", () => {
+    setup({ sheetEntry: { ...openTask, state: "done" } });
+    openStep("Type…");
+    expect(screen.queryByText(/there is no such thing as a completed/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /note/ }));
+    expect(screen.getByText(/no such thing as a completed note/)).toBeTruthy();
+  });
+
+  test("an open task is told nothing, because nothing is lost", () => {
+    setup();
+    openStep("Type…");
+    fireEvent.click(screen.getByRole("button", { name: /note/ }));
+    expect(screen.queryByText(/no such thing as a completed/)).toBeNull();
+  });
+
+  test("refused on a migrated entry, in place and with the reason on the row", () => {
+    setup({ sheetEntry: { ...openTask, state: "migrated" } });
+    const row = screen.getByRole("button", { name: "Type…" }) as HTMLButtonElement;
+    expect(row.disabled).toBe(true);
+    expect(row.textContent).toContain("not while this is migrated");
+    fireEvent.click(row);
+    expect(screen.queryByRole("button", { name: /No change to save/ })).toBeNull();
+  });
+
+  test("a scheduled entry is refused the same way, and can still change signifiers", () => {
+    setup({ sheetEntry: { ...openTask, state: "scheduled" } });
+    expect(
+      (screen.getByRole("button", { name: "Type…" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Signifiers…" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
   });
 });

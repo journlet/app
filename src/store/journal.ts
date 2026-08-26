@@ -239,6 +239,67 @@ export const cycleType = (id: string): void => {
   doc.transact(() => m.set("type", next));
 };
 
+/**
+ * Set or clear a signifier on an existing entry (spec §4.1a, added 26 August
+ * 2026). A non-priority becomes a priority: the commonest change there was no
+ * way to make, since * and ! could only be chosen at capture.
+ *
+ * Lossless and exactly self-reversing — nothing else about the entry moves,
+ * the bullet included, because a signifier is a mark on an entry and not a
+ * kind of entry. That is what lets the UI write it on tap rather than behind
+ * a save step.
+ *
+ * `inspiration` is optional in the model, so clearing it deletes the key
+ * rather than writing `false`: the export, the snapshot and every merge stay
+ * free of signifiers nobody set.
+ */
+export const setSignifier = (
+  id: string,
+  which: "priority" | "inspiration",
+  on: boolean
+): void => {
+  const m = findMap(id);
+  if (!m) return;
+  doc.transact(() => {
+    if (which === "priority") m.set("priority", on);
+    else if (on) m.set("inspiration", true);
+    else m.delete("inspiration");
+  });
+};
+
+/**
+ * Change an entry's type after the fact (spec §4.1a, added 26 August 2026).
+ * Until now the only route was the glyph tap, which cycles event → note →
+ * task but completes a *task* instead, so a task logged by mistake could not
+ * become a note at all.
+ *
+ * The task states are what make this more than a field write:
+ *
+ *   × is a completed task, and purist notation has no completed note, so a
+ *     task that stops being a task stops being complete — the state goes back
+ *     to open and the UI says so before the save, never after.
+ *   › and ‹ are half of a pair: the marker stays here and the live copy sits
+ *     on the page it was carried to. Dropping one the way × is dropped would
+ *     leave a trail that no longer joins up, so the change is refused. The
+ *     entry view offers the row inert with the reason on it; this is the
+ *     backstop for any other caller.
+ *
+ * A strikethrough survives any type — irrelevant applies to anything.
+ * Returns false when refused, true when the entry already had that type.
+ */
+export const setEntryType = (id: string, type: EntryType): boolean => {
+  const m = findMap(id);
+  if (!m) return false;
+  const state = m.get("state") as EntryState;
+  if (state === "migrated" || state === "scheduled") return false;
+  if (m.get("type") === type) return true;
+  doc.transact(() => {
+    m.set("type", type);
+    if (state === "done" && type !== "task") m.set("state", "open");
+  });
+  return true;
+};
+
 export const toggleStruck = (id: string): void => {
   const m = findMap(id);
   if (!m) return;
