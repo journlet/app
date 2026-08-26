@@ -4,8 +4,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import SpreadView from "../../src/ui/SpreadView";
 import { periodKey } from "../../src/lib/dates";
 import type { Scope } from "../../src/lib/dates";
-import type { Entry } from "../../src/lib/types";
+import type { Entry, Recurrence } from "../../src/lib/types";
 import type { EntryFilter } from "../../src/lib/filter";
+import type { ScheduledRow } from "../../src/ui/types";
 
 afterEach(cleanup);
 
@@ -49,9 +50,10 @@ const spies = () => ({
   renderEntry: vi.fn((e: Entry, _pk: string, _sc: Scope | null) => (
     <li key={e.id}>{e.text}</li>
   )),
-  renderScheduledRow: vi.fn(() => null),
+  renderScheduledRow: vi.fn((_row: ScheduledRow, _grouped: boolean) => null),
   renderThreadedHere: vi.fn(() => null),
   setAnchors: vi.fn(),
+  onToggleFold: vi.fn(),
   onReview: vi.fn(),
   onOpenFutureLog: vi.fn(),
 });
@@ -68,6 +70,7 @@ const setup = (
     scheduledRows: [],
     laterThisMonth: [],
     futureLogCount: 0,
+    folds: {} as Record<string, boolean>,
     filter: "all" as const,
     filterRow: <div data-testid="filter-row">filter row</div>,
     ...over,
@@ -200,4 +203,97 @@ test("the filter row sits after the review banner and before the journal", () =>
   // Node.compareDocumentPosition: 4 = the argument follows the reference node
   expect(banner.compareDocumentPosition(row) & 4).toBeTruthy();
   expect(row.compareDocumentPosition(due) & 4).toBeTruthy();
+});
+
+// "Later this month" (spec §11 Q19). The section is one line per active
+// repeating rule most months, which put twelve grid rows of chores between the
+// month's own intentions and This Year. What folds is what the app predicted;
+// what you dated by hand never folds.
+describe("later this month", () => {
+  const rule = (id: string): Recurrence => ({
+    id,
+    text: id,
+    type: "task",
+    priority: false,
+    everyN: 1,
+    unit: "week",
+    pageScope: "day",
+    anchor: "2026-07-24",
+    materialisedThrough: "2026-07-24",
+    createdAt: 0,
+  });
+  const preview = (id: string): ScheduledRow => ({
+    kind: "rule",
+    sort: "2026-07-28",
+    dayKey: "2026-07-28",
+    rule: rule(id),
+  });
+  const dated = (id: string): ScheduledRow => ({
+    kind: "entry",
+    sort: "2026-07-28",
+    pk: "2026-07-28",
+    entry: { ...entry, id, text: id, pageKey: "2026-07-28" },
+  });
+  const foldKey = `later:${nowKeys.month}`;
+  const shown = (props: ReturnType<typeof setup>) =>
+    props.renderScheduledRow.mock.calls.map(([r]) =>
+      r.kind === "entry" ? r.entry.id : r.rule.id
+    );
+
+  test("repeats start folded, with a count and the label saying what they are", () => {
+    const props = setup({ laterThisMonth: [preview("bins"), preview("shop")] });
+    expect(screen.getByText("Later this month · repeating")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /2 items · show/ })).toBeTruthy();
+    expect(shown(props)).toEqual([]);
+  });
+
+  test("unfolded, the previews render", () => {
+    const props = setup({
+      laterThisMonth: [preview("bins"), preview("shop")],
+      folds: { [foldKey]: false },
+    });
+    expect(shown(props)).toEqual(["bins", "shop"]);
+    expect(screen.getByRole("button", { name: /2 items · hide/ })).toBeTruthy();
+  });
+
+  test("tapping it asks App to unfold, carrying folded-by-default", () => {
+    const props = setup({ laterThisMonth: [preview("bins")] });
+    fireEvent.click(screen.getByRole("button", { name: /1 item · show/ }));
+    expect(props.onToggleFold).toHaveBeenCalledWith(foldKey, true);
+  });
+
+  test("a row dated by hand stays on the page while the repeats fold", () => {
+    const props = setup({
+      laterThisMonth: [dated("dentist"), preview("bins")],
+    });
+    expect(shown(props)).toEqual(["dentist"]);
+    expect(screen.getByText("Later this month")).toBeTruthy();
+    expect(screen.getByText("Repeating, later this month")).toBeTruthy();
+  });
+
+  test("a migrated copy counts as written, not as a repeat (§11 Q15)", () => {
+    const copy: ScheduledRow = {
+      kind: "entry",
+      sort: "2026-07-28",
+      pk: "2026-07-28",
+      entry: {
+        ...entry,
+        id: "copy",
+        pageKey: "2026-07-28",
+        recurrenceId: "r1",
+        migratedFrom: "mon",
+      },
+    };
+    const props = setup({ laterThisMonth: [copy, preview("bins")] });
+    expect(shown(props)).toEqual(["copy"]);
+  });
+
+  test("nothing is drawn when the filter empties the group", () => {
+    const done: Entry = { ...entry, id: "d", state: "done", pageKey: "2026-07-28" };
+    setup({
+      filter: "open",
+      laterThisMonth: [{ kind: "entry", sort: "2026-07-28", pk: "2026-07-28", entry: done }],
+    });
+    expect(screen.queryByText(/Later this month/)).toBeNull();
+  });
 });

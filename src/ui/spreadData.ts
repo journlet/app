@@ -32,6 +32,21 @@ export const filterRows = (
   );
 };
 
+/**
+ * Did somebody write this row, or does it merely predict something? A rule
+ * preview predicts, and so does an occurrence already materialised onto a
+ * future page, since the rule put it there rather than a person. A copy made
+ * by migrating keeps its `recurrenceId` for provenance but was a deliberate
+ * act, so it counts as written — the same reading of a migrated copy as
+ * §11 Q15, and the same test the `covered` set below applies.
+ *
+ * Used by the month section (spec §11 Q19): predicted rows fold behind a
+ * count, written rows stay on the page, because the thing you would forget is
+ * the one you dated yourself, never the bins.
+ */
+export const rowIsPredicted = (r: ScheduledRow): boolean =>
+  r.kind === "rule" || (!!r.entry.recurrenceId && !r.entry.migratedFrom);
+
 export interface SpreadData {
   nowKeys: Record<Scope, string>;
   /** Open tasks on expired pages, awaiting a migration decision. */
