@@ -6,6 +6,19 @@ import type { SyncStatus } from "../../src/store/sync";
 
 afterEach(cleanup);
 
+// Header.tsx's SYNC_BADGE, restated here on purpose. Exporting it would let a
+// change to the wording pass both sides of the test at once.
+const SYNC_LABELS: Record<SyncStatus, string> = {
+  disabled: "sync",
+  starting: "sync · starting…",
+  "signed-out": "sync · signed out",
+  connecting: "sync · connecting…",
+  "needs-key": "sync · key needed",
+  synced: "sync · synced",
+  pending: "sync · waiting",
+  offline: "sync · offline",
+};
+
 const base = {
   showBack: false,
   showMenu: true,
@@ -61,6 +74,43 @@ test("an attention status colours the sync button", () => {
     name: "sync · offline",
   }) as HTMLButtonElement;
   expect(btn.style.color).toBe("var(--danger)");
+});
+
+// The badge's wording (spec §4.5, shortened 26 August 2026). Same rule as the
+// filter button above: the bare noun while there is nothing to say, the state
+// named when there is. The width this buys is the point — at 375px the full
+// wording of the longest status does not fit beside menu and a named filter.
+test.each(["synced", "connecting", "starting", "disabled"] as SyncStatus[])(
+  "a status that needs nothing shows the bare noun: %s",
+  (status) => {
+    render(<Header {...base} syncStatus={status} />);
+    const btn = screen.getByRole("button", {
+      name: SYNC_LABELS[status],
+    }) as HTMLButtonElement;
+    // said in full to a screen reader, short on screen
+    expect(btn.textContent).toBe("sync");
+    // muted like every other header button — nothing to say
+    expect(btn.style.color).toBe("");
+  }
+);
+
+test.each(["offline", "pending", "signed-out", "needs-key"] as SyncStatus[])(
+  "a status that needs you is named on the button: %s",
+  (status) => {
+    render(<Header {...base} syncStatus={status} />);
+    const btn = screen.getByRole("button", {
+      name: SYNC_LABELS[status],
+    }) as HTMLButtonElement;
+    expect(btn.textContent).toBe(SYNC_LABELS[status]);
+    expect(btn.style.color).toBe("var(--danger)");
+  }
+);
+
+test("shortening never costs the accessible name", () => {
+  const { rerender } = render(<Header {...base} syncStatus="connecting" />);
+  expect(screen.getByRole("button", { name: "sync · connecting…" })).toBeTruthy();
+  rerender(<Header {...base} syncStatus="starting" />);
+  expect(screen.getByRole("button", { name: "sync · starting…" })).toBeTruthy();
 });
 
 // The filter badge (remediation item 7, revised 4 Aug 2026). The row is chrome
