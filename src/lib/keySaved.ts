@@ -25,8 +25,10 @@
 //   pretending the app can see where a code has been put. Nothing anywhere can:
 //   the honest version of this flag is a self-report, and the screen is written
 //   that way.
+import { JOURNAL_KEY_SAVED_KEY } from "./storageKeys";
 
-const SAVED_KEY = "journlet-journal-key-saved";
+
+const SAVED_KEY = JOURNAL_KEY_SAVED_KEY;
 
 /**
  * Note that the key is somewhere safe.

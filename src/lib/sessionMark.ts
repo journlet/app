@@ -24,8 +24,10 @@
 // Nothing about the account is written here, only that one existed. The address
 // is already on the Sync screen and this file has no need of it: a bare flag
 // cannot leak an identity to anything that reads the storage it sits in.
+import { SESSION_SEEN_KEY } from "./storageKeys";
 
-const SEEN_KEY = "journlet-session-seen";
+
+const SEEN_KEY = SESSION_SEEN_KEY;
 
 /**
  * Note that Supabase has handed this device a session.

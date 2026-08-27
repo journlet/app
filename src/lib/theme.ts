@@ -6,10 +6,12 @@
 // "system" is handled by a prefers-color-scheme rule in index.css: we simply
 // remove the data-theme attribute and let CSS decide, so an OS switch needs no
 // JS and there's no flash on load. Explicit light/dark set the attribute.
+import { THEME_KEY } from "./storageKeys";
+
 
 export type ThemePref = "system" | "light" | "dark";
 
-const KEY = "journlet-theme-v1";
+const KEY = THEME_KEY;
 
 export const loadTheme = (): ThemePref => {
   try {

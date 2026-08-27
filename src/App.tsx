@@ -137,6 +137,7 @@ import {
 import { acknowledgeRecovery, recoveryPending } from "./lib/recoveryAck";
 import { buildSpreadData } from "./ui/spreadData";
 import { buildMigrationHistory } from "./ui/migrationHistory";
+import { FUTURELOG_FOLDS_KEY } from "./lib/storageKeys";
 import type {
   EditEnds,
   EditRepeat,
@@ -162,7 +163,7 @@ type View =
 // Fold state is a device preference, not journal content — kept local like
 // sticky capture state, never synced. Keys are namespaced: a Future log month
 // is its own page key, the spread's repeating group is `later:<month>`.
-const FOLDS_KEY = "journlet-futurelog-folds";
+const FOLDS_KEY = FUTURELOG_FOLDS_KEY;
 
 // Honour the OS "reduce motion" setting for scripted scrolling, as the CSS
 // already does for its transitions

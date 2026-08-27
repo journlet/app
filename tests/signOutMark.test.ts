@@ -240,6 +240,30 @@ describe("signing out", () => {
     expect(wiped).toBe(true);
   });
 
+  test("takes the pending keeper key with it", async () => {
+    // The erase used to remove one localStorage key by hand and leave eighteen,
+    // among them the keeper key a QR scan stashes in plaintext for thirty
+    // minutes. Signing out inside that window left the credential that opens the
+    // journal on a device the spec describes as holding nothing afterwards. This
+    // asserts the wiring rather than the helper, which tests/storageKeys.test.ts
+    // covers on its own.
+    const sync = await boot();
+    const { PENDING_JOURNAL_KEY, DEVICE_ID_KEY } = await import(
+      "../src/lib/storageKeys"
+    );
+    localStorage.setItem(
+      PENDING_JOURNAL_KEY,
+      JSON.stringify({ k: "J1-AAAA-BBBB", t: Date.now() })
+    );
+
+    await sync.signOutAndWipe();
+
+    expect(localStorage.getItem(PENDING_JOURNAL_KEY)).toBeNull();
+    // And the register handle stays, or signing back in writes a second row and
+    // leaves this device's own signed-out row standing.
+    expect(localStorage.getItem(DEVICE_ID_KEY)).toBe("phone");
+  });
+
   test("wipes even when the mark cannot be pushed", async () => {
     // Offline: nothing can be recorded, the row goes stale as it did before,
     // and sign-out proceeds regardless. A device that could not be signed out

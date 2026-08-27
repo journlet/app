@@ -10,8 +10,10 @@
 // something on this screen, not about the journal, and syncing it would make
 // one device's acknowledgement silence the prompt on another that had shown
 // nobody anything.
+import { RECOVERY_PENDING_KEY } from "./storageKeys";
 
-const PENDING_KEY = "journlet-recovery-pending";
+
+const PENDING_KEY = RECOVERY_PENDING_KEY;
 
 /**
  * Note that a journal has just been created here and its code is unseen.

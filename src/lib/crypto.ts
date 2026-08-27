@@ -7,6 +7,8 @@
 // ciphertext. The wrapped-data-key indirection means an optional
 // passphrase could be added later without re-encrypting content.
 
+import { b64decode, b64encode } from "./base64";
+
 const ALG = "AES-GCM";
 const IV_BYTES = 12;
 const KEY_BYTES = 32;
@@ -49,8 +51,18 @@ const EPOCH_BYTES = 2;
 export const readPayloadEpoch = (payload: Uint8Array): number =>
   payload[0] >= 3 ? (payload[1] << 8) | payload[2] : 0;
 
-/** The wrapped-data-key blob format, unchanged by the AAD work. */
-const WRAP_VERSION = 1;
+/**
+ * The wrapped-data-key blob format, unchanged by the AAD work.
+ *
+ * Named for what it versions rather than `WRAP_VERSION`, because lib/keeperWrap.ts
+ * versions a different blob and had a constant of the same name holding the same
+ * 1. The two count independently: this one tags `journals.wrapped_key`, that one
+ * tags `keeper_wraps.wrapped` and is baked into that format's AAD string. Nothing
+ * could confuse them at runtime, since the shapes and the columns differ and the
+ * keeper wrap's AAD is namespaced, so this is a rename for the next reader rather
+ * than a fix. Bumping either must not be read as bumping both.
+ */
+const DATA_KEY_WRAP_VERSION = 1;
 
 // ---------- key generation ----------
 
@@ -74,6 +86,33 @@ export interface WrappedDataKey {
   blob: Uint8Array;
 }
 
+/**
+ * The same key as it travels: the `wrapped_key` jsonb column, base64 throughout.
+ *
+ * This lived in store/sync.ts until 27 August 2026, which made three
+ * representations of one wrapped key across two files, the wire form of a crypto
+ * type owned by the transport that happened to send it first. It is the same
+ * rule keeperWrap.ts states for `KeeperWrapJson`: the format belongs beside the
+ * bytes it describes, so a change to one is visibly a change to the other.
+ */
+export interface WrappedDataKeyJson {
+  v: number;
+  iv: string;
+  blob: string;
+}
+
+export const wrappedKeyToJson = (w: WrappedDataKey): WrappedDataKeyJson => ({
+  v: w.v,
+  iv: b64encode(w.iv),
+  blob: b64encode(w.blob),
+});
+
+export const wrappedKeyFromJson = (j: WrappedDataKeyJson): WrappedDataKey => ({
+  v: j.v,
+  iv: b64decode(j.iv),
+  blob: b64decode(j.blob),
+});
+
 export const wrapDataKey = async (
   dataKey: CryptoKey,
   keeperKey: CryptoKey
@@ -83,7 +122,7 @@ export const wrapDataKey = async (
     name: ALG,
     iv,
   });
-  return { v: WRAP_VERSION, iv, blob: new Uint8Array(blob) };
+  return { v: DATA_KEY_WRAP_VERSION, iv, blob: new Uint8Array(blob) };
 };
 
 export const unwrapDataKey = (

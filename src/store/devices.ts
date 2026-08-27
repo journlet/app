@@ -6,8 +6,9 @@
 import * as Y from "yjs";
 import { devices, doc } from "./journal";
 import { uid } from "../lib/types";
+import { DEVICE_ID_KEY } from "../lib/storageKeys";
 
-const ID_KEY = "journlet-device-id";
+const ID_KEY = DEVICE_ID_KEY;
 
 export interface DeviceRecord {
   id: string;

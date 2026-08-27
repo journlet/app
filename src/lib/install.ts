@@ -16,6 +16,7 @@
 // synced journal.
 
 import { useEffect, useState } from "react";
+import { HAS_CAPTURED_KEY, INSTALL_DISMISSED_KEY } from "./storageKeys";
 
 // `beforeinstallprompt` isn't in the standard lib.dom types yet.
 interface BeforeInstallPromptEvent extends Event {
@@ -23,8 +24,8 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-const CAPTURED_KEY = "journlet-has-captured";
-const DISMISSED_KEY = "journlet-install-dismissed-v1";
+const CAPTURED_KEY = HAS_CAPTURED_KEY;
+const DISMISSED_KEY = INSTALL_DISMISSED_KEY;
 
 // Module-level state. The browser fires `beforeinstallprompt` once, and can do
 // so before React mounts, so we attach the listener at import time and stash

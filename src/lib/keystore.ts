@@ -9,8 +9,9 @@ import {
   wrapDataKey,
 } from "./crypto";
 import type { KeyRing } from "./keyring";
+import { KEYRING_DB_NAME } from "./storageKeys";
 
-const DB_NAME = "journlet-keys";
+const DB_NAME = KEYRING_DB_NAME;
 const STORE = "keys";
 const RING_KEY = "ring-v1";
 

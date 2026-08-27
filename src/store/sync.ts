@@ -43,8 +43,10 @@ import {
   unwrapDataKey,
   importJournalKeyCode,
   exportJournalKeyCode,
+  wrappedKeyToJson,
+  wrappedKeyFromJson,
 } from "../lib/crypto";
-import type { WrappedDataKey } from "../lib/crypto";
+import type { WrappedDataKey, WrappedDataKeyJson } from "../lib/crypto";
 import {
   newWrapId,
   unwrapKeeperKeyFromAny,
@@ -92,6 +94,7 @@ import {
 } from "./syncStatus";
 import type { SyncStatus } from "./syncStatus";
 import { DEFAULT_VOLUME, getActiveVolume, setActiveVolume } from "../lib/volume";
+import { wipeDeviceStorage } from "../lib/storageKeys";
 
 const PAGE = 1000;
 
@@ -128,24 +131,6 @@ export const onSyncStatus = (fn: (s: SyncStatus) => void): (() => void) => {
 };
 
 // ---------- helpers ----------
-
-interface WrappedKeyJson {
-  v: number;
-  iv: string;
-  blob: string;
-}
-
-const wrappedToJson = (w: WrappedDataKey): WrappedKeyJson => ({
-  v: w.v,
-  iv: b64encode(w.iv),
-  blob: b64encode(w.blob),
-});
-
-const wrappedFromJson = (j: WrappedKeyJson): WrappedDataKey => ({
-  v: j.v,
-  iv: b64decode(j.iv),
-  blob: b64decode(j.blob),
-});
 
 /**
  * What a device is told when its journal has been rotated past it.
@@ -456,7 +441,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
     }
     const { error: insErr } = await supabase.from("journals").insert({
       user_id: session?.user.id,
-      wrapped_key: wrappedToJson(held.wrapped),
+      wrapped_key: wrappedKeyToJson(held.wrapped),
     });
     if (insErr) {
       setError(`Server error saving your journal key: ${insErr.message}`);
@@ -478,7 +463,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
 
   if (held.keeperKey) {
     try {
-      epoch0Wrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
+      epoch0Wrapped = wrappedKeyFromJson(data.wrapped_key as WrappedDataKeyJson);
       keeperKey0 = await unwrapDataKey(epoch0Wrapped, held.keeperKey);
       keeperUsable = true;
     } catch {
@@ -519,7 +504,7 @@ const ensureJournalKeys = async (): Promise<boolean> => {
         keys.set(
           epoch,
           await unwrapDataKey(
-            wrappedFromJson(wrappedJson as WrappedKeyJson),
+            wrappedKeyFromJson(wrappedJson as WrappedDataKeyJson),
             held.keeperKey
           )
         );
@@ -691,7 +676,7 @@ const adoptKeeperKey = async (keeperKey: CryptoKey): Promise<void> => {
     .select("wrapped_key")
     .maybeSingle();
   if (error || !data) throw new Error("Could not fetch your journal from the server");
-  const wrapped = wrappedFromJson(data.wrapped_key as WrappedKeyJson);
+  const wrapped = wrappedKeyFromJson(data.wrapped_key as WrappedDataKeyJson);
   let dataKey: CryptoKey;
   try {
     dataKey = await unwrapDataKey(wrapped, keeperKey);
@@ -1743,14 +1728,18 @@ const wipeThisDevice = async (): Promise<void> => {
   forgetSession();
   await wipeLocalJournal();
   await wipeKeys();
-  // Reminders track fired entry ids that no longer exist; reset the active
-  // volume so the fresh journal starts on the default (see reminders.ts,
-  // volume.ts). Best effort — a wipe must not fail on storage quirks.
-  try {
-    localStorage.removeItem("journlet-fired-reminders-v1");
-  } catch {
-    // ignore
-  }
+  // Everything else this device wrote into localStorage, enumerated rather than
+  // remembered. This line used to remove one key by hand, `journlet-fired-
+  // reminders-v1`, and the comment above had been asking since then for the
+  // next addition not to be missed. Eighteen keys arrived and every one of them
+  // was, including `journlet-pending-journal-key`, which holds the keeper key in
+  // plaintext for half an hour after a QR scan. lib/storageKeys.ts now owns the
+  // list and classifies each key, so adding one forces the erase decision
+  // instead of relying on somebody rereading this function.
+  wipeDeviceStorage();
+  // The fresh journal has to start on the default volume rather than on
+  // whichever one this device was last reading, so this is a reset to a value
+  // and not a removal, which is why ACTIVE_VOLUME_KEY is classified `keep`.
   setActiveVolume(DEFAULT_VOLUME);
 };
 
