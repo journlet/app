@@ -45,7 +45,6 @@ vi.mock("../../src/ui/LinkPrompts", () => ({ default: () => null }));
 vi.mock("../../src/store/useJournal", () => ({
   useJournal: () => ({
     loaded: true,
-    saveState: "saved",
     days: {
       "2026-08-13": [
         {

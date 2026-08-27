@@ -10,7 +10,6 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   applyFilter,
   entryVisible,
-  filterBadge,
   loadFilter,
   loadFilterOpen,
   saveFilter,
@@ -155,18 +154,8 @@ describe("persistence", () => {
   });
 });
 
-// The header badge has to answer "why is this page showing me less?" with the
-// row shut, so it names the filter rather than only flagging that one is on.
-describe("filterBadge", () => {
-  test("says only 'filter' when nothing is filtered", () => {
-    expect(filterBadge("all")).toBe("filter");
-  });
-
-  test("names the filter that is on", () => {
-    expect(filterBadge("open")).toBe("filter · open only");
-    expect(filterBadge("tasks")).toBe("filter · tasks only");
-  });
-});
+// The badge that answers "why is this page showing me less?" now speaks for
+// the order as well, so its wording and tests live in lib/reading.ts.
 
 describe("row open state", () => {
   afterEach(() => localStorage.clear());

@@ -12,6 +12,10 @@ import type { ScheduledRow } from "./types";
 
 interface FutureLogViewProps {
   count: number;
+  /** repeats that finished within the last fortnight (spec §11 Q17). A rule
+   *  that reaches its end stops appearing here, and this is the line that says
+   *  so, on the page where "what is next" is actually asked. */
+  finished: { id: string; text: string; last: string }[];
   groups: { gk: string; rows: ScheduledRow[] }[];
   folds: Record<string, boolean>;
   onToggleFold: (gk: string) => void;
@@ -22,6 +26,7 @@ interface FutureLogViewProps {
 
 export default function FutureLogView({
   count,
+  finished,
   groups,
   folds,
   onToggleFold,
@@ -44,6 +49,17 @@ export default function FutureLogView({
           arrives
         </span>
       </div>
+      {finished.length > 0 && (
+        <p style={S.finishedNote}>
+          {finished.length === 1 ? "Repeat finished: " : "Repeats finished: "}
+          {finished.map((f, i) => (
+            <span key={f.id}>
+              {i > 0 && "; "}
+              {f.text} <span style={S.finishedWhen}>last one {f.last}</span>
+            </span>
+          ))}
+        </p>
+      )}
       {count === 0 && (
         <div style={S.empty}>
           Nothing scheduled ahead — choose "date…" in the entry form to log an

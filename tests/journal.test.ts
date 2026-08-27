@@ -24,7 +24,9 @@ import {
   removeEntry,
   restoreEntry,
   setDetails,
+  setEntryType,
   setParent,
+  setSignifier,
   setText,
   toggleDone,
   toggleHabitMark,
@@ -460,5 +462,112 @@ describe("adoptEntryState (recurrence dedupe only)", () => {
 
   test("answers false for an entry that is no longer in the journal", () => {
     expect(adoptEntryState("gone", "done")).toBe(false);
+  });
+});
+
+// Changing what an entry says after it was logged (spec §4.1a, 26 August 2026).
+describe("setSignifier", () => {
+  test("lights and clears a priority on an entry logged without one", () => {
+    const e = addEntry("2026-07-24", "task", "Ring the surgery", false);
+    setSignifier(e.id, "priority", true);
+    expect(readAll()[0].priority).toBe(true);
+    setSignifier(e.id, "priority", false);
+    expect(readAll()[0].priority).toBe(false);
+  });
+
+  test("nothing else about the entry moves", () => {
+    const e = addEntry("2026-07-24", "task", "Ring the surgery", false);
+    toggleDone(e.id);
+    setSignifier(e.id, "priority", true);
+    expect(readAll()[0]).toMatchObject({
+      type: "task",
+      text: "Ring the surgery",
+      state: "done",
+      pageKey: "2026-07-24",
+    });
+  });
+
+  test("clearing an inspiration removes the key rather than writing false", () => {
+    const e = addEntry("2026-07-24", "note", "Prototype first", false, true);
+    expect(readAll()[0].inspiration).toBe(true);
+    setSignifier(e.id, "inspiration", false);
+    expect(readAll()[0].inspiration).toBeUndefined();
+    expect(entries.get(0).has("inspiration")).toBe(false);
+  });
+
+  test("both signifiers can be lit at once", () => {
+    const e = addEntry("2026-07-24", "task", "Write the spec note", false);
+    setSignifier(e.id, "priority", true);
+    setSignifier(e.id, "inspiration", true);
+    expect(readAll()[0]).toMatchObject({ priority: true, inspiration: true });
+  });
+
+  test("an entry that is no longer in the journal is left alone", () => {
+    setSignifier("gone", "priority", true);
+    expect(readAll()).toHaveLength(0);
+  });
+});
+
+describe("setEntryType", () => {
+  test("a task logged by mistake becomes a note", () => {
+    const e = addEntry("2026-07-24", "task", "Prototype before code", false);
+    expect(setEntryType(e.id, "note")).toBe(true);
+    expect(readAll()[0]).toMatchObject({ type: "note", state: "open" });
+  });
+
+  test("a completed task that stops being a task stops being complete", () => {
+    const e = addEntry("2026-07-24", "task", "Sign the quote", true);
+    toggleDone(e.id);
+    expect(readAll()[0].state).toBe("done");
+    expect(setEntryType(e.id, "note")).toBe(true);
+    // × is a completed task and purist notation has no completed note
+    expect(readAll()[0]).toMatchObject({ type: "note", state: "open" });
+    // and the signifier it carried is not collateral
+    expect(readAll()[0].priority).toBe(true);
+  });
+
+  test("choosing the type it already has keeps the ×", () => {
+    const e = addEntry("2026-07-24", "task", "Sign the quote", false);
+    toggleDone(e.id);
+    expect(setEntryType(e.id, "task")).toBe(true);
+    expect(readAll()[0].state).toBe("done");
+  });
+
+  test("a strikethrough survives a type change", () => {
+    const e = addEntry("2026-07-24", "task", "Chase the permit", false);
+    toggleStruck(e.id);
+    expect(setEntryType(e.id, "event")).toBe(true);
+    expect(readAll()[0]).toMatchObject({ type: "event", state: "struck" });
+  });
+
+  test("refused on a migrated entry: the › is half of a pair", () => {
+    const e = addEntry("2026-07-24", "task", "Book the dentist", false);
+    migrateEntry(e.id, "2026-07-25");
+    const marker = readAll().find((x) => x.id === e.id)!;
+    expect(marker.state).toBe("migrated");
+    expect(setEntryType(e.id, "note")).toBe(false);
+    expect(readAll().find((x) => x.id === e.id)).toMatchObject({
+      type: "task",
+      state: "migrated",
+    });
+  });
+
+  test("refused on a scheduled entry too", () => {
+    const e = addEntry("2026-07-24", "task", "Renew the passport", false);
+    migrateEntry(e.id, "2027-01-04");
+    expect(readAll().find((x) => x.id === e.id)?.state).toBe("scheduled");
+    expect(setEntryType(e.id, "note")).toBe(false);
+  });
+
+  test("the carried copy is a plain open task, and can change type", () => {
+    const e = addEntry("2026-07-24", "task", "Book the dentist", false);
+    migrateEntry(e.id, "2026-07-25");
+    const copy = readAll().find((x) => x.migratedFrom === e.id)!;
+    expect(setEntryType(copy.id, "note")).toBe(true);
+    expect(readAll().find((x) => x.id === copy.id)?.type).toBe("note");
+  });
+
+  test("an entry that is no longer in the journal answers false", () => {
+    expect(setEntryType("gone", "note")).toBe(false);
   });
 });

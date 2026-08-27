@@ -19,9 +19,11 @@ import {
 } from "../lib/dates";
 import type { Scope } from "../lib/dates";
 import { applyFilter, entryVisible } from "../lib/filter";
+import { applyOrder } from "../store/pageOrder";
+import type { EntryOrder } from "../lib/order";
 import type { EntryFilter } from "../lib/filter";
 import type { Entry } from "../lib/types";
-import { filterRows } from "./spreadData";
+import { filterRows, rowIsPredicted } from "./spreadData";
 import { S } from "./styles";
 import type { ScheduledRow } from "./types";
 
@@ -39,9 +41,18 @@ interface SpreadViewProps {
   scheduledRows: ScheduledRow[];
   laterThisMonth: ScheduledRow[];
   futureLogCount: number;
+  /** folded groups, by key — a device preference App keeps in localStorage.
+   *  Shared with the Future log page, which is why the key is namespaced. */
+  folds: Record<string, boolean>;
+  /** `defaultFolded` because "Later this month" starts closed while the
+   *  Future log's months start open (spec §11 Q19). */
+  onToggleFold: (gk: string, defaultFolded?: boolean) => void;
   /** entry visibility filter (remediation item 7) — applied to every section,
    *  the Due list and the within-period scheduled rows */
   filter: EntryFilter;
+  /** reading order (spec §4.9a) — the four scope sections only. The Due list
+   *  and the scheduled rows are drawn from other pages, so they keep theirs. */
+  order: EntryOrder;
   /** the filter control itself, built by App. Placed here rather than above
    *  the whole view because the review banner is an alert about the journal
    *  and alerts belong at the top: banners first, then the way you are
@@ -64,7 +75,10 @@ export default function SpreadView({
   scheduledRows,
   laterThisMonth,
   futureLogCount,
+  folds,
+  onToggleFold,
   filter,
+  order,
   filterRow,
   onReview,
   onOpenFutureLog,
@@ -107,7 +121,8 @@ export default function SpreadView({
             const isCurrent = pk === nowKeys[sc];
             const isFuture = pk > nowKeys[sc];
             const onPage = days[pk] || [];
-            const entries = applyFilter(onPage, filter);
+            // Filter, then re-read what is left in the chosen order (§4.9a)
+            const entries = applyOrder(applyFilter(onPage, filter), order);
             const hidden = onPage.length - entries.length;
             const step = (delta: number) =>
               setAnchors((a) => ({
@@ -191,16 +206,69 @@ export default function SpreadView({
                 <ul style={S.list}>
                   {entries.map((e) => renderEntry(e, pk, sc))}
                 </ul>
-                {sc === "month" && isCurrent && filterRows(laterThisMonth, filter).length > 0 && (
-                  <>
-                    <div style={S.subGroupLabel}>Later this month</div>
-                    <ul style={S.list}>
-                      {filterRows(laterThisMonth, filter).map((row) =>
-                        renderScheduledRow(row, true)
-                      )}
-                    </ul>
-                  </>
-                )}
+                {sc === "month" &&
+                  isCurrent &&
+                  (() => {
+                    /* "Later this month" (spec §4.2, §11 Q2 and Q9; split
+                       26 August 2026, §11 Q19). Rows dated by hand stay on
+                       the page; rule previews fold behind a count, closed by
+                       default, because a repeat is the one thing you never
+                       need reminding of — it is on the page precisely
+                       because it recurs. On a month where every row is a
+                       preview, which is most of them, the two groups
+                       collapse into one and the section reads as it always
+                       did, only folded. */
+                    const rows = filterRows(laterThisMonth, filter);
+                    if (rows.length === 0) return null;
+                    const written = rows.filter((r) => !rowIsPredicted(r));
+                    const predicted = rows.filter(rowIsPredicted);
+                    const foldKey = `later:${pk}`;
+                    // A missing key means folded here, the opposite of the
+                    // Future log's months, so the default travels with the
+                    // toggle as well (see onToggleFold).
+                    const open = !(folds[foldKey] ?? true);
+                    return (
+                      <>
+                        {written.length > 0 && (
+                          <>
+                            <div style={S.subGroupLabel}>Later this month</div>
+                            <ul style={S.list}>
+                              {written.map((row) =>
+                                renderScheduledRow(row, true)
+                              )}
+                            </ul>
+                          </>
+                        )}
+                        {predicted.length > 0 && (
+                          <>
+                            <div style={S.flGroupHead}>
+                              <span style={S.subGroupLabel}>
+                                {written.length > 0
+                                  ? "Repeating, later this month"
+                                  : "Later this month · repeating"}
+                              </span>
+                              <button
+                                className="miniBtn"
+                                onClick={() => onToggleFold(foldKey, true)}
+                                aria-expanded={open}
+                              >
+                                {predicted.length} item
+                                {predicted.length === 1 ? "" : "s"} ·{" "}
+                                {open ? "hide" : "show"}
+                              </button>
+                            </div>
+                            {open && (
+                              <ul style={S.list}>
+                                {predicted.map((row) =>
+                                  renderScheduledRow(row, true)
+                                )}
+                              </ul>
+                            )}
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                 {withinRows.length > 0 && (
                   <>
                     <div style={S.subGroupLabel}>
