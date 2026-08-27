@@ -87,6 +87,15 @@ export interface FeedbackFacts {
   entries: number;
   /** Encoded CRDT size on this device. A size, never a content. */
   docBytes: number;
+  /**
+   * Records this build could not read, and fields it defaulted, as one line.
+   *
+   * Here rather than on a screen of its own because it is a fault report by
+   * nature: nobody looks for it, and the moment it matters is the moment
+   * somebody is already writing in to say something is missing. "none" when
+   * there is nothing to say, like the sync error above it (store/decode.ts).
+   */
+  decodeFaults: string;
 }
 
 /** KB the way the Menu says it, so the two agree when read side by side. */
@@ -109,6 +118,7 @@ export const diagnosticLines = (f: FeedbackFacts): string[] => [
   `sync: ${f.syncStatus}`,
   `sync error: ${f.syncError ?? "none"}`,
   `journal: ${f.entries} ${f.entries === 1 ? "entry" : "entries"}, ${kb(f.docBytes)} on this device`,
+  `unreadable: ${f.decodeFaults}`,
 ];
 
 export const diagnosticText = (f: FeedbackFacts): string =>

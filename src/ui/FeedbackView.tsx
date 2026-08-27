@@ -47,6 +47,7 @@ import {
   saveDraft,
 } from "../lib/feedback";
 import type { FeedbackKind } from "../lib/feedback";
+import { decodeFaultLine } from "../store/decode";
 
 interface FeedbackViewProps {
   syncStatus: SyncStatus;
@@ -87,6 +88,7 @@ export default function FeedbackView({
       syncError,
       entries: vol.entries,
       docBytes: vol.docBytes,
+      decodeFaults: decodeFaultLine(),
     });
   });
   const [taken, setTaken] = useState<Taken>(null);

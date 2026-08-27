@@ -7,6 +7,7 @@ import * as Y from "yjs";
 import { devices, doc } from "./journal";
 import { uid } from "../lib/types";
 import { DEVICE_ID_KEY } from "../lib/storageKeys";
+import { readNumber, readString } from "./decode";
 
 const ID_KEY = DEVICE_ID_KEY;
 
@@ -252,7 +253,9 @@ const describe = (rec: Y.Map<unknown>): string => {
     (rec.get("platform") as string) || platformFromLegacy(rec) || "";
   if (clients instanceof Y.Map && clients.size > 0) {
     const names: { name: string; at: number }[] = [];
-    clients.forEach((at, name) => names.push({ name, at: (at as number) || 0 }));
+    clients.forEach((at, name) =>
+      names.push({ name, at: typeof at === "number" && Number.isFinite(at) ? at : 0 })
+    );
     // Most recently used first, so the one you are looking at leads.
     names.sort((a, b) => b.at - a.at);
     const sentence = listSentence(names.map((n) => n.name));
@@ -260,7 +263,7 @@ const describe = (rec: Y.Map<unknown>): string => {
   }
   // Rows from earlier versions of the register: a single `client` string, or
   // nothing but the label they were named with.
-  return (rec.get("client") as string) || named || "";
+  return readString(rec, "client") ?? named ?? "";
 };
 
 export const listDevices = (): DeviceRecord[] => {
@@ -271,10 +274,14 @@ export const listDevices = (): DeviceRecord[] => {
     out.push({
       id,
       name: describe(rec) || "Unknown device",
-      firstSeen: (rec.get("firstSeen") as number) || 0,
-      lastSeen: (rec.get("lastSeen") as number) || 0,
-      signedOutAt: (rec.get("signedOutAt") as number) || undefined,
-      removedAt: (rec.get("removedAt") as number) || undefined,
+      // Every one of these is a sort key or a badge, so a wrong shape degrades
+      // rather than invalidates: the row is the device, and a device with an
+      // unreadable last-seen is still a device on the account. `firstSeen`
+      // falling back to 0 keeps the order settled (the id breaks the tie).
+      firstSeen: readNumber(rec, "firstSeen") ?? 0,
+      lastSeen: readNumber(rec, "lastSeen") ?? 0,
+      signedOutAt: readNumber(rec, "signedOutAt"),
+      removedAt: readNumber(rec, "removedAt"),
       isThisDevice: id === here,
     });
   });

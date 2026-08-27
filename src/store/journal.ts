@@ -12,9 +12,24 @@ import type {
   EntryType,
   Habit,
   Recurrence,
-  RecurrenceUnit,
 } from "../lib/types";
-import { colPageKey, uid } from "../lib/types";
+import {
+  COLLECTION_KINDS,
+  ENTRY_STATES,
+  ENTRY_TYPES,
+  RECURRENCE_UNITS,
+  colPageKey,
+  uid,
+} from "../lib/types";
+import {
+  readCount,
+  readKeys,
+  readNumber,
+  readOneOf,
+  readString,
+  rejectRecord,
+  repairField,
+} from "./decode";
 import { isFutureKey } from "../lib/dates";
 import { docNameForVolume, getActiveVolume } from "../lib/volume";
 import { REMOTE_ORIGIN_TAG } from "../lib/storageKeys";
@@ -88,31 +103,56 @@ export const wipeLocalJournal = (): Promise<void> => persistence.clearData();
 // both survive the merge, and threading to the same page twice can't
 // duplicate. Read back as a sorted list so render order is stable.
 const readThreads = (m: Y.Map<unknown>): string[] | undefined => {
-  const t = m.get("threads");
-  if (!(t instanceof Y.Map) || t.size === 0) return undefined;
-  const keys: string[] = [];
-  t.forEach((_v, k) => keys.push(k));
-  return keys.sort();
+  const keys = readKeys(m, "threads");
+  return keys.length > 0 ? keys : undefined;
 };
 
-const toEntry = (m: Y.Map<unknown>): Entry => ({
-  id: m.get("id") as string,
-  type: m.get("type") as EntryType,
-  text: m.get("text") as string,
-  priority: Boolean(m.get("priority")),
-  inspiration: Boolean(m.get("inspiration")) || undefined,
-  parentId: (m.get("parentId") as string | undefined) ?? undefined,
-  details: (m.get("details") as string | undefined) ?? undefined,
-  threads: readThreads(m),
-  state: m.get("state") as EntryState,
-  pageKey: m.get("pageKey") as string,
-  createdAt: m.get("createdAt") as number,
-  migratedFrom: (m.get("migratedFrom") as string | undefined) ?? undefined,
-  remindAt: (m.get("remindAt") as number | undefined) ?? undefined,
-  recurrenceId: (m.get("recurrenceId") as string | undefined) ?? undefined,
-});
+/**
+ * An entry, or null if there is nowhere to put it.
+ *
+ * Three fields are load-bearing rather than merely present. Without an id it
+ * cannot be found, edited or deleted; without a page key there is no page to
+ * draw it on; without a created time it has no place in any order, and a NaN
+ * spreads through every comparison that touches it. Everything else degrades:
+ * see store/decode.ts for why repairing beats rejecting on the rest.
+ */
+const toEntry = (m: Y.Map<unknown>): Entry | null => {
+  const id = readString(m, "id");
+  if (!id) return rejectRecord("entry", "no id");
+  const pageKey = readString(m, "pageKey");
+  if (!pageKey) return rejectRecord("entry", "no page key");
+  const createdAt = readNumber(m, "createdAt");
+  if (createdAt === undefined)
+    return rejectRecord("entry", "no created time");
+  return {
+    id,
+    // An unknown type draws no bullet at all, because GLYPH has no entry for it,
+    // and an entry with no bullet is not notation. A note is the least
+    // assertive of the three: it claims nothing about being done or happening.
+    type:
+      readOneOf(m, "type", ENTRY_TYPES) ??
+      repairField("entry", "type", "note" as const),
+    // Missing text is shown as empty rather than dropped: the entry keeps its
+    // place, is visibly wrong, and can be typed into.
+    text: readString(m, "text") ?? repairField("entry", "text", ""),
+    priority: Boolean(m.get("priority")),
+    inspiration: Boolean(m.get("inspiration")) || undefined,
+    parentId: readString(m, "parentId"),
+    details: readString(m, "details"),
+    threads: readThreads(m),
+    state:
+      readOneOf(m, "state", ENTRY_STATES) ??
+      repairField("entry", "state", "open" as const),
+    pageKey,
+    createdAt,
+    migratedFrom: readString(m, "migratedFrom"),
+    remindAt: readNumber(m, "remindAt"),
+    recurrenceId: readString(m, "recurrenceId"),
+  };
+};
 
-export const readAll = (): Entry[] => entries.map(toEntry);
+export const readAll = (): Entry[] =>
+  entries.map(toEntry).filter((e): e is Entry => e !== null);
 
 const findMap = (id: string): Y.Map<unknown> | null => {
   for (let i = 0; i < entries.length; i++) {
@@ -461,7 +501,11 @@ export const restoreEntry = (e: Entry): void => {
 export const migrateEntry = (id: string, targetPageKey: string): void => {
   const m = findMap(id);
   if (!m) return;
+  // An entry this build cannot read cannot be copied forward either, and the
+  // interface can never have offered it: readAll() has already filtered it out,
+  // so there is no row to have tapped. Nothing is lost by stopping here.
   const original = toEntry(m);
+  if (!original) return;
   doc.transact(() => {
     m.set("state", isFutureKey(targetPageKey) ? "scheduled" : "migrated");
     // page references are inherited by the copy (spec §4.4): paper rewrites
@@ -509,29 +553,51 @@ export const adoptEntryState = (id: string, state: EntryState): boolean => {
 
 // ---------- collections ----------
 
-const toCollection = (m: Y.Map<unknown>): Collection => ({
-  id: m.get("id") as string,
-  kind: m.get("kind") as CollectionKind,
-  name: m.get("name") as string,
-  createdAt: m.get("createdAt") as number,
-});
-
-const toHabit = (m: Y.Map<unknown>): Habit => {
-  const marks: Record<string, true> = {};
-  (m.get("marks") as Y.Map<unknown>).forEach((_v, k) => (marks[k] = true));
+const toCollection = (m: Y.Map<unknown>): Collection | null => {
+  const id = readString(m, "id");
+  if (!id) return rejectRecord("collection", "no id");
+  const name = readString(m, "name");
+  if (!name) return rejectRecord("collection", "no name");
+  const createdAt = readNumber(m, "createdAt");
+  if (createdAt === undefined)
+    return rejectRecord("collection", "no created time");
   return {
-    id: m.get("id") as string,
-    collectionId: m.get("collectionId") as string,
-    name: m.get("name") as string,
-    createdAt: m.get("createdAt") as number,
-    marks,
+    id,
+    // A kind this build does not know is shown as a list rather than dropped.
+    // Dropping it would take the page away while its entries kept a col:<id>
+    // page key pointing at nothing, so the entries would vanish with it.
+    kind:
+      readOneOf(m, "kind", COLLECTION_KINDS) ??
+      repairField("collection", "kind", "list" as const),
+    name,
+    createdAt,
   };
 };
 
-export const readCollections = (): Collection[] =>
-  collections.map(toCollection).sort((a, b) => a.createdAt - b.createdAt);
+const toHabit = (m: Y.Map<unknown>): Habit | null => {
+  const id = readString(m, "id");
+  if (!id) return rejectRecord("habit", "no id");
+  const collectionId = readString(m, "collectionId");
+  if (!collectionId) return rejectRecord("habit", "no collection");
+  const name = readString(m, "name");
+  if (!name) return rejectRecord("habit", "no name");
+  const createdAt = readNumber(m, "createdAt");
+  if (createdAt === undefined) return rejectRecord("habit", "no created time");
+  // `marks` was read with a bare cast and a `.forEach`, so a row that had never
+  // been ticked threw here and took the whole tracker down with it.
+  const marks: Record<string, true> = {};
+  for (const k of readKeys(m, "marks")) marks[k] = true;
+  return { id, collectionId, name, createdAt, marks };
+};
 
-export const readHabits = (): Habit[] => habits.map(toHabit);
+export const readCollections = (): Collection[] =>
+  collections
+    .map(toCollection)
+    .filter((c): c is Collection => c !== null)
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+export const readHabits = (): Habit[] =>
+  habits.map(toHabit).filter((h): h is Habit => h !== null);
 
 const makeCollectionMap = (c: Collection): Y.Map<unknown> => {
   const m = new Y.Map<unknown>();
@@ -594,9 +660,15 @@ export const removeCollection = (id: string): CollectionSnapshot | null => {
     if (collections.get(i).get("id") === id) ci = i;
   }
   if (ci === -1) return null;
+  // Same reasoning as migrateEntry: an undecodable collection is not in the list
+  // this was chosen from, and an undo snapshot that cannot describe what it is
+  // restoring is worse than refusing. Reported as "not found", which it is as
+  // far as anything above here is concerned.
+  const collection = toCollection(collections.get(ci));
+  if (!collection) return null;
   const pk = colPageKey(id);
   const snap: CollectionSnapshot = {
-    collection: toCollection(collections.get(ci)),
+    collection,
     entries: readAll().filter((e) => e.pageKey === pk),
     habits: readHabits().filter((h) => h.collectionId === id),
     threadedFrom: dropThreadsTo(pk),
@@ -615,25 +687,58 @@ export const removeCollection = (id: string): CollectionSnapshot | null => {
 
 // ---------- recurrences ----------
 
-const toRecurrence = (m: Y.Map<unknown>): Recurrence => ({
-  id: m.get("id") as string,
-  text: m.get("text") as string,
-  type: m.get("type") as EntryType,
-  priority: Boolean(m.get("priority")),
-  inspiration: Boolean(m.get("inspiration")) || undefined,
-  everyN: m.get("everyN") as number,
-  unit: m.get("unit") as RecurrenceUnit,
-  pageScope: (m.get("pageScope") as RecurrenceUnit | undefined) ?? "day",
-  anchor: m.get("anchor") as string,
-  remindTime: (m.get("remindTime") as string | undefined) ?? undefined,
-  materialisedThrough: m.get("materialisedThrough") as string,
-  endsOn: (m.get("endsOn") as string | undefined) ?? undefined,
-  endsAfter: (m.get("endsAfter") as number | undefined) ?? undefined,
-  endedAt: (m.get("endedAt") as number | undefined) ?? undefined,
-  createdAt: m.get("createdAt") as number,
-});
+/**
+ * A recurrence rule, or null if it has no cadence that can be walked.
+ *
+ * The one place in this file where an unknown value is rejected rather than
+ * repaired. Every other record only has to be drawn; a rule is executed, and the
+ * materialiser writes entries from it. Defaulting a `unit` this build cannot read
+ * to "day" would turn somebody's monthly rule into a daily one and then put
+ * thirty entries on thirty pages, which is worse than the rule going quiet: the
+ * occurrences already on pages are their own entries and stay where they are, so
+ * rejecting here stops the future and destroys nothing.
+ */
+const toRecurrence = (m: Y.Map<unknown>): Recurrence | null => {
+  const id = readString(m, "id");
+  if (!id) return rejectRecord("recurrence", "no id");
+  const unit = readOneOf(m, "unit", RECURRENCE_UNITS);
+  if (!unit) return rejectRecord("recurrence", "unreadable cadence");
+  const anchor = readString(m, "anchor");
+  if (!anchor) return rejectRecord("recurrence", "no anchor");
+  const materialisedThrough = readString(m, "materialisedThrough");
+  if (!materialisedThrough)
+    return rejectRecord("recurrence", "no materialised-through");
+  const createdAt = readNumber(m, "createdAt");
+  if (createdAt === undefined)
+    return rejectRecord("recurrence", "no created time");
+  return {
+    id,
+    text: readString(m, "text") ?? repairField("recurrence", "text", ""),
+    type:
+      readOneOf(m, "type", ENTRY_TYPES) ??
+      repairField("recurrence", "type", "task" as const),
+    priority: Boolean(m.get("priority")),
+    inspiration: Boolean(m.get("inspiration")) || undefined,
+    // "every 0 days" walks nowhere and "every -1" walks backwards. One is the
+    // cadence the interface offers by default, so it is the safe reading.
+    everyN: readCount(m, "everyN") ?? repairField("recurrence", "everyN", 1),
+    unit,
+    // Unlike `unit`, a bad pageScope only says which kind of page the rule
+    // belongs to. It was already defaulted to "day" before this change, because
+    // rules written before the field existed have none.
+    pageScope: readOneOf(m, "pageScope", RECURRENCE_UNITS) ?? "day",
+    anchor,
+    remindTime: readString(m, "remindTime"),
+    materialisedThrough,
+    endsOn: readString(m, "endsOn"),
+    endsAfter: readCount(m, "endsAfter"),
+    endedAt: readNumber(m, "endedAt"),
+    createdAt,
+  };
+};
 
-export const readRecurrences = (): Recurrence[] => recurrences.map(toRecurrence);
+export const readRecurrences = (): Recurrence[] =>
+  recurrences.map(toRecurrence).filter((r): r is Recurrence => r !== null);
 
 const findRecurrenceMap = (id: string): Y.Map<unknown> | null => {
   for (let i = 0; i < recurrences.length; i++) {
