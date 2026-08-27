@@ -1,64 +1,29 @@
-// App header: brand, contextual back/menu button, transient save cue, and the
-// always-visible sync status button (spec §4.5). Presentational — App decides
-// which buttons apply and what each does; the sync label/attention tables live
-// here since this is their only use.
+// App header: brand, the sync word, the reading badge, and the one button that
+// goes somewhere (spec §4.5, §4.9, §11 Q20). Presentational — App decides which
+// buttons apply and what each does.
+//
+// The order of this row is a decision rather than a layout. It is right-anchored,
+// so only the last item has a fixed position, and until 27 August 2026 the last
+// item was the sync badge: the two buttons that navigated somewhere slid about
+// whenever a status changed wording, and `menu` travelled 87.9px across the
+// states at 375px. So the button that goes somewhere now takes the corner and
+// the badge that reports state sits to its left, growing leftwards into empty
+// space as its label lengthens. `menu` and `back` never move by a pixel on any
+// screen in any state, and the badge's right edge does not move either.
+//
+// There is no sync pill here any more. Sync speaks in three tiers instead
+// (§11 Q20): nothing while it is working, one word in the left slot for what is
+// true but has nothing to be done about it, and NotSyncingBanner on the journal
+// for what needs an action. The route to the Sync screen is the Menu row and
+// the banner; a pill that opened it was also, on the Sync screen itself, a
+// button that looked live and did nothing.
 
 import type { EntryFilter } from "../lib/filter";
 import { readingActive, readingAria, readingBadge } from "../lib/reading";
 import type { ReadingOrder } from "../lib/reading";
+import { syncSlotWord } from "../lib/syncSlot";
 import type { SyncStatus } from "../store/sync";
 import { S } from "./styles";
-
-// Always-visible sync state on the header button (spec §4.5); plain words,
-// attention colour when something needs the user.
-const SYNC_BADGE: Record<SyncStatus, string> = {
-  disabled: "sync",
-  starting: "sync · starting…",
-  "signed-out": "sync · signed out",
-  connecting: "sync · connecting…",
-  "needs-key": "sync · key needed",
-  synced: "sync · synced",
-  pending: "sync · waiting",
-  offline: "sync · offline",
-};
-
-// A list rather than a Record, so adding a status does not fail the build here
-// the way a missing badge label does. Worth knowing when adding one.
-const SYNC_ATTENTION: SyncStatus[] = [
-  "signed-out",
-  "needs-key",
-  "pending",
-  "offline",
-];
-
-/** Does this status want something from the reader? */
-const needsYou = (s: SyncStatus): boolean => SYNC_ATTENTION.includes(s);
-
-/**
- * What the badge shows (spec §4.5, shortened 26 August 2026).
- *
- * The bare noun while nothing needs you, the state named in full when
- * something does — the rule the filter badge already follows, where "filter"
- * alone means nothing is hidden and "filter · open only" means something is.
- * The accessible name carries the whole wording either way, exactly as it does
- * for the filter's shortened label.
- *
- * The reason is width, and it was measured rather than felt. This row is the
- * brand plus `menu`, the filter badge and this one, all of them .miniBtn pills
- * whose padding and border cost 14px before any text. At 375px, allowing 10px
- * of clear air after the brand: `sync · synced` is 84px and leaves 13px spare,
- * and `sync · connecting…` — the longest thing SYNC_BADGE can say, and a
- * status every launch passes through — does not fit at all, overrunning by
- * 14px. A bare `sync` is 38px and leaves 59px. Nothing else in the header
- * changes; §4.9's filter badge already shortens its own wording below 480px
- * for the same reason.
- *
- * What this trades away is the standing reassurance of the word "synced" while
- * everything is well. That is deliberate: a badge that says the same thing
- * every time you look at it is one you stop reading, and the Sync screen this
- * button opens says the whole of it. Reverting is this function.
- */
-const syncLabel = (s: SyncStatus): string => (needsYou(s) ? SYNC_BADGE[s] : "sync");
 
 // Search deliberately does not live here. It sits bottom-left on the capture
 // bar (CaptureLauncher), within a thumb's reach and in one fixed place on
@@ -81,9 +46,8 @@ interface HeaderProps {
   /** is the reading block showing beneath the banners? */
   filterOpen: boolean;
   onToggleFilter: () => void;
-  saving: boolean;
+  /** drives the left slot only — the middle tier of §11 Q20's three */
   syncStatus: SyncStatus;
-  onSyncClick: () => void;
 }
 
 export default function Header({
@@ -95,91 +59,72 @@ export default function Header({
   order,
   filterOpen,
   onToggleFilter,
-  saving,
   syncStatus,
-  onSyncClick,
 }: HeaderProps) {
+  const slot = syncSlotWord(syncStatus);
   return (
     <header style={S.header}>
       <div style={S.brandRow}>
-        <span style={S.brand}>Journlet</span>
-        <span style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-          {showBack && (
-            <button className="miniBtn" onClick={onBack}>
-              back
-            </button>
-          )}
-          {/* Menu opens from home only; every sub-screen uses "back" */}
-          {showMenu && (
-            <button className="miniBtn" onClick={onMenu}>
-              menu
-            </button>
-          )}
+        <span style={S.headSide}>
+          <span style={S.brand}>Journlet</span>
+          {/* Always rendered, even empty. A live region that appears with its
+              text already in it is not reliably announced, and this is the only
+              place a screen reader learns that the device has gone offline now
+              that the badge's aria-label is gone. Full ink rather than the
+              muted grey the saving cue used: this is a state, not a caption,
+              and the badge next to it already uses ink for the same reason.
+              Never the danger colour — offline is not a fault (§11 Q20). */}
+          <span style={S.statusSlot} role="status" aria-live="polite">
+            {slot}
+          </span>
+        </span>
+        <span style={S.headSide}>
           {/* The way in to the reading block, which is chrome and stays closed
               until asked for (remediation item 7, revised 4 August 2026 after
               the always-on row read as clutter on device).
 
-              The label carries the state, exactly as the sync badge does: a
-              page can be filtered or sorted with the block shut, so what is
-              set has to be readable without opening anything. Full ink rather
-              than the muted default when either is — attention, not alarm, so
-              not the danger colour the sync badge uses.
-
-              Named "reading" rather than "filter" since 27 August 2026, when
-              it took the order on as well (§4.9a): a button saying "filter"
-              while reporting an order is the same small lie as a link saying
-              "from next month on" over this month's items. lib/reading.ts owns
-              the wording and the measurements behind it. */}
+              The label carries the state, because a page can be filtered or
+              sorted with the block shut and what is set has to be readable
+              without opening anything. Full ink and a heavier label rather than
+              the muted default when either half is set: attention, not alarm,
+              so never the danger colour. Weight rather than a thicker border,
+              measured — at 600 the labels grow by 0.6px to 2.2px, where a 2px
+              border would add 2px to the pill and is also what :focus-visible
+              draws. lib/reading.ts owns the wording. */}
           {filter !== null && (
             <button
               className="miniBtn"
               style={
                 readingActive(filter, order)
-                  ? { color: "var(--ink)", borderColor: "var(--ink)" }
+                  ? {
+                      color: "var(--ink)",
+                      borderColor: "var(--ink)",
+                      fontWeight: 600,
+                    }
                   : undefined
               }
               aria-expanded={filterOpen}
-              // Visible text shortens on narrow screens; the accessible name
-              // carries the full wording either way
+              // The values in full, which the visible label gives up
               aria-label={readingAria(filter, order)}
               onClick={onToggleFilter}
             >
-              {(() => {
-                const long = readingBadge(filter, order);
-                const short = readingBadge(filter, order, true);
-                // One string when the two agree, so the button's text is the
-                // badge rather than both spellings of it
-                return long === short ? (
-                  long
-                ) : (
-                  <>
-                    <span className="navLong">{long}</span>
-                    <span className="navShort">{short}</span>
-                  </>
-                );
-              })()}
+              {readingBadge(filter, order)}
             </button>
           )}
-          {/* Transient cue while the local IndexedDB write is in
-              flight; the sync badge is the persistent status */}
-          {saving && <span style={S.saveDot}>saving…</span>}
-          {/* Sync pinned to the far right — a persistent status present
-              on every screen, so it lives in one consistent spot. On the
-              sync screen it stays put as a status but doesn't re-navigate. */}
-          <button
-            className="miniBtn"
-            style={
-              needsYou(syncStatus)
-                ? { color: "var(--danger)", borderColor: "var(--danger-line)" }
-                : undefined
-            }
-            // Visible text is the bare noun while nothing needs you; the
-            // accessible name always says which status it is
-            aria-label={SYNC_BADGE[syncStatus]}
-            onClick={onSyncClick}
-          >
-            {syncLabel(syncStatus)}
-          </button>
+          {/* The pinned corner. One of these two is present on every screen and
+              in the same place on all of them, which is §4.8's "one fixed
+              corner" applied to the header. Menu opens from home only; every
+              sub-screen uses "back". */}
+          {showBack && (
+            <button className="miniBtn" onClick={onBack}>
+              back
+            </button>
+          )}
+          {showMenu && (
+            <button className="miniBtn" onClick={onMenu}>
+              menu
+            </button>
+          )}
         </span>
       </div>
     </header>

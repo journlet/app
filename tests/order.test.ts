@@ -7,7 +7,6 @@ import {
   ORDERS,
   ORDER_LABEL,
   ORDER_BADGE,
-  ORDER_BADGE_SHORT,
   ORDER_NOTE,
   compareTop,
   loadOrder,
@@ -39,22 +38,18 @@ describe("the vocabulary", () => {
       expect(ORDER_LABEL[o]).toBeTruthy();
       expect(ORDER_NOTE[o]).toBeTruthy();
       expect(typeof ORDER_BADGE[o]).toBe("string");
-      expect(typeof ORDER_BADGE_SHORT[o]).toBe("string");
     }
   });
 
   test("as logged says nothing on the badge — it is the page as written", () => {
     expect(ORDER_BADGE.logged).toBe("");
-    expect(ORDER_BADGE_SHORT.logged).toBe("");
     expect(ORDER_BADGE.priority).toBeTruthy();
     expect(ORDER_BADGE.type).toBeTruthy();
   });
 
-  test("the short form is never longer than the long one (that is its job)", () => {
-    for (const o of ORDERS) {
-      expect(ORDER_BADGE_SHORT[o].length).toBeLessThanOrEqual(ORDER_BADGE[o].length);
-    }
-  });
+  // There was a short form here, checked against the long one. Both it and the
+  // 480px shortening it served are gone (§11 Q20): the badge names the kind of
+  // change now, so its longest wording fits at 375px.
 });
 
 describe("the comparator", () => {

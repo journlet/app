@@ -43,7 +43,26 @@ export const S = {
     textTransform: "uppercase",
     color: INK_SOFT,
   },
-  saveDot: { fontSize: 11, color: INK_SOFT },
+  // The two groups either side of the header row. flexShrink 0 on purpose: the
+  // wordmark is one unbreakable word and every pill is nowrap, so this row
+  // cannot be squeezed, and letting it try would hide an overrun by squashing
+  // the buttons instead of showing it (§11 Q20).
+  headSide: {
+    display: "flex",
+    gap: 10,
+    alignItems: "baseline",
+    flexShrink: 0,
+  },
+  // The header's left slot: the sync word, and nothing else (§11 Q20). Italic
+  // and 11px, which is the app's idiom for a remark rather than content, so it
+  // does not read as part of the wordmark beside it. Full ink, because unlike
+  // the caption it borrows its styling from, this is a state.
+  statusSlot: {
+    fontSize: 11,
+    color: INK,
+    fontStyle: "italic",
+    whiteSpace: "nowrap",
+  },
   paper: {
     flex: 1,
     width: "100%",

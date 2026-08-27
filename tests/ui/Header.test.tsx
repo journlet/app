@@ -6,19 +6,6 @@ import type { SyncStatus } from "../../src/store/sync";
 
 afterEach(cleanup);
 
-// Header.tsx's SYNC_BADGE, restated here on purpose. Exporting it would let a
-// change to the wording pass both sides of the test at once.
-const SYNC_LABELS: Record<SyncStatus, string> = {
-  disabled: "sync",
-  starting: "sync · starting…",
-  "signed-out": "sync · signed out",
-  connecting: "sync · connecting…",
-  "needs-key": "sync · key needed",
-  synced: "sync · synced",
-  pending: "sync · waiting",
-  offline: "sync · offline",
-};
-
 const base = {
   showBack: false,
   showMenu: true,
@@ -28,9 +15,7 @@ const base = {
   order: "logged" as const,
   filterOpen: false,
   onToggleFilter: vi.fn(),
-  saving: false,
   syncStatus: "synced" as SyncStatus,
-  onSyncClick: vi.fn(),
 };
 
 test("shows the menu button on the home view and fires onMenu", () => {
@@ -54,112 +39,135 @@ test("search does not live in the header — it is on the capture bar", () => {
   expect(screen.queryByRole("button", { name: /find/i })).toBeNull();
 });
 
-test("shows the saving cue only while saving", () => {
-  const { rerender } = render(<Header {...base} saving={false} />);
-  expect(screen.queryByText("saving…")).toBeNull();
-  rerender(<Header {...base} saving={true} />);
-  expect(screen.getByText("saving…")).toBeTruthy();
+// The pinned corner (spec §11 Q20). The button that goes somewhere is the last
+// item in the row, so it holds still while the badge beside it changes wording.
+// This is the test that would have caught the old order, where `menu` travelled
+// 87.9px across the states at 375px because the sync badge was last.
+test("the button that navigates is last in the row, after the badge", () => {
+  render(<Header {...base} filter="open" order="priority" />);
+  const buttons = screen.getAllByRole("button").map((b) => b.textContent);
+  expect(buttons).toEqual(["filtered, sorted", "menu"]);
 });
 
-test("renders the sync badge label and fires onSyncClick", () => {
-  const onSyncClick = vi.fn();
-  render(<Header {...base} syncStatus="synced" onSyncClick={onSyncClick} />);
-  const btn = screen.getByRole("button", { name: "sync · synced" });
-  fireEvent.click(btn);
-  expect(onSyncClick).toHaveBeenCalledTimes(1);
+test("and on a sub-page it is alone in the corner", () => {
+  render(<Header {...base} showBack showMenu={false} filter={null} />);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["back"]);
 });
 
-test("an attention status colours the sync button", () => {
+// Sync's three tiers (spec §4.5 revised, §11 Q20). There is no pill: this
+// header shows the middle tier only, and it is not a button, because there is
+// nothing to do about the states it names.
+test("no sync button anywhere in the header", () => {
   render(<Header {...base} syncStatus="offline" />);
-  const btn = screen.getByRole("button", {
-    name: "sync · offline",
-  }) as HTMLButtonElement;
-  expect(btn.style.color).toBe("var(--danger)");
+  expect(screen.queryByRole("button", { name: /sync/ })).toBeNull();
 });
 
-// The badge's wording (spec §4.5, shortened 26 August 2026). Same rule as the
-// filter button above: the bare noun while there is nothing to say, the state
-// named when there is. The width this buys is the point — at 375px the full
-// wording of the longest status does not fit beside menu and a named filter.
-test.each(["synced", "connecting", "starting", "disabled"] as SyncStatus[])(
-  "a status that needs nothing shows the bare noun: %s",
+test("offline is said in words, in the left slot", () => {
+  render(<Header {...base} syncStatus="offline" />);
+  const slot = screen.getByRole("status");
+  expect(slot.textContent).toBe("offline");
+  // a state, so full ink — but never the danger colour, since offline is not a
+  // fault in an offline-first journal
+  expect(slot.style.color).toBe("var(--ink)");
+  expect(slot.style.color).not.toBe("var(--danger)");
+});
+
+test.each(["synced", "pending", "connecting", "starting", "disabled"] as SyncStatus[])(
+  "a state with nothing to say leaves the slot empty: %s",
   (status) => {
     render(<Header {...base} syncStatus={status} />);
-    const btn = screen.getByRole("button", {
-      name: SYNC_LABELS[status],
-    }) as HTMLButtonElement;
-    // said in full to a screen reader, short on screen
-    expect(btn.textContent).toBe("sync");
-    // muted like every other header button — nothing to say
-    expect(btn.style.color).toBe("");
+    expect(screen.getByRole("status").textContent).toBe("");
   }
 );
 
-test.each(["offline", "pending", "signed-out", "needs-key"] as SyncStatus[])(
-  "a status that needs you is named on the button: %s",
+// The states that need an action belong to NotSyncingBanner, which offers the
+// action. Saying it here as well would be the same fact twice in two registers.
+test.each(["signed-out", "needs-key"] as SyncStatus[])(
+  "a state that needs you is not answered up here: %s",
   (status) => {
     render(<Header {...base} syncStatus={status} />);
-    const btn = screen.getByRole("button", {
-      name: SYNC_LABELS[status],
-    }) as HTMLButtonElement;
-    expect(btn.textContent).toBe(SYNC_LABELS[status]);
-    expect(btn.style.color).toBe("var(--danger)");
+    expect(screen.getByRole("status").textContent).toBe("");
   }
 );
 
-test("shortening never costs the accessible name", () => {
-  const { rerender } = render(<Header {...base} syncStatus="connecting" />);
-  expect(screen.getByRole("button", { name: "sync · connecting…" })).toBeTruthy();
-  rerender(<Header {...base} syncStatus="starting" />);
-  expect(screen.getByRole("button", { name: "sync · starting…" })).toBeTruthy();
+// The live region is rendered even while empty. One that appears with its text
+// already in it is not reliably announced, and this slot is now the only place
+// a screen reader learns that the device has gone offline.
+test("the live region exists before it has anything to announce", () => {
+  const { rerender } = render(<Header {...base} syncStatus="synced" />);
+  const slot = screen.getByRole("status");
+  expect(slot.getAttribute("aria-live")).toBe("polite");
+  rerender(<Header {...base} syncStatus="offline" />);
+  expect(screen.getByRole("status")).toBe(slot);
+  expect(slot.textContent).toBe("offline");
 });
 
-// The reading badge (remediation item 7, revised 4 Aug 2026; took the order on
-// 27 Aug 2026, §4.9a). The block is chrome and stays closed until asked for,
-// which means the button has to carry the state: a page can be filtered or
-// sorted with the control out of sight, and a journal quietly showing you less
-// than it holds, or in an order you have forgotten choosing, is the thing this
-// must not do.
-test("the button reads 'reading' while the page is as the journal drew it", () => {
+// There was a "saving…" cue here until 27 August 2026. It reported nothing:
+// a 400ms timer started by any Yjs update, including updates arriving from
+// another device (spec §11 Q20).
+test("no saving cue", () => {
+  render(<Header {...base} />);
+  expect(screen.queryByText(/saving/i)).toBeNull();
+});
+
+// The reading badge (remediation item 7, revised 4 August 2026; took the order
+// on 27 August 2026, §4.9a; became `filter` and named the kind the same day,
+// §11 Q20). The block is chrome and stays closed, so the button has to carry
+// the state: a journal quietly showing you less than it holds, or in an order
+// you have forgotten choosing, is the thing this must not do.
+test("the button reads 'filter' while the page is as the journal drew it", () => {
   render(<Header {...base} filter="all" order="logged" />);
-  const btn = screen.getByRole("button", { name: "reading" }) as HTMLButtonElement;
+  const btn = screen.getByRole("button", { name: "filter" }) as HTMLButtonElement;
+  expect(btn.textContent).toBe("filter");
   // muted like every other header button — nothing to say
   expect(btn.style.color).toBe("");
+  expect(btn.style.fontWeight).toBe("");
 });
 
-test("an applied filter is named on the button, in full ink", () => {
+test("something hidden reads 'filtered', in full ink and heavier", () => {
   render(<Header {...base} filter="open" />);
   const btn = screen.getByRole("button", {
-    name: "reading · open only",
+    name: "filtered · open only",
   }) as HTMLButtonElement;
+  expect(btn.textContent).toBe("filtered");
   expect(btn.style.color).toBe("var(--ink)");
   expect(btn.style.borderColor).toBe("var(--ink)");
-  // attention, not alarm — the danger colour belongs to sync
+  expect(btn.style.fontWeight).toBe("600");
+  // attention, not alarm — the danger colour belongs to the banner
   expect(btn.style.color).not.toBe("var(--danger)");
 });
 
-test("tasks only is named too", () => {
-  render(<Header {...base} filter="tasks" />);
-  expect(screen.getByRole("button", { name: "reading · tasks only" })).toBeTruthy();
+// The cost of §11 Q20, asserted rather than left implicit: on the button these
+// two are the same word, and they are very different pages. The accessible
+// name is where they part.
+test("tasks only and open only read the same on the button, and differ in the name", () => {
+  const { rerender } = render(<Header {...base} filter="tasks" />);
+  expect(screen.getByRole("button", { name: "filtered · tasks only" }).textContent)
+    .toBe("filtered");
+  rerender(<Header {...base} filter="open" />);
+  expect(screen.getByRole("button", { name: "filtered · open only" }).textContent)
+    .toBe("filtered");
 });
 
 // The half this button gained: an order changes nothing about how much of the
 // page is there, so without the badge a sorted page looks like an ordinary one.
-test("an order alone lights the button and is named on it", () => {
+// It reads "sorted" rather than "filtered", because nothing is hidden.
+test("an order alone lights the button and reads 'sorted'", () => {
   render(<Header {...base} filter="all" order="priority" />);
   const btn = screen.getByRole("button", {
-    name: "reading · priority first",
+    name: "sorted · priority first",
   }) as HTMLButtonElement;
+  expect(btn.textContent).toBe("sorted");
   expect(btn.style.color).toBe("var(--ink)");
 });
 
-test("both set, the button counts them — there is no room for both in words", () => {
+test("both set, both are named — the count is gone", () => {
   render(<Header {...base} filter="open" order="priority" />);
   const btn = screen.getByRole("button", {
-    // said in full to a screen reader, counted on screen
-    name: "reading · open only, priority first",
+    name: "filtered, sorted · open only, priority first",
   }) as HTMLButtonElement;
-  expect(btn.textContent).toBe("reading · 2 set");
+  expect(btn.textContent).toBe("filtered, sorted");
+  expect(btn.textContent).not.toContain("2 set");
   expect(btn.style.color).toBe("var(--ink)");
 });
 
@@ -167,7 +175,7 @@ test("both set, the button counts them — there is no room for both in words", 
 // the page is not applying.
 test("where an order does not apply, the badge ignores it", () => {
   render(<Header {...base} filter="all" order={null} />);
-  const btn = screen.getByRole("button", { name: "reading" }) as HTMLButtonElement;
+  const btn = screen.getByRole("button", { name: "filter" }) as HTMLButtonElement;
   expect(btn.style.color).toBe("");
 });
 
@@ -176,17 +184,17 @@ test("the button reports whether the block is open, and toggles it", () => {
   const { rerender } = render(
     <Header {...base} filterOpen={false} onToggleFilter={onToggleFilter} />
   );
-  const btn = screen.getByRole("button", { name: "reading" });
+  const btn = screen.getByRole("button", { name: "filter" });
   expect(btn.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(btn);
   expect(onToggleFilter).toHaveBeenCalledTimes(1);
   rerender(<Header {...base} filterOpen={true} onToggleFilter={onToggleFilter} />);
   expect(
-    screen.getByRole("button", { name: "reading" }).getAttribute("aria-expanded")
+    screen.getByRole("button", { name: "filter" }).getAttribute("aria-expanded")
   ).toBe("true");
 });
 
 test("no reading button on pages it does not apply to", () => {
   render(<Header {...base} filter={null} />);
-  expect(screen.queryByRole("button", { name: /^reading/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^filter/ })).toBeNull();
 });

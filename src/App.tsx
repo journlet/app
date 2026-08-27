@@ -173,7 +173,7 @@ const scrollBehaviour = (): ScrollBehavior =>
     : "smooth";
 
 export default function App() {
-  const { loaded, saveState, days, collections, habits, recurrences } =
+  const { loaded, days, collections, habits, recurrences } =
     useJournal();
 
   const sticky = useRef(loadSticky());
@@ -1444,11 +1444,7 @@ export default function App() {
         }
         filterOpen={filterOpen}
         onToggleFilter={toggleFilterRow}
-        saving={saveState === "saving"}
         syncStatus={syncStatus}
-        onSyncClick={() => {
-          if (view !== "sync") setView("sync");
-        }}
       />
 
       <main style={S.paper}>
