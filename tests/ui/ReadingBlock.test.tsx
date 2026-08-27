@@ -45,23 +45,19 @@ test("the note is there even for as logged, so it is never a line you stop readi
   expect(screen.getByText("in the order you logged them")).toBeTruthy();
 });
 
-// Closed, the block still has one job: a page in an order the journal never
-// put it in must say so on the page. The filter has a header badge for this;
-// the order does not, so it says it in words.
-test("closed and as logged, the page says nothing — it is the page as written", () => {
-  const { container } = render(<ReadingBlock {...base} open={false} />);
-  expect(container.textContent).toBe("");
-});
-
-test("closed and sorted, the page says so in words", () => {
-  render(<ReadingBlock {...base} open={false} order="priority" />);
-  expect(screen.getByText("priority marks first")).toBeTruthy();
-});
-
-test("closed and by type, likewise", () => {
-  render(<ReadingBlock {...base} open={false} order="type" />);
-  expect(screen.getByText("in type order")).toBeTruthy();
-});
+// Closed, the block draws nothing at all: the header badge carries both halves
+// of the state (lib/reading.ts, 27 August 2026). The standing caption this
+// replaced was the filter note's styling in the filter note's slot, and read as
+// a row that had failed to close.
+test.each(["logged", "priority", "type"] as const)(
+  "closed, it leaves the page alone whatever the order: %s",
+  (order) => {
+    const { container } = render(
+      <ReadingBlock {...base} open={false} order={order} />
+    );
+    expect(container.textContent).toBe("");
+  }
+);
 
 // The Future log's rows are occurrences drawn from other pages, so there is
 // no page sequence there to re-read.
@@ -71,7 +67,7 @@ test("a page with no sequence of its own gets the filter and no order row", () =
   expect(screen.queryByRole("group", { name: "Order entries" })).toBeNull();
 });
 
-test("and it never claims an order it is not applying", () => {
+test("and closed on such a page it is likewise silent", () => {
   const { container } = render(
     <ReadingBlock {...base} open={false} showOrder={false} order="priority" />
   );

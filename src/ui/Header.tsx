@@ -3,8 +3,9 @@
 // which buttons apply and what each does; the sync label/attention tables live
 // here since this is their only use.
 
-import { FILTER_LABEL, FILTER_SHORT, filterBadge } from "../lib/filter";
 import type { EntryFilter } from "../lib/filter";
+import { readingActive, readingAria, readingBadge } from "../lib/reading";
+import type { ReadingOrder } from "../lib/reading";
 import type { SyncStatus } from "../store/sync";
 import { S } from "./styles";
 
@@ -71,7 +72,13 @@ interface HeaderProps {
   /** null on pages the filter does not apply to (Index, Find, Menu, Sync,
    *  habit trackers), where the button would do nothing */
   filter: EntryFilter | null;
-  /** is the filter row showing beneath the banners? */
+  /** the reading order, or null where an order does not apply (the Future log,
+   *  §4.9a). The badge speaks for the whole reading block, so it needs both
+   *  halves; the props keep the filter's names because the stored preference
+   *  they came from is `journlet-filter-open` and renaming it would be a
+   *  migration for nothing. */
+  order: ReadingOrder;
+  /** is the reading block showing beneath the banners? */
   filterOpen: boolean;
   onToggleFilter: () => void;
   saving: boolean;
@@ -85,6 +92,7 @@ export default function Header({
   onBack,
   onMenu,
   filter,
+  order,
   filterOpen,
   onToggleFilter,
   saving,
@@ -107,38 +115,49 @@ export default function Header({
               menu
             </button>
           )}
-          {/* The way in to the filter row, which is chrome and stays closed
+          {/* The way in to the reading block, which is chrome and stays closed
               until asked for (remediation item 7, revised 4 August 2026 after
               the always-on row read as clutter on device).
 
               The label carries the state, exactly as the sync badge does: a
-              page can be filtered with the row shut, so "filter · open only"
-              has to be readable without opening anything. Full ink rather
-              than the muted default when a filter is on — attention, not
-              alarm, so not the danger colour the sync badge uses. */}
+              page can be filtered or sorted with the block shut, so what is
+              set has to be readable without opening anything. Full ink rather
+              than the muted default when either is — attention, not alarm, so
+              not the danger colour the sync badge uses.
+
+              Named "reading" rather than "filter" since 27 August 2026, when
+              it took the order on as well (§4.9a): a button saying "filter"
+              while reporting an order is the same small lie as a link saying
+              "from next month on" over this month's items. lib/reading.ts owns
+              the wording and the measurements behind it. */}
           {filter !== null && (
             <button
               className="miniBtn"
               style={
-                filter !== "all"
+                readingActive(filter, order)
                   ? { color: "var(--ink)", borderColor: "var(--ink)" }
                   : undefined
               }
               aria-expanded={filterOpen}
               // Visible text shortens on narrow screens; the accessible name
               // carries the full wording either way
-              aria-label={filterBadge(filter)}
+              aria-label={readingAria(filter, order)}
               onClick={onToggleFilter}
             >
-              {filter === "all" ? (
-                "filter"
-              ) : (
-                <>
-                  filter ·{" "}
-                  <span className="navLong">{FILTER_LABEL[filter]}</span>
-                  <span className="navShort">{FILTER_SHORT[filter]}</span>
-                </>
-              )}
+              {(() => {
+                const long = readingBadge(filter, order);
+                const short = readingBadge(filter, order, true);
+                // One string when the two agree, so the button's text is the
+                // badge rather than both spellings of it
+                return long === short ? (
+                  long
+                ) : (
+                  <>
+                    <span className="navLong">{long}</span>
+                    <span className="navShort">{short}</span>
+                  </>
+                );
+              })()}
             </button>
           )}
           {/* Transient cue while the local IndexedDB write is in

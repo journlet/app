@@ -547,6 +547,12 @@ export default function App() {
     view === "future" ||
     (activeCol !== null && activeCol.kind === "list");
 
+  // The order applies wherever the filter does, bar the Future log: its rows
+  // are occurrences drawn from other pages, so there is no page sequence there
+  // to re-read (§4.9a). The header badge takes null there and speaks for the
+  // filter alone, which is the same rule ReadingBlock's showOrder follows.
+  const orderApplies = filterApplies && view !== "future";
+
   // Whether this device holds any journal content. Gates the "not syncing"
   // banner (remediation item 11) so a brand-new empty install stays quiet,
   // but any device with entries at risk of loss is warned.
@@ -1432,6 +1438,9 @@ export default function App() {
           filterApplies
             ? filter
             : null
+        }
+        order={
+          journalOnScreen && loaded && orderApplies ? order : null
         }
         filterOpen={filterOpen}
         onToggleFilter={toggleFilterRow}

@@ -38,13 +38,6 @@ export const FILTER_SHORT: Record<EntryFilter, string> = {
   open: "open",
 };
 
-/** The header badge, which has to carry the state while the row is closed:
- *  a page can be filtered with the control out of sight, so the button says
- *  which filter is on rather than only that one is. Same shape as the sync
- *  badge ("sync · offline"), for the same reason. */
-export const filterBadge = (f: EntryFilter): string =>
-  f === "all" ? "filter" : `filter · ${FILTER_LABEL[f]}`;
-
 /** Accessible name for each button — the note as a sentence. */
 export const FILTER_ARIA: Record<EntryFilter, string> = {
   all: "Show all entries",

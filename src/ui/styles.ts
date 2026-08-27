@@ -106,13 +106,6 @@ export const S = {
   // (spec §4.9a). One GRID line box, so the dot rhythm below is untouched;
   // italic and muted like the filter's note, because it is the same kind of
   // remark about how you are reading rather than part of the journal.
-  orderStanding: {
-    color: INK_SOFT,
-    fontSize: 11.5,
-    fontStyle: "italic",
-    lineHeight: `${GRID}px`,
-    padding: "0 4px",
-  },
   // A section or page emptied out by the filter — says how many are hidden,
   // so nothing ever just vanishes
   filterHidden: {

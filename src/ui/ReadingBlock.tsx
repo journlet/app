@@ -6,16 +6,16 @@
 // header badge of its own, because at 375px the corner has about a dozen
 // pixels spare once menu, the filter badge and sync have had theirs.
 //
-// The block starts closed, so it has one more job than the rows do: while it
-// is shut, a page in a non-default order still has to say so. The filter is
-// covered by its header badge; the order is said here, in words, on the page.
+// The block starts closed, and while it is shut it draws nothing: the header
+// badge carries both halves of the state (lib/reading.ts, 27 August 2026).
+// It used to leave a standing italic line naming the order, which was the
+// filter note's styling in the filter note's slot and read as a row that had
+// failed to close.
 
 import FilterRow from "./FilterRow";
 import OrderRow from "./OrderRow";
-import { ORDER_STANDING } from "../lib/order";
 import type { EntryOrder } from "../lib/order";
 import type { EntryFilter } from "../lib/filter";
-import { S } from "./styles";
 
 interface ReadingBlockProps {
   open: boolean;
@@ -37,13 +37,9 @@ export default function ReadingBlock({
   onChangeOrder,
   showOrder,
 }: ReadingBlockProps) {
-  if (!open) {
-    const standing = showOrder ? ORDER_STANDING[order] : "";
-    // Nothing to say: the page is as it was written, and the filter's own
-    // badge is already saying whatever there is to say about what is hidden.
-    if (!standing) return null;
-    return <div style={S.orderStanding}>{standing}</div>;
-  }
+  // Shut, the block is out of the way entirely — the badge is doing the
+  // talking, for the order as well as the filter.
+  if (!open) return null;
   return (
     <>
       <FilterRow filter={filter} onChange={onChangeFilter} />

@@ -25,6 +25,7 @@ const base = {
   onBack: vi.fn(),
   onMenu: vi.fn(),
   filter: "all" as const,
+  order: "logged" as const,
   filterOpen: false,
   onToggleFilter: vi.fn(),
   saving: false,
@@ -113,13 +114,15 @@ test("shortening never costs the accessible name", () => {
   expect(screen.getByRole("button", { name: "sync · starting…" })).toBeTruthy();
 });
 
-// The filter badge (remediation item 7, revised 4 Aug 2026). The row is chrome
-// and stays closed until asked for, which means the button has to carry the
-// state: a page can be filtered with the control out of sight, and a journal
-// quietly showing you less than it holds is the one thing this must not do.
-test("the filter button reads 'filter' while everything is showing", () => {
-  render(<Header {...base} filter="all" />);
-  const btn = screen.getByRole("button", { name: "filter" }) as HTMLButtonElement;
+// The reading badge (remediation item 7, revised 4 Aug 2026; took the order on
+// 27 Aug 2026, §4.9a). The block is chrome and stays closed until asked for,
+// which means the button has to carry the state: a page can be filtered or
+// sorted with the control out of sight, and a journal quietly showing you less
+// than it holds, or in an order you have forgotten choosing, is the thing this
+// must not do.
+test("the button reads 'reading' while the page is as the journal drew it", () => {
+  render(<Header {...base} filter="all" order="logged" />);
+  const btn = screen.getByRole("button", { name: "reading" }) as HTMLButtonElement;
   // muted like every other header button — nothing to say
   expect(btn.style.color).toBe("");
 });
@@ -127,7 +130,7 @@ test("the filter button reads 'filter' while everything is showing", () => {
 test("an applied filter is named on the button, in full ink", () => {
   render(<Header {...base} filter="open" />);
   const btn = screen.getByRole("button", {
-    name: "filter · open only",
+    name: "reading · open only",
   }) as HTMLButtonElement;
   expect(btn.style.color).toBe("var(--ink)");
   expect(btn.style.borderColor).toBe("var(--ink)");
@@ -137,25 +140,53 @@ test("an applied filter is named on the button, in full ink", () => {
 
 test("tasks only is named too", () => {
   render(<Header {...base} filter="tasks" />);
-  expect(screen.getByRole("button", { name: "filter · tasks only" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "reading · tasks only" })).toBeTruthy();
 });
 
-test("the button reports whether the row is open, and toggles it", () => {
+// The half this button gained: an order changes nothing about how much of the
+// page is there, so without the badge a sorted page looks like an ordinary one.
+test("an order alone lights the button and is named on it", () => {
+  render(<Header {...base} filter="all" order="priority" />);
+  const btn = screen.getByRole("button", {
+    name: "reading · priority first",
+  }) as HTMLButtonElement;
+  expect(btn.style.color).toBe("var(--ink)");
+});
+
+test("both set, the button counts them — there is no room for both in words", () => {
+  render(<Header {...base} filter="open" order="priority" />);
+  const btn = screen.getByRole("button", {
+    // said in full to a screen reader, counted on screen
+    name: "reading · open only, priority first",
+  }) as HTMLButtonElement;
+  expect(btn.textContent).toBe("reading · 2 set");
+  expect(btn.style.color).toBe("var(--ink)");
+});
+
+// The Future log takes no order (§4.9a), so the badge there must not report one
+// the page is not applying.
+test("where an order does not apply, the badge ignores it", () => {
+  render(<Header {...base} filter="all" order={null} />);
+  const btn = screen.getByRole("button", { name: "reading" }) as HTMLButtonElement;
+  expect(btn.style.color).toBe("");
+});
+
+test("the button reports whether the block is open, and toggles it", () => {
   const onToggleFilter = vi.fn();
   const { rerender } = render(
     <Header {...base} filterOpen={false} onToggleFilter={onToggleFilter} />
   );
-  const btn = screen.getByRole("button", { name: "filter" });
+  const btn = screen.getByRole("button", { name: "reading" });
   expect(btn.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(btn);
   expect(onToggleFilter).toHaveBeenCalledTimes(1);
   rerender(<Header {...base} filterOpen={true} onToggleFilter={onToggleFilter} />);
   expect(
-    screen.getByRole("button", { name: "filter" }).getAttribute("aria-expanded")
+    screen.getByRole("button", { name: "reading" }).getAttribute("aria-expanded")
   ).toBe("true");
 });
 
-test("no filter button on pages the filter does not apply to", () => {
+test("no reading button on pages it does not apply to", () => {
   render(<Header {...base} filter={null} />);
-  expect(screen.queryByRole("button", { name: /^filter/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^reading/ })).toBeNull();
 });
