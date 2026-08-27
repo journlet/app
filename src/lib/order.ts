@@ -55,12 +55,9 @@ export const ORDER_BADGE: Record<EntryOrder, string> = {
   type: "type order",
 };
 
-/** The same, shortened below 480px (see lib/reading.ts for the measurements). */
-export const ORDER_BADGE_SHORT: Record<EntryOrder, string> = {
-  logged: "",
-  priority: "priority",
-  type: "type",
-};
+/* ORDER_BADGE_SHORT lived here until 27 August 2026, for the same reason
+   FILTER_SHORT did and removed by the same change (§11 Q20). */
+
 
 export const ORDER_ARIA: Record<EntryOrder, string> = {
   logged: "Show entries in the order they were logged",

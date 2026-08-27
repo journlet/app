@@ -1,13 +1,9 @@
-// The reading badge's wording (src/lib/reading.ts, spec §4.9a revised
-// 27 August 2026). One badge for the whole block: it names one thing, counts
-// two, and goes to full ink whenever either half is set.
+// The reading badge's wording (src/lib/reading.ts, spec §4.9, §4.9a, §11 Q20;
+// rewritten 27 August 2026). The badge names the kind of change rather than its
+// value, and the accessible name gives back the value the label gives up.
 
 import { describe, expect, test } from "vitest";
-import {
-  readingActive,
-  readingAria,
-  readingBadge,
-} from "../src/lib/reading";
+import { readingActive, readingAria, readingBadge } from "../src/lib/reading";
 
 describe("readingActive", () => {
   test("nothing set is not active — the page is as the journal drew it", () => {
@@ -28,42 +24,65 @@ describe("readingActive", () => {
 
 describe("readingBadge", () => {
   test("the bare noun while there is nothing to say", () => {
-    expect(readingBadge("all", "logged")).toBe("reading");
+    expect(readingBadge("all", "logged")).toBe("filter");
+    expect(readingBadge("all", null)).toBe("filter");
   });
 
-  test("one thing set is named", () => {
-    expect(readingBadge("open", "logged")).toBe("reading · open only");
-    expect(readingBadge("tasks", "logged")).toBe("reading · tasks only");
-    expect(readingBadge("all", "priority")).toBe("reading · priority first");
-    expect(readingBadge("all", "type")).toBe("reading · type order");
+  test("something hidden reads 'filtered', whichever filter is doing it", () => {
+    expect(readingBadge("open", "logged")).toBe("filtered");
+    expect(readingBadge("tasks", "logged")).toBe("filtered");
   });
 
-  test("shortened below 480px, the same way the filter's wording already was", () => {
-    expect(readingBadge("open", "logged", true)).toBe("reading · open");
-    expect(readingBadge("all", "priority", true)).toBe("reading · priority");
+  // The cost of naming the kind rather than the value, written down where it
+  // cannot be lost: these two show very different pages, since "open only"
+  // keeps your notes and events and "tasks only" removes them, and the button
+  // says the same thing about both. One tap, or the accessible name below,
+  // says which (spec §11 Q20).
+  test("tasks only and open only are deliberately indistinguishable here", () => {
+    expect(readingBadge("tasks", "logged")).toBe(readingBadge("open", "logged"));
   });
 
-  test("both set, it counts them — 375px has no room for both in words", () => {
-    expect(readingBadge("open", "priority")).toBe("reading · 2 set");
-    expect(readingBadge("tasks", "type")).toBe("reading · 2 set");
-    // and the count does not change with the width
-    expect(readingBadge("open", "priority", true)).toBe("reading · 2 set");
+  // An order hides nothing, so "filtered" would be false. It gets its own word
+  // rather than borrowing one that would be a small lie.
+  test("an order alone reads 'sorted', never 'filtered'", () => {
+    expect(readingBadge("all", "priority")).toBe("sorted");
+    expect(readingBadge("all", "type")).toBe("sorted");
   });
 
-  test("an order the page does not apply is never counted", () => {
-    expect(readingBadge("open", null)).toBe("reading · open only");
-    expect(readingBadge("all", null)).toBe("reading");
+  test("both set, both are named — there is room for it now", () => {
+    expect(readingBadge("open", "priority")).toBe("filtered, sorted");
+    expect(readingBadge("tasks", "type")).toBe("filtered, sorted");
+  });
+
+  test("a page with no order of its own can never say 'sorted'", () => {
+    expect(readingBadge("all", null)).toBe("filter");
+    expect(readingBadge("open", null)).toBe("filtered");
   });
 });
 
 describe("readingAria", () => {
-  test("a screen reader hears both halves, in full, never the count", () => {
+  test("the bare noun when nothing is set", () => {
+    expect(readingAria("all", "logged")).toBe("filter");
+    expect(readingAria("all", null)).toBe("filter");
+  });
+
+  // A screen reader has no width problem, so it hears which filter and which
+  // order, not merely that there is one. This is the half of §11 Q20 that keeps
+  // the shortened label honest.
+  test("a screen reader hears the values in full", () => {
+    expect(readingAria("open", "logged")).toBe("filtered · open only");
+    expect(readingAria("tasks", "logged")).toBe("filtered · tasks only");
+    expect(readingAria("all", "priority")).toBe("sorted · priority first");
     expect(readingAria("open", "priority")).toBe(
-      "reading · open only, priority first"
+      "filtered, sorted · open only, priority first"
     );
   });
 
-  test("and the bare noun when nothing is set", () => {
-    expect(readingAria("all", "logged")).toBe("reading");
+  test("what the eye cannot separate, the accessible name can", () => {
+    expect(readingAria("tasks", "logged")).not.toBe(readingAria("open", "logged"));
+  });
+
+  test("and it never claims an order the page is not applying", () => {
+    expect(readingAria("open", null)).toBe("filtered · open only");
   });
 });
