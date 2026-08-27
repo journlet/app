@@ -38,6 +38,7 @@ const facts = (over: Partial<FeedbackFacts> = {}): FeedbackFacts => ({
   syncError: null,
   entries: 412,
   docBytes: 98700,
+  decodeFaults: "none",
   ...over,
 });
 
@@ -79,6 +80,13 @@ describe("the diagnostics block", () => {
     expect(diagnosticText(facts())).toContain("journal: 412 entries, 96.4 KB on this device");
   });
 
+  test("says when records could not be read, and nothing when they could", () => {
+    expect(diagnosticText(facts())).toContain("unreadable: none");
+    expect(
+      diagnosticText(facts({ decodeFaults: "1 not shown (entry 1)" }))
+    ).toContain("unreadable: 1 not shown (entry 1)");
+  });
+
   test("one entry is not one entries", () => {
     expect(diagnosticText(facts({ entries: 1 }))).toContain("journal: 1 entry,");
   });
@@ -87,8 +95,14 @@ describe("the diagnostics block", () => {
     // The promise the screen makes in words. Nothing in FeedbackFacts can carry
     // content, so this guards the shape rather than the values: a field added later
     // that does carry content fails here.
+    //
+    // It did its job on 27 August 2026, when `decodeFaults` was added and this
+    // failed on the count. That line is built from record kinds and field names
+    // out of the app's own vocabulary ("entry.type 1"), never from a value in a
+    // record, which tests/decode.test.ts asserts directly against an entry whose
+    // text would otherwise show up in it.
     const lines = diagnosticLines(facts());
-    expect(lines).toHaveLength(9);
+    expect(lines).toHaveLength(10);
     for (const line of lines) {
       expect(line).not.toMatch(/@/);
     }

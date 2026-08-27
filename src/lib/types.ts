@@ -1,8 +1,24 @@
 // Journlet entry model — purist Ryder Carroll notation throughout.
 
-export type EntryType = "task" | "event" | "note";
+/**
+ * Every value of these unions, as a runtime list as well as a type.
+ *
+ * The list is what store/decode.ts checks an incoming field against, and the
+ * type is derived from the list rather than written twice, so the two cannot
+ * drift: adding a state without teaching the decoder about it is now impossible
+ * rather than merely unlikely.
+ */
+export const ENTRY_TYPES = ["task", "event", "note"] as const;
+export type EntryType = (typeof ENTRY_TYPES)[number];
 
-export type EntryState = "open" | "done" | "struck" | "migrated" | "scheduled";
+export const ENTRY_STATES = [
+  "open",
+  "done",
+  "struck",
+  "migrated",
+  "scheduled",
+] as const;
+export type EntryState = (typeof ENTRY_STATES)[number];
 
 export interface Entry {
   id: string;
@@ -35,7 +51,12 @@ export interface Entry {
   recurrenceId?: string;
 }
 
-export type RecurrenceUnit = "day" | "week" | "month" | "year";
+// Character-identical to `Scope` in lib/dates.ts, and `pageScope` below is
+// semantically a Scope. Left as two names for now because unifying them touches
+// the date helpers and the meaning of pageScope; the runtime list is here so the
+// decoder has something to check against either way.
+export const RECURRENCE_UNITS = ["day", "week", "month", "year"] as const;
+export type RecurrenceUnit = (typeof RECURRENCE_UNITS)[number];
 
 /** A recurring entry rule; instances materialise client-side, no server */
 export interface Recurrence {
@@ -71,7 +92,8 @@ export interface Recurrence {
   createdAt: number;
 }
 
-export type CollectionKind = "list" | "habits";
+export const COLLECTION_KINDS = ["list", "habits"] as const;
+export type CollectionKind = (typeof COLLECTION_KINDS)[number];
 
 export interface Collection {
   id: string;

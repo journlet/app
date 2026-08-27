@@ -30,6 +30,7 @@
 import * as Y from "yjs";
 import { credentials, doc } from "./journal";
 import { describeThisClient } from "./devices";
+import { readNumber, readOneOf, readString } from "./decode";
 
 /**
  * Where a secret came from, in the only two flavours that matter here.
@@ -44,7 +45,8 @@ import { describeThisClient } from "./devices";
  * An unreported attachment counts as another device, matching store/sync.ts: the
  * cautious reading in every other place this value is used.
  */
-export type EnrolRoute = "this device" | "another device";
+export const ENROL_ROUTES = ["this device", "another device"] as const;
+export type EnrolRoute = (typeof ENROL_ROUTES)[number];
 
 export const routeOf = (attachment: string | null): EnrolRoute =>
   attachment === "platform" ? "this device" : "another device";
@@ -109,22 +111,33 @@ const clientsOf = (rec: Y.Map<unknown>): string[] | undefined => {
   const map = rec.get("openedBy");
   if (!(map instanceof Y.Map) || map.size === 0) return undefined;
   const seen: { name: string; at: number }[] = [];
-  map.forEach((at, name) => seen.push({ name, at: (at as number) || 0 }));
+  map.forEach((at, name) =>
+    seen.push({ name, at: typeof at === "number" && Number.isFinite(at) ? at : 0 })
+  );
   return seen.sort((a, b) => b.at - a.at).map((s) => s.name);
 };
 
+/**
+ * A note about one route into the journal.
+ *
+ * Nothing here is rejected. Every field is descriptive by design (§6.5 forbids
+ * the row from holding anything that could identify the credential), so the note
+ * exists to say what it can and stay silent about the rest, which is what an
+ * absent field already meant. A route that could not be described is still a
+ * route, and hiding it would understate how many ways into the journal there are.
+ */
 const toNote = (wrapId: string, rec: Y.Map<unknown>): CredentialNote => ({
   wrapId,
-  credentialId: (rec.get("credentialId") as string) || undefined,
-  fingerprint: (rec.get("fingerprint") as string) || undefined,
-  enrolledOn: (rec.get("enrolledOn") as string) || undefined,
-  provider: (rec.get("provider") as string) || undefined,
+  credentialId: readString(rec, "credentialId"),
+  fingerprint: readString(rec, "fingerprint"),
+  enrolledOn: readString(rec, "enrolledOn"),
+  provider: readString(rec, "provider"),
   openedBy: clientsOf(rec),
-  enrolledRoute: (rec.get("enrolledRoute") as EnrolRoute) || undefined,
-  enrolledAt: (rec.get("enrolledAt") as number) || 0,
-  lastOpenedAt: (rec.get("lastOpenedAt") as number) || undefined,
-  lastOpenedOn: (rec.get("lastOpenedOn") as string) || undefined,
-  lastOpenedRoute: (rec.get("lastOpenedRoute") as EnrolRoute) || undefined,
+  enrolledRoute: readOneOf(rec, "enrolledRoute", ENROL_ROUTES),
+  enrolledAt: readNumber(rec, "enrolledAt") ?? 0,
+  lastOpenedAt: readNumber(rec, "lastOpenedAt"),
+  lastOpenedOn: readString(rec, "lastOpenedOn"),
+  lastOpenedRoute: readOneOf(rec, "lastOpenedRoute", ENROL_ROUTES),
 });
 
 /**
