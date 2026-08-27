@@ -43,7 +43,26 @@ export const S = {
     textTransform: "uppercase",
     color: INK_SOFT,
   },
-  saveDot: { fontSize: 11, color: INK_SOFT },
+  // The two groups either side of the header row. flexShrink 0 on purpose: the
+  // wordmark is one unbreakable word and every pill is nowrap, so this row
+  // cannot be squeezed, and letting it try would hide an overrun by squashing
+  // the buttons instead of showing it (§11 Q20).
+  headSide: {
+    display: "flex",
+    gap: 10,
+    alignItems: "baseline",
+    flexShrink: 0,
+  },
+  // The header's left slot: the sync word, and nothing else (§11 Q20). Italic
+  // and 11px, which is the app's idiom for a remark rather than content, so it
+  // does not read as part of the wordmark beside it. Full ink, because unlike
+  // the caption it borrows its styling from, this is a state.
+  statusSlot: {
+    fontSize: 11,
+    color: INK,
+    fontStyle: "italic",
+    whiteSpace: "nowrap",
+  },
   paper: {
     flex: 1,
     width: "100%",
@@ -102,6 +121,10 @@ export const S = {
     fontStyle: "italic",
     padding: "0 4px",
   },
+  // What the page says about its own order while the reading block is shut
+  // (spec §4.9a). One GRID line box, so the dot rhythm below is untouched;
+  // italic and muted like the filter's note, because it is the same kind of
+  // remark about how you are reading rather than part of the journal.
   // A section or page emptied out by the filter — says how many are hidden,
   // so nothing ever just vanishes
   filterHidden: {
@@ -615,6 +638,36 @@ export const S = {
     borderTop: `1px solid ${LINE}`,
   },
   // Prose inside a sub-view — what this step does before anything is tapped
+  // The answer to what was just chosen, in the "when it ends" control. Bordered
+  // on one side rather than boxed: it is the consequence of the field above it,
+  // not a separate thing to read (spec §11 Q17).
+  endsResolved: {
+    border: `1px solid ${LINE}`,
+    borderLeft: `3px solid ${INK}`,
+    borderRadius: 8,
+    background: "var(--surface)",
+    padding: "10px 12px",
+    fontSize: 13.5,
+    lineHeight: 1.5,
+    margin: "4px 0 2px",
+  },
+  endsWhy: {
+    display: "block",
+    color: INK_SOFT,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  // "Repeat finished: …" on the Future log (spec §11 Q17). One --grid line box
+  // so the page keeps its rhythm, and quiet: it is a fact about something that
+  // has stopped, sitting above the things that have not.
+  finishedNote: {
+    fontSize: 12.5,
+    lineHeight: `${GRID}px`,
+    color: INK_SOFT,
+    margin: 0,
+    padding: "0 4px",
+  },
+  finishedWhen: { fontSize: 11.5 },
   subLede: {
     fontSize: 13,
     lineHeight: 1.55,

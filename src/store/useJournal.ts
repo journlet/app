@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Collection, Entry, Habit, Recurrence } from "../lib/types";
 import { groupByPage } from "./pageOrder";
 import {
   collections as collectionsArr,
-  doc,
   entries,
   habits as habitsArr,
   persistence,
@@ -14,11 +13,16 @@ import {
   recurrences as recurrencesArr,
 } from "./journal";
 
-export type SaveState = "saved" | "saving";
+// There was a `saveState` here, and a "saving…" cue in the header driven by
+// it. Both are gone (spec §11 Q20, 27 August 2026): it was set on any Yjs
+// document update and cleared on a fixed 400ms timer, so it never waited for
+// the IndexedDB write, never noticed one failing, and fired for updates arriving
+// from another device — which meant incoming sync was labelled "saving". The
+// entry appearing on the page is the confirmation, and writing that never
+// reaches the server is what NotSyncingBanner is for.
 
 export interface JournalSnapshot {
   loaded: boolean;
-  saveState: SaveState;
   /** entries grouped by pageKey, ordered by creation time */
   days: Record<string, Entry[]>;
   collections: Collection[];
@@ -32,8 +36,6 @@ export function useJournal(): JournalSnapshot {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [saveState, setSaveState] = useState<SaveState>("saved");
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const refresh = () => {
@@ -43,18 +45,10 @@ export function useJournal(): JournalSnapshot {
       setRecurrences(readRecurrences());
     };
 
-    // y-indexeddb writes every update; surface a brief "saving…" cue
-    const onUpdate = () => {
-      setSaveState("saving");
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => setSaveState("saved"), 400);
-    };
-
     entries.observeDeep(refresh);
     collectionsArr.observeDeep(refresh);
     habitsArr.observeDeep(refresh);
     recurrencesArr.observeDeep(refresh);
-    doc.on("update", onUpdate);
     persistence.whenSynced.then(() => {
       refresh();
       setLoaded(true);
@@ -65,10 +59,8 @@ export function useJournal(): JournalSnapshot {
       collectionsArr.unobserveDeep(refresh);
       habitsArr.unobserveDeep(refresh);
       recurrencesArr.unobserveDeep(refresh);
-      doc.off("update", onUpdate);
-      if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, []);
 
-  return { loaded, saveState, days, collections, habits, recurrences };
+  return { loaded, days, collections, habits, recurrences };
 }

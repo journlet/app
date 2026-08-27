@@ -8,6 +8,8 @@
 // by the store and quietly do nothing.
 
 import type { Entry } from "../lib/types";
+import { compareTop } from "../lib/order";
+import type { EntryOrder } from "../lib/order";
 
 /** The minimum an entry needs for its nesting to be resolved. */
 export interface Nestable {
@@ -141,4 +143,44 @@ export const groupByPage = (list: Entry[]): Record<string, Entry[]> => {
   for (const e of list) (days[e.pageKey] ??= []).push(e);
   for (const k of Object.keys(days)) days[k] = orderPage(days[k]);
   return days;
+};
+
+/**
+ * Read one page in a different order (spec §4.9a, §11 Q16).
+ *
+ * Top-level entries move; a sub-bullet never does. It stays directly beneath
+ * its parent wherever the parent lands, which is the same rule `orderPage`
+ * follows and the reason a reading order needs no stored position: the page
+ * is re-read, not rewritten, and `createdAt` is still the only thing the
+ * journal holds about sequence.
+ *
+ * Applied after the filter, to what the filter left. An entry whose parent is
+ * not in the list is drawn at top level rather than dropped, so this cannot
+ * lose a row however it is called — the same promise `orderPage` makes.
+ */
+export const applyOrder = (page: Entry[], order: EntryOrder): Entry[] => {
+  if (order === "logged") return page;
+
+  const present = new Set(page.map((e) => e.id));
+  const kids = new Map<string, Entry[]>();
+  const tops: Entry[] = [];
+  for (const e of page) {
+    const parent = e.parentId && present.has(e.parentId) ? e.parentId : undefined;
+    if (!parent) {
+      tops.push(e);
+      continue;
+    }
+    const sibs = kids.get(parent);
+    if (sibs) sibs.push(e);
+    else kids.set(parent, [e]);
+  }
+
+  // Sort a copy: the array belongs to the caller, and re-reading a page must
+  // never be a write, however far from the store it happens.
+  const ordered: Entry[] = [];
+  for (const top of [...tops].sort(compareTop(order))) {
+    ordered.push(top);
+    for (const child of kids.get(top.id) ?? []) ordered.push(child);
+  }
+  return ordered;
 };

@@ -11,6 +11,7 @@ import {
   dkey,
   fmt,
   keyScope,
+  endLabel,
   keyToAnchor,
   pageLabel,
   periodKey,
@@ -21,6 +22,7 @@ import IndexView from "./IndexView";
 import CollectionView from "./CollectionView";
 import SyncView from "./SyncView";
 import MenuView from "./MenuView";
+import FeedbackView from "./ui/FeedbackView";
 import { download } from "./lib/download";
 import { buildMarkdown } from "./lib/exportMd";
 import {
@@ -62,9 +64,15 @@ import {
   restoreCollection,
   setParent,
   setReminder,
+  setRecurrenceEnd,
   tagEntryRecurrence,
 } from "./store/journal";
-import type { RecurrenceUnit } from "./lib/types";
+import {
+  cadenceLabel,
+  endClause,
+  repeatCaption,
+  ruleSentence,
+} from "./store/recurrence";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -82,6 +90,8 @@ import {
   saveFilterOpen,
 } from "./lib/filter";
 import type { EntryFilter } from "./lib/filter";
+import { loadOrder, saveOrder } from "./lib/order";
+import type { EntryOrder } from "./lib/order";
 import { loadSticky, saveSticky } from "./lib/sticky";
 import {
   addEntry,
@@ -93,7 +103,7 @@ import {
 import { useJournal } from "./store/useJournal";
 import { applyUpdate, getUpdateReady, onUpdateReady } from "./store/appUpdate";
 import { S } from "./ui/styles";
-import FilterRow from "./ui/FilterRow";
+import ReadingBlock from "./ui/ReadingBlock";
 import FutureLogView from "./ui/FutureLogView";
 import CaptureForm from "./ui/CaptureForm";
 import EntryActionsSheet from "./ui/EntryActionsSheet";
@@ -127,7 +137,12 @@ import {
 import { acknowledgeRecovery, recoveryPending } from "./lib/recoveryAck";
 import { buildSpreadData } from "./ui/spreadData";
 import { buildMigrationHistory } from "./ui/migrationHistory";
-import type { EditRepeat, ScheduledRow, SheetTarget } from "./ui/types";
+import type {
+  EditEnds,
+  EditRepeat,
+  ScheduledRow,
+  SheetTarget,
+} from "./ui/types";
 
 interface DeletedToast {
   entry?: Entry;
@@ -141,10 +156,12 @@ type View =
   | "menu"
   | "future"
   | "search"
+  | "feedback"
   | { col: string };
 
-// Future log fold state is a device preference, not journal content —
-// kept local like sticky capture state, never synced
+// Fold state is a device preference, not journal content — kept local like
+// sticky capture state, never synced. Keys are namespaced: a Future log month
+// is its own page key, the spread's repeating group is `later:<month>`.
 const FOLDS_KEY = "journlet-futurelog-folds";
 
 // Honour the OS "reduce motion" setting for scripted scrolling, as the CSS
@@ -156,7 +173,7 @@ const scrollBehaviour = (): ScrollBehavior =>
     : "smooth";
 
 export default function App() {
-  const { loaded, saveState, days, collections, habits, recurrences } =
+  const { loaded, days, collections, habits, recurrences } =
     useJournal();
 
   const sticky = useRef(loadSticky());
@@ -227,7 +244,8 @@ export default function App() {
   // floor and may reach back into the past.
   const [moveAnchor, setMoveAnchor] = useState(todayKey());
   const [moveGran, setMoveGran] = useState<Scope>("day");
-  // Folded Future log month groups (device preference, see FOLDS_KEY)
+  // Folded groups: Future log months and the spread's repeating group
+  // (device preference, see FOLDS_KEY)
   const [folds, setFolds] = useState<Record<string, boolean>>(() => {
     try {
       return JSON.parse(localStorage.getItem(FOLDS_KEY) || "{}");
@@ -235,9 +253,13 @@ export default function App() {
       return {};
     }
   });
-  const toggleFold = (gk: string) =>
+  // `defaultFolded` carries the group's own default, because they differ: a
+  // Future log month starts open, "Later this month"'s repeats start folded
+  // (spec §11 Q19). Without it the first tap on a folded-by-default group
+  // flips `undefined` to `true` and nothing appears to happen.
+  const toggleFold = (gk: string, defaultFolded = false) =>
     setFolds((f) => {
-      const next = { ...f, [gk]: !f[gk] };
+      const next = { ...f, [gk]: !(f[gk] ?? defaultFolded) };
       try {
         localStorage.setItem(FOLDS_KEY, JSON.stringify(next));
       } catch {
@@ -260,6 +282,10 @@ export default function App() {
   // an action that appears to do nothing is the app lying about what happened.
   const [nestRefused, setNestRefused] = useState<string | null>(null);
   const [editRepeat, setEditRepeat] = useState<EditRepeat | null>(null);
+  // Draft for the "when it ends" step (spec §11 Q17). Held here beside the other
+  // sheet drafts rather than in the view, because the row that opens it is one
+  // of sixteen and the view is unmounted every time the sheet closes.
+  const [editEnds, setEditEnds] = useState<EditEnds | null>(null);
   const [toast, setToast] = useState<DeletedToast | null>(null);
   const [reviewing, setReviewing] = useState(false);
   // Entry visibility filter (remediation item 7). A device preference like
@@ -274,6 +300,15 @@ export default function App() {
   // row you opened yourself stays open across launches. Closing it never
   // changes what is filtered — the badge keeps saying which filter is on, so
   // a filtered page is still explained with the control out of sight.
+  // Reading order (spec §4.9a, §11 Q16). A device preference exactly like the
+  // filter above: it rearranges what is drawn and writes nothing, so one
+  // device reading "priority" doesn't change what another shows, and no entry
+  // is touched. Sub-bullets are unaffected — they follow their parent.
+  const [order, setOrderState] = useState<EntryOrder>(loadOrder);
+  const changeOrder = useCallback((o: EntryOrder) => {
+    setOrderState(o);
+    saveOrder(o);
+  }, []);
   const [filterOpen, setFilterOpen] = useState<boolean>(loadFilterOpen);
   const toggleFilterRow = useCallback(() => {
     setFilterOpen((o) => {
@@ -483,6 +518,7 @@ export default function App() {
     futureLogCount,
     dueItems,
     earlierOpen,
+    endedRules,
   } = useMemo(
     () => buildSpreadData(days, recurrences, today),
     [days, recurrences, today]
@@ -510,6 +546,12 @@ export default function App() {
     view === "spread" ||
     view === "future" ||
     (activeCol !== null && activeCol.kind === "list");
+
+  // The order applies wherever the filter does, bar the Future log: its rows
+  // are occurrences drawn from other pages, so there is no page sequence there
+  // to re-read (§4.9a). The header badge takes null there and speaks for the
+  // filter alone, which is the same rule ReadingBlock's showOrder follows.
+  const orderApplies = filterApplies && view !== "future";
 
   // Whether this device holds any journal content. Gates the "not syncing"
   // banner (remediation item 11) so a brand-new empty install stays quiet,
@@ -673,6 +715,7 @@ export default function App() {
     setEditText(null);
     setEditRemind(null);
     setEditRepeat(null);
+    setEditEnds(null);
     setThreadFilter(null);
     setNestFilter(null);
     setNestRefused(null);
@@ -686,8 +729,28 @@ export default function App() {
     setDetailsEntry(entry);
   };
 
-  const cadenceLabel = (n: number, unit: RecurrenceUnit) =>
-    `every ${n > 1 ? `${n} ` : ""}${unit}${n > 1 ? "s" : ""}`;
+  /**
+   * Write the end the step was left on (spec §11 Q17).
+   *
+   * The two forms are stored as they were given rather than one being converted
+   * into the other, and "never" clears both. Nothing already on a page is
+   * touched: an end only stops the materialiser going further, which is why
+   * this needs no pass over the entries.
+   */
+  const saveEnds = () => {
+    if (!sheet || !sheetEntry || !editEnds) return;
+    const rule = recurrences.find((r) => r.id === sheetEntry.recurrenceId);
+    if (!rule) return;
+    setRecurrenceEnd(
+      rule.id,
+      editEnds.mode === "date"
+        ? { on: editEnds.date }
+        : editEnds.mode === "count"
+          ? { after: Math.max(1, parseInt(editEnds.count, 10) || 1) }
+          : null
+    );
+    setEditEnds(null);
+  };
 
   const saveRepeat = () => {
     if (!sheet || !sheetEntry || !editRepeat) return;
@@ -699,6 +762,10 @@ export default function App() {
       scope === "day" && /^\d{2}:\d{2}$/.test(editRepeat.time)
         ? editRepeat.time
         : undefined;
+    // The end set in the same step, if any (spec §11 Q17). Stored as the form
+    // it was given in: a count is not turned into the date it implies, since
+    // "ten of these" and "nothing after September" are different statements.
+    const ends = editRepeat.ends;
     const rule = addRecurrence({
       text: sheetEntry.text,
       type: sheetEntry.type,
@@ -717,6 +784,11 @@ export default function App() {
       // their own anchor so occurrences still begin after them.
       materialisedThrough:
         sheet.pk > nowKeys[scope] ? sheet.pk : nowKeys[scope],
+      endsOn: ends.mode === "date" ? ends.date : undefined,
+      endsAfter:
+        ends.mode === "count"
+          ? Math.max(1, parseInt(ends.count, 10) || 1)
+          : undefined,
     });
     tagEntryRecurrence(sheet.id, rule.id);
     if (time && !sheetEntry.remindAt) {
@@ -1124,7 +1196,15 @@ export default function App() {
               marginLeft: 8,
             }}
           >
-            repeats
+            {/* "repeats" alone until the rule has an end, then "repeats until
+                30 Sept", and "repeats, last one" on the final occurrence. The
+                cadence stays out of it: this page has never carried it, and the
+                longer form wrapped on most rows at 375px (spec §11 Q17). */}
+            {repeatCaption(
+              recurrences.find((r) => r.id === e.recurrenceId),
+              e.pageKey,
+              today
+            )}
           </span>
         )}
         {/* Earlier occurrences of this rule that were never finished (spec
@@ -1272,7 +1352,10 @@ export default function App() {
                   (r) => r.id === row.entry.recurrenceId && !r.endedAt
                 );
               return rule
-                ? ` — repeats ${cadenceLabel(rule.everyN, rule.unit)}`
+                ? ` — repeats ${cadenceLabel(
+                    rule.everyN,
+                    rule.unit
+                  )}${endClause(rule, row.pk)}`
                 : null;
             })()}
           </span>
@@ -1318,6 +1401,7 @@ export default function App() {
           >
             {whenLabel(row.dayKey, grouped)} — repeats{" "}
             {cadenceLabel(row.rule.everyN, row.rule.unit)}
+            {endClause(row.rule, row.dayKey)}
           </span>
         </span>
         <span className="actions">
@@ -1355,13 +1439,12 @@ export default function App() {
             ? filter
             : null
         }
+        order={
+          journalOnScreen && loaded && orderApplies ? order : null
+        }
         filterOpen={filterOpen}
         onToggleFilter={toggleFilterRow}
-        saving={saveState === "saving"}
         syncStatus={syncStatus}
-        onSyncClick={() => {
-          if (view !== "sync") setView("sync");
-        }}
       />
 
       <main style={S.paper}>
@@ -1455,10 +1538,19 @@ export default function App() {
             review banner, while the other two pages, which carry no banner,
             take it here. */}
         {journalOnScreen && loaded &&
-          filterOpen &&
           (view === "future" ||
             (activeCol !== null && activeCol.kind === "list")) && (
-          <FilterRow filter={filter} onChange={changeFilter} />
+          <ReadingBlock
+            open={filterOpen}
+            filter={filter}
+            onChangeFilter={changeFilter}
+            order={order}
+            onChangeOrder={changeOrder}
+            /* The Future log's rows are occurrences drawn from other pages,
+               not this page's own entries, so there is no page sequence to
+               re-read and no order row is offered (spec §4.9a). */
+            showOrder={view !== "future"}
+          />
         )}
         {journalOnScreen && loaded && view === "index" && (
           <IndexView
@@ -1490,6 +1582,17 @@ export default function App() {
         {journalOnScreen && loaded && view === "sync" && (
           <SyncView />
         )}
+        {/* Reached from the Menu, so it needs a journal on screen like the rest.
+            The case this cannot serve is somebody stuck before that point, on the
+            unlock or sign-in screen, which is why the site carries the address too
+            (spec §13.1). */}
+        {journalOnScreen && loaded && view === "feedback" && (
+          <FeedbackView
+            syncStatus={syncStatus}
+            syncError={sync.error}
+            installed={install.mode === "hidden"}
+          />
+        )}
         {journalOnScreen && loaded && view === "menu" && (
           <MenuView
             syncStatus={syncStatus}
@@ -1501,6 +1604,7 @@ export default function App() {
             onOpenIndex={() => setView("index")}
             onOpenSearch={openSearch}
             onOpenSync={() => setView("sync")}
+            onOpenFeedback={() => setView("feedback")}
             onExport={() => {
               const md = buildMarkdown(days, collections, habits);
               download(
@@ -1546,6 +1650,7 @@ export default function App() {
             habits={habits.filter((h) => h.collectionId === activeCol.id)}
             renderEntry={(e) => renderEntry(e, colPageKey(activeCol.id), null)}
             filter={filter}
+            order={order}
             threadedHere={renderThreadedHere(colPageKey(activeCol.id))}
             onDelete={() => {
               const snap = removeCollection(activeCol.id);
@@ -1568,11 +1673,19 @@ export default function App() {
             scheduledRows={scheduledRows}
             laterThisMonth={laterThisMonth}
             futureLogCount={futureLogCount}
+            folds={folds}
+            onToggleFold={toggleFold}
             filter={filter}
+            order={order}
             filterRow={
-              filterOpen ? (
-                <FilterRow filter={filter} onChange={changeFilter} />
-              ) : null
+              <ReadingBlock
+                open={filterOpen}
+                filter={filter}
+                onChangeFilter={changeFilter}
+                order={order}
+                onChangeOrder={changeOrder}
+                showOrder
+              />
             }
             onReview={() => setReviewing(true)}
             onOpenFutureLog={() => setView("future")}
@@ -1581,6 +1694,11 @@ export default function App() {
         {journalOnScreen && loaded && view === "future" && (
           <FutureLogView
             count={futureLogCount}
+            finished={endedRules.map(({ rule, last }) => ({
+              id: rule.id,
+              text: rule.text,
+              last: endLabel(last),
+            }))}
             groups={futureLogGroups}
             folds={folds}
             onToggleFold={toggleFold}
@@ -1597,6 +1715,9 @@ export default function App() {
       {journalOnScreen &&
         view !== "sync" &&
         view !== "menu" &&
+        // Writing feedback is not writing in the journal, and the launcher would
+        // sit over the message box with the keyboard already up.
+        view !== "feedback" &&
         // Search is a screen for finding, not writing: the bar would sit over
         // the results and the keyboard has the room instead. It is also the
         // one page where a Find button would point at itself.
@@ -1623,8 +1744,8 @@ export default function App() {
             <RuleActionsSheet
               rule={rule}
               dayKey={ruleSheet.dayKey}
+              today={today}
               onClose={() => setRuleSheet(null)}
-              cadenceLabel={cadenceLabel}
             />
           );
         })()}
@@ -1761,11 +1882,7 @@ export default function App() {
             <EarlierOccurrencesSheet
               entry={owner}
               occurrences={earlierOpenFor(owner)}
-              cadence={
-                rule
-                  ? `repeats ${cadenceLabel(rule.everyN, rule.unit)}`
-                  : "repeats"
-              }
+              cadence={rule ? ruleSentence(rule, today) : "repeats"}
               onClose={() => setEarlierSheet(null)}
             />
           );
@@ -1795,6 +1912,8 @@ export default function App() {
           today={today}
           nowKeys={nowKeys}
           editRepeat={editRepeat}
+          editEnds={editEnds}
+          setEditEnds={setEditEnds}
           setEditRepeat={setEditRepeat}
           threadFilter={threadFilter}
           setThreadFilter={setThreadFilter}
@@ -1811,8 +1930,8 @@ export default function App() {
           setMoveGran={setMoveGran}
           closeSheet={closeSheet}
           saveRepeat={saveRepeat}
+          saveEnds={saveEnds}
           saveReminder={saveReminder}
-          cadenceLabel={cadenceLabel}
           deleteWithUndo={deleteWithUndo}
           fmtRemind={fmtRemind}
           toLocalInput={toLocalInput}

@@ -26,24 +26,13 @@ export const FILTER_NOTE: Record<EntryFilter, string> = {
   tasks: "hiding notes and events",
   open: "hiding completed, struck out, migrated and scheduled",
 };
+/* FILTER_SHORT lived here until 27 August 2026. The badge shortened its value
+   below 480px because "menu", a named filter and the sync badge together
+   overran a 375px header; §11 Q20 removed the sync badge, and the badge now
+   names the kind of change rather than its value, so every state fits at 375px
+   and there is no second wording to keep in step. FILTER_LABEL is the only
+   vocabulary the badge needs, through readingAria. */
 
-/** The badge value on a narrow screen. "menu", a named filter and a signed-out
- *  sync badge together overrun a 375px header — measured, not guessed — so the
- *  value drops its second word there, exactly as the section nav drops
- *  "previous" for "prev". The full wording stays in the accessible name and in
- *  the row itself, so nothing is lost, only shortened. */
-export const FILTER_SHORT: Record<EntryFilter, string> = {
-  all: "",
-  tasks: "tasks",
-  open: "open",
-};
-
-/** The header badge, which has to carry the state while the row is closed:
- *  a page can be filtered with the control out of sight, so the button says
- *  which filter is on rather than only that one is. Same shape as the sync
- *  badge ("sync · offline"), for the same reason. */
-export const filterBadge = (f: EntryFilter): string =>
-  f === "all" ? "filter" : `filter · ${FILTER_LABEL[f]}`;
 
 /** Accessible name for each button — the note as a sentence. */
 export const FILTER_ARIA: Record<EntryFilter, string> = {

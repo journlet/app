@@ -74,6 +74,15 @@ describe("what it says", () => {
       .toBeTruthy();
   });
 
+  test("offers a way to report it, since feedback is behind the Menu", () => {
+    // The Menu's feedback screen needs a journal on screen and this is the state
+    // where there is not one, so the address is written out here rather than
+    // linked to a route that cannot be reached from here (spec §13.1).
+    renderView();
+
+    expect(screen.getByText(/hello@journlet.com/)).toBeTruthy();
+  });
+
   test("copes with no error text", () => {
     renderView({ error: null });
 

@@ -3,12 +3,12 @@
 // writes, so recurrence rows here are display-only previews. Extracted from
 // App so the grouping/scheduling logic can be unit-tested directly.
 
-import { SCOPES, keyScope, keyToAnchor, periodKey } from "../lib/dates";
+import { SCOPES, keyScope, keyToAnchor, periodKey, toDate } from "../lib/dates";
 import type { Scope } from "../lib/dates";
 import type { Entry, Recurrence } from "../lib/types";
 import { entryVisible } from "../lib/filter";
 import type { EntryFilter } from "../lib/filter";
-import { nextOccurrence } from "../store/recurrence";
+import { isSpent, lastOccurrence, nextOccurrence } from "../store/recurrence";
 import type { ScheduledRow } from "./types";
 
 /**
@@ -31,6 +31,21 @@ export const filterRows = (
         : true
   );
 };
+
+/**
+ * Did somebody write this row, or does it merely predict something? A rule
+ * preview predicts, and so does an occurrence already materialised onto a
+ * future page, since the rule put it there rather than a person. A copy made
+ * by migrating keeps its `recurrenceId` for provenance but was a deliberate
+ * act, so it counts as written — the same reading of a migrated copy as
+ * §11 Q15, and the same test the `covered` set below applies.
+ *
+ * Used by the month section (spec §11 Q19): predicted rows fold behind a
+ * count, written rows stay on the page, because the thing you would forget is
+ * the one you dated yourself, never the bins.
+ */
+export const rowIsPredicted = (r: ScheduledRow): boolean =>
+  r.kind === "rule" || (!!r.entry.recurrenceId && !r.entry.migratedFrom);
 
 export interface SpreadData {
   nowKeys: Record<Scope, string>;
@@ -56,7 +71,25 @@ export interface SpreadData {
    * always share a scope, so a plain string compare orders them.
    */
   earlierOpen: Record<string, { pk: string; entry: Entry }[]>;
+  /**
+   * Repeats that have just finished, most recent first (spec §11 Q17, added
+   * 26 August 2026 after a day's use).
+   *
+   * A rule that reaches its end leaves the future log silently: the caption
+   * saying `repeats, last one` is on the occurrence's own page, which is a page
+   * you have finished with by the time you go looking for the next one. So the
+   * Future log carries the fact for a fortnight, where the question is actually
+   * asked. Only rules with a planned end are listed: *Stop repeating* is a
+   * deliberate act with a visible effect on the row in front of you, and does
+   * not need a receipt.
+   */
+  endedRules: { rule: Recurrence; last: string }[];
 }
+
+/** How long a finished repeat stays named in the Future log. A fortnight: long
+ *  enough to cover "it should have gone out this week", short enough that the
+ *  page does not become a graveyard. */
+export const ENDED_RULE_DAYS = 14;
 
 export function buildSpreadData(
   days: Record<string, Entry[]>,
@@ -111,7 +144,9 @@ export function buildSpreadData(
           .map((f) => `${f.entry.recurrenceId}:${f.pk}`)
       );
       return recurrences
-        .filter((r) => !r.endedAt)
+        // A rule with nothing left to make has no next occurrence to preview
+        // (spec §11 Q17); isSpent covers both a manual stop and a passed end.
+        .filter((r) => !isSpent(r, today))
         .map((r) => {
           const occKey = nextOccurrence(r, periodKey(r.pageScope, today));
           // sort by the period's first day so week/month/year previews
@@ -123,7 +158,15 @@ export function buildSpreadData(
             rule: r,
           };
         })
-        .filter((row) => !covered.has(`${row.rule.id}:${row.dayKey}`));
+        .filter((row) => {
+          // Never preview past the rule's own end: the occurrence after the
+          // last one does not exist (spec §11 Q17).
+          const last = lastOccurrence(row.rule);
+          return (
+            (!last || row.dayKey <= last) &&
+            !covered.has(`${row.rule.id}:${row.dayKey}`)
+          );
+        });
     })(),
   ].sort((a, b) => (a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0));
 
@@ -179,6 +222,21 @@ export function buildSpreadData(
     list.sort((a, b) => (a.pk < b.pk ? -1 : a.pk > b.pk ? 1 : 0))
   );
 
+  // Repeats that finished recently (see endedRules above). Measured in days
+  // from the last occurrence's own page, so a monthly rule's last month counts
+  // from the day that page began.
+  const endedRules = recurrences
+    .filter((r) => {
+      const last = lastOccurrence(r);
+      if (!last || last >= periodKey(r.pageScope, today)) return false;
+      const gone =
+        (toDate(today).getTime() - toDate(keyToAnchor(last)).getTime()) /
+        86400000;
+      return gone <= ENDED_RULE_DAYS;
+    })
+    .map((r) => ({ rule: r, last: lastOccurrence(r) as string }))
+    .sort((a, b) => (a.last < b.last ? 1 : -1));
+
   return {
     nowKeys,
     pastOpen,
@@ -189,5 +247,6 @@ export function buildSpreadData(
     futureLogCount,
     dueItems,
     earlierOpen,
+    endedRules,
   };
 }

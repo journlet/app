@@ -6,6 +6,8 @@ import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { dkey } from "./lib/dates";
 import { applyFilter } from "./lib/filter";
+import { applyOrder } from "./store/pageOrder";
+import type { EntryOrder } from "./lib/order";
 import type { EntryFilter } from "./lib/filter";
 import { GRID } from "./lib/grid";
 import type { Collection, Entry, Habit } from "./lib/types";
@@ -55,6 +57,8 @@ interface Props {
   /** entry visibility filter (remediation item 7) — the same one the spread
    *  uses, so a collection is read the way the rest of the journal is */
   filter: EntryFilter;
+  /** reading order (spec §4.9a) */
+  order: EntryOrder;
   /** entries elsewhere referencing this collection (spec §4.4 Threading) */
   threadedHere: ReactNode;
   onDelete: () => void;
@@ -66,10 +70,14 @@ export default function CollectionView({
   habits,
   renderEntry,
   filter,
+  order,
   threadedHere,
   onDelete,
 }: Props) {
-  const shown = applyFilter(entries, filter);
+  // Filter first, then re-read what is left in the chosen order (§4.9a):
+  // ordering a page the filter has already emptied of context would move
+  // rows past neighbours that are not on screen.
+  const shown = applyOrder(applyFilter(entries, filter), order);
   const hidden = entries.length - shown.length;
   const [habitName, setHabitName] = useState<string | null>(null);
 

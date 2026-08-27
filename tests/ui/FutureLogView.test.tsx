@@ -42,6 +42,7 @@ test("shows the empty state when nothing is scheduled ahead", () => {
   render(
     <FutureLogView
       count={0}
+      finished={[]}
       groups={[]}
       folds={{}}
       onToggleFold={vi.fn()}
@@ -58,6 +59,7 @@ describe("with groups", () => {
     render(
       <FutureLogView
         count={3}
+        finished={[]}
         groups={groups}
         folds={{}}
         onToggleFold={vi.fn()}
@@ -83,6 +85,7 @@ describe("with groups", () => {
     render(
       <FutureLogView
         count={3}
+        finished={[]}
         groups={groups}
         folds={{ "2026-08": true }}
         onToggleFold={vi.fn()}
@@ -100,6 +103,7 @@ describe("with groups", () => {
     render(
       <FutureLogView
         count={3}
+        finished={[]}
         groups={groups}
         folds={{}}
         onToggleFold={onToggleFold}
@@ -133,6 +137,7 @@ describe("with the filter on", () => {
     render(
       <FutureLogView
         count={2}
+        finished={[]}
         groups={mixed}
         folds={{}}
         onToggleFold={vi.fn()}
@@ -149,6 +154,7 @@ describe("with the filter on", () => {
     render(
       <FutureLogView
         count={2}
+        finished={[]}
         groups={[{ gk: "2026-08", rows: mixed[0].rows.slice(1) }]}
         folds={{}}
         onToggleFold={vi.fn()}
@@ -163,4 +169,62 @@ describe("with the filter on", () => {
     expect(screen.getByText(/Nothing matching/i)).toBeTruthy();
     expect(screen.queryByText(/Nothing scheduled ahead/i)).toBeNull();
   });
+});
+
+// A repeat that reaches its end stops appearing here, and its "last one"
+// caption is on a page you have finished with, so this is where it says so
+// (spec §11 Q17, after a day's use).
+test("names repeats that have just finished, above what is still coming", () => {
+  render(
+    <FutureLogView
+      count={0}
+      finished={[
+        { id: "r1", text: "Send out governance agenda", last: "26 Aug" },
+      ]}
+      groups={[]}
+      folds={{}}
+      onToggleFold={vi.fn()}
+      filter="all"
+      renderRow={vi.fn()}
+    />
+  );
+  expect(screen.getByText(/Repeat finished:/)).toBeTruthy();
+  expect(screen.getByText(/Send out governance agenda/)).toBeTruthy();
+  expect(screen.getByText(/last one 26 Aug/)).toBeTruthy();
+  // and the page still says what it says when nothing is scheduled
+  expect(screen.getByText(/Nothing scheduled ahead/)).toBeTruthy();
+});
+
+test("several finished repeats are listed together, plurally", () => {
+  render(
+    <FutureLogView
+      count={0}
+      finished={[
+        { id: "r1", text: "Send out governance agenda", last: "26 Aug" },
+        { id: "r2", text: "Antibiotics", last: "16 Aug" },
+      ]}
+      groups={[]}
+      folds={{}}
+      onToggleFold={vi.fn()}
+      filter="all"
+      renderRow={vi.fn()}
+    />
+  );
+  expect(screen.getByText(/Repeats finished:/)).toBeTruthy();
+  expect(screen.getByText(/Antibiotics/)).toBeTruthy();
+});
+
+test("says nothing at all when no repeat has finished", () => {
+  render(
+    <FutureLogView
+      count={0}
+      finished={[]}
+      groups={[]}
+      folds={{}}
+      onToggleFold={vi.fn()}
+      filter="all"
+      renderRow={vi.fn()}
+    />
+  );
+  expect(screen.queryByText(/finished/i)).toBeNull();
 });

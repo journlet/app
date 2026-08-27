@@ -2,7 +2,11 @@
 // Future log grouping. Pure logic, so tested directly in the node environment.
 
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
-import { buildSpreadData, filterRows } from "../src/ui/spreadData";
+import {
+  buildSpreadData,
+  filterRows,
+  rowIsPredicted,
+} from "../src/ui/spreadData";
 import { periodKey } from "../src/lib/dates";
 import type { Entry, Recurrence } from "../src/lib/types";
 
@@ -228,5 +232,45 @@ describe("earlierOpen", () => {
     ]);
     const { earlierOpen } = buildSpreadData(days, [dailyRule()], TODAY);
     expect(earlierOpen.r1).toHaveLength(1);
+  });
+});
+
+// spec §11 Q19: what the month section folds by default is what the app
+// predicted, never what was written by hand.
+describe("rowIsPredicted", () => {
+  const row = (e: Partial<Entry> & { id: string; pageKey: string }) =>
+    ({ kind: "entry", sort: e.pageKey, pk: e.pageKey, entry: entry(e) }) as const;
+
+  test("a rule preview is a prediction", () => {
+    const { scheduledRows } = buildSpreadData({}, [dailyRule()], TODAY);
+    const preview = scheduledRows.find((r) => r.kind === "rule")!;
+    expect(rowIsPredicted(preview)).toBe(true);
+  });
+
+  test("an entry dated by hand is not", () => {
+    expect(rowIsPredicted(row({ id: "dentist", pageKey: "2026-07-28" }))).toBe(
+      false
+    );
+  });
+
+  test("an occurrence already on a future page is — the rule put it there", () => {
+    expect(
+      rowIsPredicted(
+        row({ id: "standup", pageKey: "2026-07-28", recurrenceId: "r1" })
+      )
+    ).toBe(true);
+  });
+
+  test("a migrated copy is not, even though it keeps its rule (§11 Q15)", () => {
+    expect(
+      rowIsPredicted(
+        row({
+          id: "copy",
+          pageKey: "2026-07-28",
+          recurrenceId: "r1",
+          migratedFrom: "mon",
+        })
+      )
+    ).toBe(false);
   });
 });
