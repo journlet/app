@@ -17,15 +17,18 @@ import type {
 import { colPageKey, uid } from "../lib/types";
 import { isFutureKey } from "../lib/dates";
 import { docNameForVolume, getActiveVolume } from "../lib/volume";
+import { REMOTE_ORIGIN_TAG } from "../lib/storageKeys";
 import { canNest } from "./pageOrder";
 import type { Nestable } from "./pageOrder";
 
 // Origin tag for updates applied from the sync layer (shared so other
-// modules can distinguish remote from local changes)
-export const REMOTE_ORIGIN = "journlet-remote";
+// modules can distinguish remote from local changes). The literal lives in
+// lib/storageKeys.ts with every other `journlet-` name, so the inventory that
+// the erase enumerates can be checked exhaustively.
+export const REMOTE_ORIGIN = REMOTE_ORIGIN_TAG;
 
 // Per-volume IndexedDB name. With the default volume this is still
-// "journlet-journal-v1", so existing local journals load unchanged.
+// `journlet-journal-v1`, so existing local journals load unchanged.
 const DOC_NAME = docNameForVolume(getActiveVolume());
 
 export const doc = new Y.Doc();

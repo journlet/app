@@ -29,8 +29,17 @@ const AES = "AES-GCM";
 const IV_BYTES = 12;
 const SALT_BYTES = 32;
 
-/** Format version of the wrapped blob, carried in the row. */
-const WRAP_VERSION = 1;
+/**
+ * Format version of the wrapped blob, carried in the row.
+ *
+ * Named for what it versions rather than `WRAP_VERSION`, because lib/crypto.ts
+ * versions the wrapped *data* key and had a constant of the same name holding the
+ * same 1. They count independently. This one is also load-bearing in a way that
+ * one is not: it is interpolated into the AAD below, so its value is part of the
+ * stored format and changing it makes every existing row undecryptable. A bump
+ * here is a migration, not a relabelling.
+ */
+const KEEPER_WRAP_VERSION = 1;
 
 /**
  * The fixed input the authenticator is asked to evaluate.
@@ -89,7 +98,7 @@ export const newWrapId = (): string => crypto.randomUUID();
 
 const bindingBytes = (b: KeeperWrapBinding): Uint8Array =>
   new TextEncoder().encode(
-    `journlet/keeper-wrap/${WRAP_VERSION}\nuser=${b.userId}\nwrap=${b.wrapId}`
+    `journlet/keeper-wrap/${KEEPER_WRAP_VERSION}\nuser=${b.userId}\nwrap=${b.wrapId}`
   );
 
 /**
@@ -154,7 +163,7 @@ export const wrapKeeperKey = async (
   );
 
   return {
-    v: WRAP_VERSION,
+    v: KEEPER_WRAP_VERSION,
     salt: b64encode(salt),
     iv: b64encode(iv),
     blob: b64encode(blob),
@@ -174,7 +183,7 @@ export const unwrapKeeperKey = async (
   secret: BufferSource,
   binding: KeeperWrapBinding
 ): Promise<CryptoKey> => {
-  if (wrapped.v !== WRAP_VERSION)
+  if (wrapped.v !== KEEPER_WRAP_VERSION)
     throw new Error(`Unsupported keeper wrap version ${wrapped.v}`);
   const aesKey = await deriveWrappingKey(
     secret,

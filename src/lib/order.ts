@@ -9,6 +9,7 @@
 // order is decided and already owns the parent/child tree this has to respect.
 
 import type { Entry } from "./types";
+import { ORDER_KEY } from "./storageKeys";
 
 export type EntryOrder = "logged" | "priority" | "type";
 
@@ -90,7 +91,7 @@ export const compareTop =
     return a.createdAt - b.createdAt;
   };
 
-const KEY = "journlet-order-v1";
+const KEY = ORDER_KEY;
 
 export const loadOrder = (): EntryOrder => {
   try {

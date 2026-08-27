@@ -4,7 +4,8 @@
 // partitioned by volume so opening a new volume never re-encrypts an old one.
 //
 // All current data lives in volume "v1". The default is chosen so the
-// IndexedDB doc name stays byte-for-byte "journlet-journal-v1" — existing
+// IndexedDB doc name stays byte-for-byte `journlet-journal-v1` (see
+// JOURNAL_DOC_PREFIX in lib/storageKeys.ts): existing
 // local journals are adopted as-is, no local migration.
 //
 // The close-a-volume ritual (opening the next volume, carrying open items and
@@ -12,7 +13,7 @@
 // This module is only the plumbing that keeps the model from assuming a single
 // volume for good.
 
-const ACTIVE_VOLUME_KEY = "journlet-active-volume";
+import { ACTIVE_VOLUME_KEY, JOURNAL_DOC_PREFIX } from "./storageKeys";
 
 export const DEFAULT_VOLUME = "v1";
 
@@ -33,4 +34,4 @@ export const setActiveVolume = (volume: string): void => {
 };
 
 export const docNameForVolume = (volume: string): string =>
-  `journlet-journal-${volume}`;
+  `${JOURNAL_DOC_PREFIX}${volume}`;

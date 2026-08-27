@@ -231,3 +231,25 @@ export const pageLabel = (pk: string): string => {
     return fmt(toDate(pk + "-01"), { month: "short", year: "numeric" });
   return pk;
 };
+
+/**
+ * A reminder's time, said as briefly as it can be without becoming ambiguous:
+ * the clock time alone when it falls today, the weekday and date as well when it
+ * does not. Takes today rather than reading the clock, because two callers
+ * render the same timestamp on the same page (the entry row and its ⋯ view) and
+ * they must not disagree across a midnight boundary mid-render.
+ */
+export const formatRemindAt = (ts: number, today: string): string => {
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return dkey(d) === today
+    ? time
+    : `${d.toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      })}, ${time}`;
+};

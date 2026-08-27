@@ -34,8 +34,10 @@
 // closed before the timer fires, nothing of ours is running, and the key waits
 // on disk until the app is next opened. A service worker cannot help, because
 // service workers have no access to localStorage at all.
+import { PENDING_JOURNAL_KEY } from "./storageKeys";
 
-const PENDING_KEY = "journlet-pending-journal-key";
+
+const PENDING_KEY = PENDING_JOURNAL_KEY;
 
 /** Generous enough to go and fetch the emailed code, short enough to matter. */
 export const PENDING_TTL_MS = 30 * 60 * 1000;

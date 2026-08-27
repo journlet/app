@@ -5,6 +5,7 @@
 import type { EntryType } from "./types";
 import { SCOPES } from "./dates";
 import type { Scope } from "./dates";
+import { CAPTURE_STICKY_KEY } from "./storageKeys";
 
 export interface CaptureSticky {
   type: EntryType;
@@ -14,7 +15,7 @@ export interface CaptureSticky {
   scope: Scope;
 }
 
-const KEY = "journlet-capture-v1";
+const KEY = CAPTURE_STICKY_KEY;
 
 const DEFAULTS: CaptureSticky = {
   type: "task",

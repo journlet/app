@@ -8,6 +8,12 @@ import type { Scope } from "../../src/lib/dates";
 // The sheet calls store mutators directly (they are module-level, stateless
 // wrappers over the CRDT doc), so we mock those modules and assert the calls.
 vi.mock("../../src/store/journal", () => ({
+  // The four saves that used to be App's live in the view now (behaviour-neutral
+  // refactor), so the write each one makes is what a test can see. addRecurrence
+  // returns a rule because saveRepeat tags the entry with its id.
+  addRecurrence: vi.fn(() => ({ id: "r1" })),
+  tagEntryRecurrence: vi.fn(),
+  setRecurrenceEnd: vi.fn(),
   endRecurrence: vi.fn(),
   migrateEntry: vi.fn(),
   moveTo: vi.fn(),
@@ -29,15 +35,20 @@ vi.mock("../../src/store/recurrence", async (importOriginal) => ({
 }));
 vi.mock("../../src/store/reminders", () => ({
   notificationPermission: vi.fn(() => "granted"),
+  requestNotificationPermission: vi.fn(() => Promise.resolve("granted")),
 }));
 
 import {
+  addRecurrence,
   migrateEntry,
   moveTo,
   setEntryType,
   setParent,
+  setRecurrenceEnd,
+  setReminder,
   setSignifier,
   setText,
+  tagEntryRecurrence,
   toggleDone,
   toggleStruck,
   toggleThread,
@@ -74,11 +85,6 @@ const setup = (
     sheetHistory: [] as string[],
     sheetNestTargets: [] as Entry[],
     sheetHasChildren: false,
-    nestFilter: null,
-    setNestFilter: vi.fn(),
-    nestRefused: null,
-    onOpenNestPicker: vi.fn(),
-    onNestUnder: vi.fn(),
     onAddSubBullet: vi.fn(),
     sheetMigrates: false,
     recurrences: [],
@@ -88,31 +94,9 @@ const setup = (
     ],
     today: "2026-07-24",
     nowKeys,
-    editRepeat: null,
-    setEditRepeat: vi.fn(),
-    editEnds: null,
-    setEditEnds: vi.fn(),
-    editRemind: null,
-    setEditRemind: vi.fn(),
-    threadFilter: null,
-    setThreadFilter: vi.fn(),
-    editText: null,
-    setEditText: vi.fn(),
     onEditDetails: vi.fn(),
-    schedDate: "",
-    setSchedDate: vi.fn(),
-    moveAnchor: "2026-07-24",
-    setMoveAnchor: vi.fn(),
-    moveGran: "day" as Scope,
-    setMoveGran: vi.fn(),
     closeSheet: vi.fn(),
-    saveRepeat: vi.fn(),
-    saveEnds: vi.fn(),
-    saveReminder: vi.fn().mockResolvedValue(undefined),
     deleteWithUndo: vi.fn(),
-    fmtRemind: () => "10:00",
-    toLocalInput: () => "2026-07-24T10:00",
-    trunc: (s: string) => s,
     ...overrides,
   };
   render(<EntryActionsSheet {...props} />);
@@ -120,12 +104,26 @@ const setup = (
 };
 
 /** Migrate, move and schedule each have their own step now (6 August 2026), so
- *  a test that exercises one opens it first — as the user has to. */
-const openStep = (name: string) =>
+ *  a test that exercises one opens it first — as the user has to. Every other
+ *  step joined them here once the drafts moved into the component: a step used
+ *  to be entered by handing it its draft as a prop, and is now entered the only
+ *  way a person can, by tapping the row that opens it. */
+const openStep = (name: string | RegExp) =>
   fireEvent.click(screen.getByRole("button", { name }));
 const openMove = () => openStep("Move to another page…");
 const openMigrate = () => openStep("Migrate…");
 const openSchedule = () => openStep("Schedule for later…");
+const openText = () => openStep("Edit text");
+const openRemind = () => openStep(/^(Set|Change) reminder…$/);
+const openRepeat = () => openStep("Repeat this entry…");
+const openEnds = () => openStep(/^(Set|Change) when it ends…$/);
+const openThread = () => openStep(/^Thread to (a|another) page…$/);
+const openNest = () => openStep(/^Nest under (another|a different) entry…$/);
+
+/** Type into a labelled field, which is how a filter is narrowed now that it is
+ *  the component's own state rather than a prop handed in already narrowed. */
+const typeInto = (label: string, value: string) =>
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 describe("actions mode", () => {
   test("completing a task calls toggleDone and closes", () => {
@@ -150,24 +148,35 @@ describe("actions mode", () => {
   });
 
   test("Edit text opens the edit sub-form with the current text", () => {
-    const props = setup();
-    fireEvent.click(screen.getByRole("button", { name: "Edit text" }));
-    expect(props.setEditText).toHaveBeenCalledWith("write report");
+    setup();
+    openText();
+    // the draft starts as what the entry says, so a small correction does not
+    // begin by retyping the whole line
+    expect((screen.getByLabelText("Entry text") as HTMLInputElement).value).toBe(
+      "write report"
+    );
   });
 
   test("Move to offers the four kinds of page, as one picker shared with capture", () => {
-    const props = setup();
+    setup();
     openMove();
     expect(screen.getByRole("tablist", { name: "Move to" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "week" }));
-    expect(props.setMoveGran).toHaveBeenCalledWith("week");
+    // choosing a kind of page moves the picker onto that page, which the move
+    // it offers then names
+    expect(
+      screen.getByRole("tab", { name: "week" }).getAttribute("aria-selected")
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: "Move to Week 30" })).toBeTruthy();
     // the old row of four current-period buttons is gone, so "this week" is
     // reached by choosing a page rather than by a button that means only "now"
     expect(screen.queryByRole("button", { name: "This week" })).toBeNull();
   });
 
   test("the picker starts on the entry's own page, and moving there is refused", () => {
-    const props = setup({ moveAnchor: "2026-07-24", moveGran: "day" as Scope });
+    // The picker seeds itself from the page the sheet was opened on, so this
+    // needs nothing set up: the entry is on 24 Jul and so is the picker.
+    const props = setup();
     openMove();
     expect(screen.getByText(/page this entry is already on/)).toBeTruthy();
     const btn = screen.getByRole("button", { name: "Move" }) as HTMLButtonElement;
@@ -178,7 +187,7 @@ describe("actions mode", () => {
   });
 
   test("a chosen past page is reachable — a move is a correction, not a migration", () => {
-    const props = setup({ moveAnchor: "2026-07-20", moveGran: "day" as Scope });
+    const props = setup();
     openMove();
     expect(
       (screen.getByRole("button", { name: "Previous day" }) as HTMLButtonElement)
@@ -192,6 +201,9 @@ describe("actions mode", () => {
         .disabled
     ).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "close without changing" }));
+    // and stepping back off the entry's own page is how it is chosen
+    for (let i = 0; i < 4; i++)
+      fireEvent.click(screen.getByRole("button", { name: "Previous day" }));
     fireEvent.click(screen.getByRole("button", { name: "Move to Mon 20 Jul" }));
     expect(moveTo).toHaveBeenCalledWith("e1", "2026-07-20");
     expect(migrateEntry).not.toHaveBeenCalled();
@@ -199,20 +211,21 @@ describe("actions mode", () => {
   });
 
   test("the chosen kind of page decides which page a date means", () => {
-    setup({ moveAnchor: "2026-09-15", moveGran: "month" as Scope });
+    setup();
     openMove();
+    fireEvent.click(screen.getByRole("tab", { name: "month" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next month" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next month" }));
     expect(screen.getByText("September 2026")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Move to Sept 2026" }));
     expect(moveTo).toHaveBeenCalledWith("e1", "2026-09");
   });
 
   test("a sub-bullet is told it will be promoted, since its parent stays put", () => {
-    setup({
-      sheetEntry: { ...openTask, parentId: "p1" },
-      moveAnchor: "2026-08-01",
-      moveGran: "day" as Scope,
-    });
+    setup({ sheetEntry: { ...openTask, parentId: "p1" } });
     openMove();
+    // any page but the one it is on: the promotion is what a real move costs
+    fireEvent.click(screen.getByRole("button", { name: "Next day" }));
     expect(screen.getByText(/stops being a sub-bullet/)).toBeTruthy();
   });
 
@@ -223,13 +236,15 @@ describe("actions mode", () => {
       name: `Collection ${i}`,
       createdAt: i,
     }));
-    const props = setup({ collections: many });
+    setup({ collections: many });
     // no per-collection buttons in the actions list — just the one opener
     expect(screen.queryByRole("button", { name: "Collection 3" })).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: /Thread to a page/ })
-    );
-    expect(props.setThreadFilter).toHaveBeenCalledWith("");
+    openThread();
+    // the pages are chosen inside the step it opens, never on the list itself
+    expect(
+      screen.getByRole("button", { name: "Thread to Collection 3" })
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete entry" })).toBeNull();
   });
 
   test("current references are listed and removable in the actions list", () => {
@@ -248,7 +263,8 @@ describe("actions mode", () => {
 
 describe("thread picker sub-view", () => {
   test("lists list collections and the current period pages, not the entry's own page", () => {
-    setup({ threadFilter: "" });
+    setup();
+    openThread();
     expect(
       screen.getByRole("button", { name: "Thread to Reading list" })
     ).toBeTruthy();
@@ -263,22 +279,23 @@ describe("thread picker sub-view", () => {
   });
 
   test("choosing a page references it and returns to the actions list", () => {
-    const props = setup({ threadFilter: "" });
+    const props = setup();
+    openThread();
     fireEvent.click(
       screen.getByRole("button", { name: "Thread to Reading list" })
     );
     expect(toggleThread).toHaveBeenCalledWith("e1", "col:c1");
     expect(moveTo).not.toHaveBeenCalled();
     expect(migrateEntry).not.toHaveBeenCalled();
-    expect(props.setThreadFilter).toHaveBeenCalledWith(null);
+    // the step closes and the actions list is back (Delete only ever appears
+    // there), while the view itself stays open
+    expect(screen.getByRole("button", { name: "Delete entry" })).toBeTruthy();
     expect(props.closeSheet).not.toHaveBeenCalled();
   });
 
   test("a page already referenced is shown as such, not as a second way to remove it", () => {
-    setup({
-      threadFilter: "",
-      sheetEntry: { ...openTask, threads: ["col:c1"] },
-    });
+    setup({ sheetEntry: { ...openTask, threads: ["col:c1"] } });
+    openThread();
     expect(
       screen.queryByRole("button", { name: "Thread to Reading list" })
     ).toBeNull();
@@ -292,11 +309,10 @@ describe("thread picker sub-view", () => {
       name: `Collection ${i}`,
       createdAt: i,
     }));
-    setup({ threadFilter: "", collections: many });
+    setup({ collections: many });
+    openThread();
     expect(screen.getByLabelText("Find a page")).toBeTruthy();
-    cleanup();
-
-    setup({ threadFilter: "collection 1" , collections: many });
+    typeInto("Find a page", "collection 1");
     expect(
       screen.getByRole("button", { name: "Thread to Collection 1" })
     ).toBeTruthy();
@@ -305,20 +321,34 @@ describe("thread picker sub-view", () => {
     ).toBeNull();
     cleanup();
 
-    setup({ threadFilter: "", collections: [] });
+    setup({ collections: [] });
+    openThread();
     expect(screen.queryByLabelText("Find a page")).toBeNull();
   });
 
   test("says so plainly when nothing matches", () => {
-    setup({ threadFilter: "zzz" });
+    // Twelve collections only so that the filter is on screen to type into: it
+    // earns its place past a glance, and the empty state is what is under test.
+    setup({
+      collections: Array.from({ length: 12 }, (_, i) => ({
+        id: `c${i}`,
+        kind: "list" as const,
+        name: `Collection ${i}`,
+        createdAt: i,
+      })),
+    });
+    openThread();
+    typeInto("Find a page", "zzz");
     expect(screen.getByText("no page matches")).toBeTruthy();
   });
 
   test("Back returns to the actions list without changing anything", () => {
-    const props = setup({ threadFilter: "" });
+    const props = setup();
+    openThread();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(props.setThreadFilter).toHaveBeenCalledWith(null);
+    expect(screen.getByRole("button", { name: "Delete entry" })).toBeTruthy();
     expect(toggleThread).not.toHaveBeenCalled();
+    expect(props.closeSheet).not.toHaveBeenCalled();
   });
 });
 
@@ -356,8 +386,6 @@ test("migration mode still offers a plain move, for an entry logged on the wrong
   const props = setup({
     sheet: { scope: "day", pk: "2020-01-01", id: "e1" },
     sheetMigrates: true,
-    moveAnchor: "2020-01-08",
-    moveGran: "day" as Scope,
   });
   // the two are told apart at the top level by their captions, not left to be
   // inferred from two mini-forms sitting one above the other
@@ -366,6 +394,10 @@ test("migration mode still offers a plain move, for an entry logged on the wrong
     screen.getByText(/corrects the page it was logged on/)
   ).toBeTruthy();
   openMove();
+  // the picker opens on the entry's own page, so the week it belonged on is a
+  // week of steps away: a move has no floor
+  for (let i = 0; i < 7; i++)
+    fireEvent.click(screen.getByRole("button", { name: "Next day" }));
   fireEvent.click(screen.getByRole("button", { name: "Move to Wed 8 Jan" }));
   expect(moveTo).toHaveBeenCalledWith("e1", "2020-01-08");
   expect(migrateEntry).not.toHaveBeenCalled();
@@ -423,9 +455,10 @@ describe("the shape of the view (6 August 2026)", () => {
   });
 
   test("scheduling an open task is its own step, and names the date it will use", () => {
-    const props = setup({ schedDate: "2026-08-01" });
+    const props = setup();
     openSchedule();
     expect(screen.getByText(/a copy appears on the date you pick/)).toBeTruthy();
+    typeInto("Schedule to date", "2026-08-01");
     fireEvent.click(
       screen.getByRole("button", { name: "Schedule for Sat 1 Aug" })
     );
@@ -478,29 +511,48 @@ describe("the shape of the view (6 August 2026)", () => {
 });
 
 test("edit-text mode saves the trimmed text", () => {
-  const props = setup({ editText: "  new text  " });
+  const props = setup();
+  openText();
+  typeInto("Entry text", "  new text  ");
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   expect(setText).toHaveBeenCalledWith("e1", "new text");
   expect(props.closeSheet).toHaveBeenCalledTimes(1);
 });
 
-test("reminder mode saves via the async saveReminder handler", () => {
-  const props = setup({ editRemind: "2026-07-24T10:00" });
+test("reminder mode writes the time the field was left on", () => {
+  // The save lives in the view now, so the write is what can be seen. The
+  // timestamp is built the way the view builds it, by hand: a timezone-less
+  // string must never be handed to new Date(), which Safari reads as UTC.
+  const props = setup();
+  openRemind();
+  typeInto("Reminder date and time", "2026-07-24T10:00");
   fireEvent.click(screen.getByRole("button", { name: "Save reminder" }));
-  expect(props.saveReminder).toHaveBeenCalledTimes(1);
+  expect(setReminder).toHaveBeenCalledWith(
+    "e1",
+    new Date(2026, 6, 24, 10, 0).getTime()
+  );
+  expect(props.closeSheet).toHaveBeenCalledTimes(1);
 });
 
-test("repeat mode starts the rule via saveRepeat", () => {
-  const props = setup({
-    editRepeat: {
-      n: "1",
-      unit: "week",
-      time: "",
-      ends: { mode: "never", date: "2026-10-24", count: "8" },
-    },
-  });
+test("repeat mode starts the rule and tags the entry with it", () => {
+  const props = setup();
+  openRepeat();
   fireEvent.click(screen.getByRole("button", { name: "Start repeating" }));
-  expect(props.saveRepeat).toHaveBeenCalledTimes(1);
+  // the step's own defaults: weekly from this entry, no end, and on a day page
+  // the cadence is chosen rather than locked
+  expect(addRecurrence).toHaveBeenCalledWith(
+    expect.objectContaining({
+      text: "write report",
+      everyN: 1,
+      unit: "week",
+      pageScope: "day",
+      anchor: "2026-07-24",
+      endsOn: undefined,
+      endsAfter: undefined,
+    })
+  );
+  expect(tagEntryRecurrence).toHaveBeenCalledWith("e1", "r1");
+  expect(props.closeSheet).toHaveBeenCalledTimes(1);
 });
 
 // Nesting, one level deep (spec §4.1). Any top-level entry on the page can be
@@ -512,6 +564,11 @@ describe("nesting", () => {
     id,
     text,
   });
+  /** The picker's filter only appears once the list is past a glance, so a test
+   *  that types into it needs a page with more than eight candidates. The
+   *  padding is scenery: what is under test is the matching, not the count. */
+  const padding = (n: number): Entry[] =>
+    Array.from({ length: n }, (_, i) => other(`p${i}`, `padding ${i}`));
 
   test("a top-level entry offers to gain sub-bullets", () => {
     const props = setup();
@@ -531,11 +588,11 @@ describe("nesting", () => {
   });
 
   test("the nest action opens the picker rather than nesting blindly", () => {
-    const props = setup({ sheetNestTargets: [other("e2", "plan the week")] });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Nest under another entry…" })
-    );
-    expect(props.onOpenNestPicker).toHaveBeenCalledTimes(1);
+    setup({ sheetNestTargets: [other("e2", "plan the week")] });
+    openNest();
+    expect(
+      screen.getByRole("button", { name: "Nest under plan the week" })
+    ).toBeTruthy();
     expect(setParent).not.toHaveBeenCalled();
   });
 
@@ -546,13 +603,13 @@ describe("nesting", () => {
 
   test("the picker lists every candidate parent, not just the one above", () => {
     setup({
-      nestFilter: "",
       sheetNestTargets: [
         other("e2", "plan the week"),
         other("e3", "call the bank"),
         other("e4", "book the dentist"),
       ],
     });
+    openNest();
     expect(
       screen.getByRole("button", { name: "Nest under plan the week" })
     ).toBeTruthy();
@@ -561,40 +618,48 @@ describe("nesting", () => {
     ).toBeTruthy();
   });
 
-  test("choosing a parent asks App to nest, which reports any refusal", () => {
-    const props = setup({
-      nestFilter: "",
-      sheetNestTargets: [other("e2", "plan the week")],
-    });
+  test("choosing a parent nests it, and the picker closes only when it took", () => {
+    vi.mocked(setParent).mockReturnValue(true);
+    setup({ sheetNestTargets: [other("e2", "plan the week")] });
+    openNest();
     fireEvent.click(
       screen.getByRole("button", { name: "Nest under plan the week" })
     );
-    expect(props.onNestUnder).toHaveBeenCalledWith("e2");
-    // the sheet must not close the picker itself — App does, only on success
-    expect(props.setNestFilter).not.toHaveBeenCalledWith(null);
+    expect(setParent).toHaveBeenCalledWith("e1", "e2");
+    // closed only because the store took the change: the refusal below is the
+    // other half of this, and there the picker stays put
+    expect(screen.getByRole("button", { name: "Delete entry" })).toBeTruthy();
   });
 
   test("a refused nest is stated, not swallowed", () => {
-    setup({
-      nestFilter: "",
-      nestRefused: "That entry can no longer take sub-bullets.",
-      sheetNestTargets: [other("e2", "plan the week")],
-    });
+    // The store refuses when the page changed under the picker
+    vi.mocked(setParent).mockReturnValue(false);
+    setup({ sheetNestTargets: [other("e2", "plan the week")] });
+    openNest();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Nest under plan the week" })
+    );
     const note = screen.getByRole("status");
     expect(note.textContent).toContain("no longer take sub-bullets");
+    // and the picker is still there to pick again, so the tap is never a
+    // silent no-op
+    expect(
+      screen.getByRole("button", { name: "Nest under plan the week" })
+    ).toBeTruthy();
   });
 
   test("the picker names the page, which may not be the one on screen", () => {
-    setup({ nestFilter: "", sheetNestTargets: [other("e2", "plan the week")] });
+    setup({ sheetNestTargets: [other("e2", "plan the week")] });
+    openNest();
     // the entry lives on 24 Jul 2026, so the heading must say so
     expect(screen.getByText(/24 Jul/)).toBeTruthy();
   });
 
   test("a candidate's real state is shown and named, not disguised as open", () => {
     setup({
-      nestFilter: "",
       sheetNestTargets: [{ ...other("e2", "done thing"), state: "done" }],
     });
+    openNest();
     // × not •, spelled out in the row, and in the accessible name too, so the
     // purist glyph is never the only thing carrying the meaning
     expect(
@@ -605,26 +670,35 @@ describe("nesting", () => {
   });
 
   test("the picker matches text ignoring accents, as search does", () => {
-    setup({ nestFilter: "cafe", sheetNestTargets: [other("e2", "café run")] });
+    setup({ sheetNestTargets: [other("e2", "café run"), ...padding(8)] });
+    openNest();
+    typeInto("Find an entry", "cafe");
     expect(
       screen.getByRole("button", { name: /Nest under café run/ })
     ).toBeTruthy();
   });
 
-  test("the filter stays put once typed in, even if the list shortens", () => {
-    // Otherwise a sync could hide the filter while it kept narrowing the list
-    setup({ nestFilter: "bank", sheetNestTargets: [other("e3", "call the bank")] });
+  test("the filter stays put once typed in, even though the list has shortened", () => {
+    // Otherwise a filter could be hidden while it went on narrowing the list,
+    // and a list could be narrowed by a filter the user can no longer see
+    setup({ sheetNestTargets: [other("e3", "call the bank"), ...padding(8)] });
+    openNest();
+    typeInto("Find an entry", "bank");
     expect(screen.getByLabelText("Find an entry")).toBeTruthy();
+    // one row left, well short of the eight that put the filter on screen
+    expect(screen.getAllByRole("button", { name: /^Nest under/ }).length).toBe(1);
   });
 
   test("the picker filters by entry text once the list is long", () => {
     setup({
-      nestFilter: "bank",
       sheetNestTargets: [
         other("e2", "plan the week"),
         other("e3", "call the bank"),
+        ...padding(7),
       ],
     });
+    openNest();
+    typeInto("Find an entry", "bank");
     expect(
       screen.getByRole("button", { name: "Nest under call the bank" })
     ).toBeTruthy();
@@ -696,29 +770,34 @@ describe("when the repeat ends", () => {
     ).toBeTruthy();
   });
 
-  test("opening the row hands App the end in both forms, so switching moves nothing", () => {
-    const props = setup({
-      sheetEntry: repeating,
-      recurrences: [daily({ endsAfter: 10 })],
-    });
-    fireEvent.click(screen.getByRole("button", { name: /Change when it ends…/ }));
-    expect(props.setEditEnds).toHaveBeenCalledWith({
-      mode: "count",
-      // the tenth occurrence of a daily rule anchored 20 July
-      date: "2026-07-29",
-      count: "10",
-    });
+  test("the step opens with the end in both forms, so switching moves nothing", () => {
+    setup({ sheetEntry: repeating, recurrences: [daily({ endsAfter: 10 })] });
+    openEnds();
+    // the count as the rule states it …
+    expect(
+      (screen.getByLabelText("How many in total") as HTMLInputElement).value
+    ).toBe("10");
+    // … and the same end as a date: the tenth occurrence of a daily rule
+    // anchored 20 July, so switching forms does not quietly move the end
+    fireEvent.click(screen.getByRole("button", { name: "On a date" }));
+    expect(
+      (screen.getByLabelText("Last day it may fall on") as HTMLInputElement)
+        .value
+    ).toBe("2026-07-29");
   });
 
-  test("the step saves through App, which owns the write", () => {
-    const props = setup({
-      sheetEntry: repeating,
-      recurrences: [daily()],
-      editEnds: { mode: "date", date: "2026-07-31", count: "6" },
-    });
+  test("the step writes the end it was left on", () => {
+    setup({ sheetEntry: repeating, recurrences: [daily()] });
+    openEnds();
     expect(screen.getByRole("group", { name: "When it ends" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "On a date" }));
+    fireEvent.change(screen.getByLabelText("Last day it may fall on"), {
+      target: { value: "2026-07-31" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save when it ends" }));
-    expect(props.saveEnds).toHaveBeenCalledTimes(1);
+    // stored as the form it was given in, and nothing already on a page is
+    // touched: an end only stops the materialiser going further
+    expect(setRecurrenceEnd).toHaveBeenCalledWith("r1", { on: "2026-07-31" });
   });
 
   test("a spent repeat offers nothing, and says why rather than going quiet", () => {
@@ -732,14 +811,8 @@ describe("when the repeat ends", () => {
   });
 
   test("the Repeat step can set an end at the same moment", () => {
-    setup({
-      editRepeat: {
-        n: "1",
-        unit: "week",
-        time: "",
-        ends: { mode: "never", date: "2026-10-24", count: "8" },
-      },
-    });
+    setup();
+    openRepeat();
     expect(screen.getByRole("group", { name: "When it ends" })).toBeTruthy();
     expect(screen.getByText(/No end/)).toBeTruthy();
   });

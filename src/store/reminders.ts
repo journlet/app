@@ -19,8 +19,9 @@
 // and is deferred — see spec §11 open question 6.
 
 import { readAll } from "./journal";
+import { FIRED_REMINDERS_KEY } from "../lib/storageKeys";
 
-const FIRED_KEY = "journlet-fired-reminders-v1";
+const FIRED_KEY = FIRED_REMINDERS_KEY;
 const CHECK_MS = 30_000;
 
 type FiredMap = Record<string, number>; // occurrence key → remindAt already fired

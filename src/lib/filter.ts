@@ -7,6 +7,7 @@
 // the only thing this file decides (spec §4.1, purist notation).
 
 import type { Entry } from "./types";
+import { FILTER_KEY, FILTER_OPEN_KEY } from "./storageKeys";
 
 export type EntryFilter = "all" | "tasks" | "open";
 
@@ -76,8 +77,8 @@ export const applyFilter = (entries: Entry[], f: EntryFilter): Entry[] => {
   return entries.filter((e) => kept.has(e.id) || parents.has(e.id));
 };
 
-const KEY = "journlet-filter-v1";
-const OPEN_KEY = "journlet-filter-open-v1";
+const KEY = FILTER_KEY;
+const OPEN_KEY = FILTER_OPEN_KEY;
 
 /** Persisted like the sticky capture prefs: a filter you chose is a way of
  *  reading your journal, not a one-off, and it survives a relaunch. */

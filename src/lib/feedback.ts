@@ -45,6 +45,7 @@
 // and mailto: here is an ordinary link, so index.html needs no change.
 
 import type { SyncStatus } from "../store/syncStatus";
+import { FEEDBACK_DRAFT_KEY } from "./storageKeys";
 
 /** Where feedback goes. `privacy@` is the data-protection route and stays separate. */
 export const FEEDBACK_ADDRESS = "hello@journlet.com";
@@ -239,7 +240,7 @@ export const feedbackGmail = (
 // visit, because a stale block is worse than no block: it would describe the
 // build and the sync state of the day the draft was started, and be read as
 // describing today.
-const DRAFT_KEY = "journlet-feedback-draft";
+const DRAFT_KEY = FEEDBACK_DRAFT_KEY;
 
 export const saveDraft = (message: string): void => {
   try {
