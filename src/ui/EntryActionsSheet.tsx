@@ -19,16 +19,28 @@
 // Deliberately no chevron: › and ‹ are notation here (migrated, scheduled) and
 // must not also mean "goes somewhere".
 //
-// Presentational — App owns the draft state and the save/close/delete closures,
-// except for the three new steps, whose only state is which one is open. Pure
-// store and date helpers are imported here as before.
+// Every draft this view collects, and every write it makes, live here.
+//
+// They used to live in App, which held eleven pieces of state nothing else on
+// the page read, reset all of them in its closeSheet, and threaded them back
+// down as forty-four props. Two of those props existed only so that App could
+// seed them from `sheet.pk` before setting `sheet`, which is a sequencing
+// requirement that disappears when the value is a useState initialiser in the
+// view that reads it. This component is unmounted whenever no sheet is open,
+// so the drafts reset by unmounting and there is nothing to clear.
+//
+// App keeps what App owns: which entry the sheet is aimed at, the derived
+// context around it (nest targets, migration history, whether the page has
+// expired), and the three closures that move focus somewhere else, since
+// closing the sheet, opening the details view and opening capture with this
+// entry as parent are all decisions about the page rather than about the entry.
 
 import { useId, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
 import {
   SCOPES,
   SCOPE_LABEL,
   defaultRemindAt,
+  formatRemindAt,
   keyScope,
   keyToAnchor,
   pageLabel,
@@ -48,17 +60,20 @@ import type {
   RecurrenceUnit,
 } from "../lib/types";
 import {
+  addRecurrence,
   endRecurrence,
   migrateEntry,
   moveTo,
   setEntryType,
   setParent,
+  setRecurrenceEnd,
   setReminder,
   setSignifier,
   setText,
   toggleDone,
   toggleStruck,
   toggleThread,
+  tagEntryRecurrence,
 } from "../store/journal";
 import {
   cadenceLabel,
@@ -67,7 +82,10 @@ import {
   nextOccurrence,
   ruleSentence,
 } from "../store/recurrence";
-import { notificationPermission } from "../store/reminders";
+import {
+  notificationPermission,
+  requestNotificationPermission,
+} from "../store/reminders";
 import EndsForm, {
   endsDraftFor,
   endsSaveLabel,
@@ -77,9 +95,9 @@ import PagePicker from "./PagePicker";
 import { S } from "./styles";
 import type { EditEnds, EditRepeat, SheetTarget } from "./types";
 
-/** Which step is open. The five App-owned ones are named by the draft state
- *  that opens them; the three added here are held locally, since their drafts
- *  (schedDate, moveAnchor/moveGran) already live in App and outlive nothing. */
+/** Which step is open. Five are named by the draft state that opens them; the
+ *  other three carry no draft of their own beyond which one is showing, so they
+ *  are held in `localStep` instead. */
 type Step =
   | "text"
   | "sig"
@@ -116,15 +134,6 @@ interface EntryActionsSheetProps {
   sheetNestTargets: Entry[];
   /** this entry has sub-bullets of its own, so it can't become one */
   sheetHasChildren: boolean;
-  /** "Nest under…" picker sub-view: null = closed, otherwise its filter text */
-  nestFilter: string | null;
-  setNestFilter: Dispatch<SetStateAction<string | null>>;
-  /** why the last nest attempt was refused, if it was */
-  nestRefused: string | null;
-  /** open the "Nest under…" picker, clearing any previous refusal */
-  onOpenNestPicker: () => void;
-  /** nest this entry under the chosen parent; App reports any refusal */
-  onNestUnder: (parentId: string) => void;
   /** open capture with this entry pre-set as the parent */
   onAddSubBullet: () => void;
   sheetMigrates: boolean;
@@ -133,36 +142,10 @@ interface EntryActionsSheetProps {
   collections: Collection[];
   today: string;
   nowKeys: Record<Scope, string>;
-  editRepeat: EditRepeat | null;
-  setEditRepeat: Dispatch<SetStateAction<EditRepeat | null>>;
-  /** draft for the "when it ends" step (spec §11 Q17) */
-  editEnds: EditEnds | null;
-  setEditEnds: Dispatch<SetStateAction<EditEnds | null>>;
-  editRemind: string | null;
-  setEditRemind: Dispatch<SetStateAction<string | null>>;
-  /** thread picker sub-view: null = closed, otherwise its filter text */
-  threadFilter: string | null;
-  setThreadFilter: Dispatch<SetStateAction<string | null>>;
-  editText: string | null;
-  setEditText: Dispatch<SetStateAction<string | null>>;
   /** open the full-screen details view for this entry */
   onEditDetails: () => void;
-  schedDate: string;
-  setSchedDate: Dispatch<SetStateAction<string>>;
-  /** "Move to": a day inside the page being moved to (see ui/PagePicker) */
-  moveAnchor: string;
-  setMoveAnchor: Dispatch<SetStateAction<string>>;
-  /** which kind of page that day means */
-  moveGran: Scope;
-  setMoveGran: Dispatch<SetStateAction<Scope>>;
   closeSheet: () => void;
-  saveRepeat: () => void;
-  saveEnds: () => void;
-  saveReminder: () => Promise<void>;
   deleteWithUndo: (id: string) => void;
-  fmtRemind: (ts: number) => string;
-  toLocalInput: (ts: number) => string;
-  trunc: (s: string, n: number) => string;
 }
 
 export default function EntryActionsSheet({
@@ -171,52 +154,206 @@ export default function EntryActionsSheet({
   sheetHistory,
   sheetNestTargets,
   sheetHasChildren,
-  nestFilter,
-  setNestFilter,
-  nestRefused,
-  onOpenNestPicker,
-  onNestUnder,
   onAddSubBullet,
   sheetMigrates,
   recurrences,
   collections,
   today,
   nowKeys,
-  editRepeat,
-  setEditRepeat,
-  editEnds,
-  setEditEnds,
-  editRemind,
-  setEditRemind,
-  threadFilter,
-  setThreadFilter,
-  editText,
-  setEditText,
   onEditDetails,
-  schedDate,
-  setSchedDate,
-  moveAnchor,
-  setMoveAnchor,
-  moveGran,
-  setMoveGran,
   closeSheet,
-  saveRepeat,
-  saveEnds,
-  saveReminder,
   deleteWithUndo,
-  fmtRemind,
-  toLocalInput,
-  trunc,
 }: EntryActionsSheetProps) {
-  // The three steps whose drafts App already holds but which used to unfold in
-  // place. Nothing else needs to know they exist: closing the view unmounts it.
+  // ---------- the drafts ----------
+  //
+  // One per multi-step action, `null` meaning its step is closed, which is what
+  // `step` below reads to decide what is on screen. Each one is the reason its
+  // step exists, so they are declared together rather than beside the code that
+  // saves them.
+
+  /** the text being edited, before it is written */
+  const [editText, setEditText] = useState<string | null>(null);
+  const [editRepeat, setEditRepeat] = useState<EditRepeat | null>(null);
+  /** draft for the "when it ends" step (spec §11 Q17) */
+  const [editEnds, setEditEnds] = useState<EditEnds | null>(null);
+  const [editRemind, setEditRemind] = useState<string | null>(null);
+  // Thread-to-a-page: null = closed, otherwise the current filter text (spec
+  // §4.4). A sub-view rather than inline buttons so the length doesn't grow with
+  // the number of collections.
+  const [threadFilter, setThreadFilter] = useState<string | null>(null);
+  // "Nest under…": null = closed, otherwise the current filter text. Every
+  // top-level entry on the page is a candidate parent, so like the thread picker
+  // this is a sub-view rather than a row of buttons — the length can't grow with
+  // the size of the page.
+  const [nestFilter, setNestFilter] = useState<string | null>(null);
+  // Set when a nest was refused because the page changed under the picker
+  // (another device deleted or moved something). Shown rather than swallowed —
+  // an action that appears to do nothing is the app lying about what happened.
+  const [nestRefused, setNestRefused] = useState<string | null>(null);
+  /** the date chosen in "Schedule to a future date" */
+  const [schedDate, setSchedDate] = useState("");
+
+  // "Move to": which day the picker is pointing at, and which kind of page that
+  // day means. Both start on the page the entry is actually on, so the picker
+  // opens showing where the entry is and the move button stays inert until that
+  // changes; a sheet can be opened from a row on another page, so starting on
+  // today would be a claim about the wrong page. A move is a correction rather
+  // than a migration, so it has no floor and may reach back into the past.
+  //
+  // App used to set both of these before setting `sheet`, in that order, because
+  // a prop has no other way to be seeded. Here they are just initialisers.
+  const [moveAnchor, setMoveAnchor] = useState(() => keyToAnchor(sheet.pk));
+  const [moveGran, setMoveGran] = useState<Scope>(
+    () => keyScope(sheet.pk) ?? "day"
+  );
+
+  // ---------- writes ----------
+
+  /**
+   * Nest the sheet's entry under the chosen parent. Closes the picker when it
+   * worked; when the store refuses — only possible if the page changed while
+   * the picker was open — the picker stays put and says so, so the tap is never
+   * a silent no-op.
+   */
+  const nestUnder = (parentId: string) => {
+    if (setParent(sheet.id, parentId)) {
+      setNestRefused(null);
+      setNestFilter(null);
+    } else {
+      setNestRefused(
+        "That entry can no longer take sub-bullets — the page changed. Pick another."
+      );
+    }
+  };
+
+  const openNestPicker = () => {
+    // A refusal belongs to the attempt that caused it, never to the next one —
+    // otherwise the picker opens already complaining
+    setNestRefused(null);
+    setNestFilter("");
+  };
+
+  /**
+   * Write the end the step was left on (spec §11 Q17).
+   *
+   * The two forms are stored as they were given rather than one being converted
+   * into the other, and "never" clears both. Nothing already on a page is
+   * touched: an end only stops the materialiser going further, which is why
+   * this needs no pass over the entries.
+   */
+  const saveEnds = () => {
+    if (!editEnds) return;
+    const rule = recurrences.find((r) => r.id === sheetEntry.recurrenceId);
+    if (!rule) return;
+    setRecurrenceEnd(
+      rule.id,
+      editEnds.mode === "date"
+        ? { on: editEnds.date }
+        : editEnds.mode === "count"
+          ? { after: Math.max(1, parseInt(editEnds.count, 10) || 1) }
+          : null
+    );
+    setEditEnds(null);
+  };
+
+  const saveRepeat = () => {
+    if (!editRepeat) return;
+    const scope = keyScope(sheet.pk);
+    if (!scope) return; // no recurrence on collections (no timeline to walk)
+    const n = Math.max(1, parseInt(editRepeat.n, 10) || 1);
+    // Timed reminders only apply to day-scope recurrences
+    const time =
+      scope === "day" && /^\d{2}:\d{2}$/.test(editRepeat.time)
+        ? editRepeat.time
+        : undefined;
+    // The end set in the same step, if any (spec §11 Q17). Stored as the form
+    // it was given in: a count is not turned into the date it implies, since
+    // "ten of these" and "nothing after September" are different statements.
+    const ends = editRepeat.ends;
+    const rule = addRecurrence({
+      text: sheetEntry.text,
+      type: sheetEntry.type,
+      priority: sheetEntry.priority,
+      inspiration: sheetEntry.inspiration,
+      everyN: n,
+      // On a week/month/year page the cadence is locked to that scope
+      unit: scope === "day" ? editRepeat.unit : scope,
+      pageScope: scope,
+      anchor: keyToAnchor(sheet.pk),
+      remindTime: time,
+      // Start materialising from the current period, never before it: making
+      // a past (or today's) entry recurring must not retroactively spawn
+      // overdue occurrences on pages gone by (honest history, and it was
+      // wrongly triggering the migration banner). Future-dated pages keep
+      // their own anchor so occurrences still begin after them.
+      materialisedThrough:
+        sheet.pk > nowKeys[scope] ? sheet.pk : nowKeys[scope],
+      endsOn: ends.mode === "date" ? ends.date : undefined,
+      endsAfter:
+        ends.mode === "count"
+          ? Math.max(1, parseInt(ends.count, 10) || 1)
+          : undefined,
+    });
+    tagEntryRecurrence(sheet.id, rule.id);
+    if (time && !sheetEntry.remindAt) {
+      const [hh, mm] = time.split(":").map(Number);
+      const d = new Date(sheet.pk + "T00:00");
+      const ts = new Date(
+        d.getFullYear(),
+        d.getMonth(),
+        d.getDate(),
+        hh,
+        mm
+      ).getTime();
+      setReminder(sheet.id, ts);
+    }
+    closeSheet();
+  };
+
+  const saveReminder = async () => {
+    if (!editRemind) return;
+    // Parse the datetime-local value by hand: engines disagree on whether
+    // timezone-less strings are local or UTC (Safari says UTC — an hour
+    // out in BST), so never let new Date(string) guess.
+    const m = editRemind.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!m) return;
+    const ts = new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5])
+    ).getTime();
+    if (Number.isNaN(ts)) return;
+    if (notificationPermission() === "default")
+      await requestNotificationPermission();
+    setReminder(sheet.id, ts);
+    closeSheet();
+  };
+
+  // ---------- display helpers ----------
+
+  const fmtRemind = (ts: number): string => formatRemindAt(ts, today);
+
+  /** datetime-local wants "YYYY-MM-DDTHH:MM" in local time */
+  const toLocalInput = (ts: number): string => {
+    const d = new Date(ts);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
+      d.getHours()
+    )}:${p(d.getMinutes())}`;
+  };
+
+  const trunc = (s: string, n: number) =>
+    s.length > n ? s.slice(0, n - 1) + "…" : s;
+
+  // The three steps that unfold with no draft behind them. Nothing else needs to
+  // know they exist: closing the view unmounts it.
   const [localStep, setLocalStep] = useState<
     "sig" | "type" | "migrate" | "move" | "schedule" | null
   >(null);
-  /** Which type the Type step has selected but not yet saved. Local, unlike the
-   *  other drafts: it outlives nothing — the view unmounts when it closes — and
-   *  App has no use for it. The Signifiers step needs no draft at all, because
-   *  it writes on tap. */
+  /** Which type the Type step has selected but not yet saved. The Signifiers
+   *  step needs no draft at all, because it writes on tap. */
   const [typeDraft, setTypeDraft] = useState<EntryType | null>(null);
   // Prefix for the row-caption ids the rows point their aria-describedby at
   const rowIds = useId();
@@ -963,7 +1100,7 @@ export default function EntryActionsSheet({
                     aria-label={`Nest under ${t.text}${
                       t.state === "open" ? "" : `, ${t.state}`
                     }`}
-                    onClick={() => onNestUnder(t.id)}
+                    onClick={() => nestUnder(t.id)}
                   >
                     <span style={{ color: "var(--ink-soft)" }} aria-hidden="true">
                       {t.state === "done" ||
@@ -1146,7 +1283,7 @@ export default function EntryActionsSheet({
                 sheetEntry.parentId
                   ? "Nest under a different entry…"
                   : "Nest under another entry…",
-                onOpenNestPicker
+                openNestPicker
               )}
             {sheetHasChildren && !sheetEntry.parentId && (
               <div style={S.sheetNote}>
