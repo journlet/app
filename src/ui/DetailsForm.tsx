@@ -10,6 +10,7 @@ import type { Entry } from "../lib/types";
 import { splitLinks } from "../lib/linkify";
 import { setDetails } from "../store/journal";
 import { S } from "./styles";
+import FullScreenSheet from "./FullScreenSheet";
 
 interface DetailsFormProps {
   entry: Entry;
@@ -34,95 +35,88 @@ export default function DetailsForm({ entry, onClose }: DetailsFormProps) {
   };
 
   return (
-    <div style={S.captureForm} role="dialog" aria-label="Entry details">
-      <div style={S.captureFormHead}>
-        <h2 style={S.captureFormTitle}>Details</h2>
-        <button
-          className="sheetBtn isCompact"
-          style={{ flex: "none", margin: 0 }}
-          onClick={onClose}
-        >
-          Done
-        </button>
+    <FullScreenSheet
+      label="Entry details"
+      title="Details"
+      actionLabel="Done"
+      onAction={onClose}
+    >
+      <div style={S.formLbl}>Entry</div>
+      <div style={{ fontSize: 15.5, marginBottom: 4, wordBreak: "break-word" }}>
+        <span style={{ marginRight: 8 }}>{GLYPH[entry.type]}</span>
+        {entry.text}
       </div>
-      <div style={S.captureFormBody}>
-        <div style={S.formLbl}>Entry</div>
-        <div style={{ fontSize: 15.5, marginBottom: 4, wordBreak: "break-word" }}>
-          <span style={{ marginRight: 8 }}>{GLYPH[entry.type]}</span>
-          {entry.text}
-        </div>
-        {editing ? (
-          <>
-            <div style={S.formLbl}>Details</div>
-            <textarea
-              autoFocus
-              style={{ ...S.sheetInput, minHeight: 160, resize: "vertical" }}
-              value={draft}
-              onChange={(ev) => setDraft(ev.target.value)}
-              onKeyDown={(ev) => {
-                if (ev.key === "Escape") onClose();
-              }}
-              placeholder="Notes, or a link to read later…"
-              aria-label="Entry details"
-            />
-            <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "0 4px 12px" }}>
-              Links become tappable. Leave empty to remove.
-            </p>
-            <button className="sheetBtn" onClick={save}>
-              Save details
-            </button>
-            {value !== "" && (
-              <button
-                className="sheetBtn isQuiet"
-                onClick={() => {
-                  setDraft(value);
-                  setEditing(false);
-                }}
-              >
-                Back
-              </button>
-            )}
-          </>
-        ) : (
-          <>
-            <div style={S.formLbl}>Details</div>
-            <div
-              style={{
-                fontSize: 15,
-                lineHeight: 1.5,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                marginBottom: 12,
-              }}
-            >
-              {splitLinks(value).map((seg, i) =>
-                seg.kind === "url" ? (
-                  <a
-                    key={i}
-                    href={seg.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: "var(--ink)" }}
-                  >
-                    {seg.value}
-                  </a>
-                ) : (
-                  <span key={i}>{seg.value}</span>
-                )
-              )}
-            </div>
+      {editing ? (
+        <>
+          <div style={S.formLbl}>Details</div>
+          <textarea
+            autoFocus
+            style={{ ...S.sheetInput, minHeight: 160, resize: "vertical" }}
+            value={draft}
+            onChange={(ev) => setDraft(ev.target.value)}
+            onKeyDown={(ev) => {
+              if (ev.key === "Escape") onClose();
+            }}
+            placeholder="Notes, or a link to read later…"
+            aria-label="Entry details"
+          />
+          <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "0 4px 12px" }}>
+            Links become tappable. Leave empty to remove.
+          </p>
+          <button className="sheetBtn" onClick={save}>
+            Save details
+          </button>
+          {value !== "" && (
             <button
-              className="sheetBtn"
+              className="sheetBtn isQuiet"
               onClick={() => {
                 setDraft(value);
-                setEditing(true);
+                setEditing(false);
               }}
             >
-              Edit details
+              Back
             </button>
-          </>
-        )}
-      </div>
-    </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div style={S.formLbl}>Details</div>
+          <div
+            style={{
+              fontSize: 15,
+              lineHeight: 1.5,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              marginBottom: 12,
+            }}
+          >
+            {splitLinks(value).map((seg, i) =>
+              seg.kind === "url" ? (
+                <a
+                  key={i}
+                  href={seg.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: "var(--ink)" }}
+                >
+                  {seg.value}
+                </a>
+              ) : (
+                <span key={i}>{seg.value}</span>
+              )
+            )}
+          </div>
+          <button
+            className="sheetBtn"
+            onClick={() => {
+              setDraft(value);
+              setEditing(true);
+            }}
+          >
+            Edit details
+          </button>
+        </>
+      )}
+    </FullScreenSheet>
   );
 }

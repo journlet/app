@@ -107,7 +107,7 @@ export default function RecoveryCodeView({
 
       {canPasskey && (
         <div style={ST.box}>
-          <div style={ST.boxLabel}>The quick way</div>
+          <div style={S.boxLabel}>The quick way</div>
           <p style={{ ...S.onboardLede, marginTop: 0 }}>
             A passkey opens your journal on any device your password manager
             reaches, after a Face ID, Touch ID or device PIN check — or, on a device
@@ -136,7 +136,7 @@ export default function RecoveryCodeView({
       )}
 
       <div style={ST.box}>
-        <div style={ST.boxLabel}>
+        <div style={S.boxLabel}>
           {canPasskey ? "Belt and braces" : "Your way back in"}
         </div>
         {/* "Sixteen characters" until 13 August 2026, which was wrong and had been
@@ -206,13 +206,6 @@ const ST = {
     padding: "10px 14px",
     margin: "4px 0 14px",
     maxWidth: 480,
-  },
-  boxLabel: {
-    fontSize: 11,
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-    color: "var(--ink-soft)",
-    marginBottom: 5,
   },
   code: {
     display: "block",

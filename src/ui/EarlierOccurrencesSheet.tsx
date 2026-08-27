@@ -18,6 +18,7 @@ import { pageLabel } from "../lib/dates";
 import type { Entry } from "../lib/types";
 import { strikeEntry, toggleDone } from "../store/journal";
 import { S } from "./styles";
+import BottomSheet from "./BottomSheet";
 
 interface EarlierOccurrencesSheetProps {
   /** The entry the caption was tapped on — restated at the head of the sheet */
@@ -35,78 +36,70 @@ export default function EarlierOccurrencesSheet({
   onClose,
 }: EarlierOccurrencesSheetProps) {
   return (
-    <div style={S.sheetBackdrop} onClick={onClose}>
-      <div
-        style={S.sheet}
-        role="dialog"
-        aria-label="Earlier occurrences still open"
-        onClick={(ev) => ev.stopPropagation()}
-      >
-        <div style={S.sheetHandle} />
-        <div style={S.entryCtx}>
-          <span>•</span>
-          <span>{entry.text}</span>
-          <span style={S.entryCtxState}>{cadence}</span>
-        </div>
-        <div style={S.sheetGroupLabel}>Earlier occurrences still open</div>
-        {occurrences.length === 0 ? (
-          <>
-            <div style={S.sheetEntry}>
-              All dealt with — nothing earlier is still open.
-            </div>
-            <button className="sheetBtn isQuiet" onClick={onClose}>
-              Close
-            </button>
-          </>
-        ) : (
-          <>
-            <div style={S.sheetNote}>
-              Each one stays on its own page and keeps its own notation.
-              This entry is already on this page, so nothing here needs
-              bringing forward.
-            </div>
-            {occurrences.map(({ pk, entry: occ }) => (
-              <div key={occ.id} style={{ marginBottom: 14 }}>
-                <div style={S.sheetEntry}>
-                  <span style={{ marginRight: 8 }}>•</span>
-                  {occ.priority && (
-                    <span className="prio">
-                      <i>*</i>
-                    </span>
-                  )}
-                  {occ.text}
-                  <span
-                    style={{
-                      fontSize: 11.5,
-                      color: "var(--ink-soft)",
-                      marginLeft: 8,
-                    }}
-                  >
-                    on {pageLabel(pk)}
+    <BottomSheet label="Earlier occurrences still open" onClose={onClose}>
+      <div style={S.entryCtx}>
+        <span>•</span>
+        <span>{entry.text}</span>
+        <span style={S.entryCtxState}>{cadence}</span>
+      </div>
+      <div style={S.sheetGroupLabel}>Earlier occurrences still open</div>
+      {occurrences.length === 0 ? (
+        <>
+          <div style={S.sheetEntry}>
+            All dealt with — nothing earlier is still open.
+          </div>
+          <button className="sheetBtn isQuiet" onClick={onClose}>
+            Close
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={S.sheetNote}>
+            Each one stays on its own page and keeps its own notation.
+            This entry is already on this page, so nothing here needs
+            bringing forward.
+          </div>
+          {occurrences.map(({ pk, entry: occ }) => (
+            <div key={occ.id} style={{ marginBottom: 14 }}>
+              <div style={S.sheetEntry}>
+                <span style={{ marginRight: 8 }}>•</span>
+                {occ.priority && (
+                  <span className="prio">
+                    <i>*</i>
                   </span>
-                </div>
-                <div style={S.sheetRow}>
-                  <button
-                    className="sheetBtn isCompact"
-                    onClick={() => toggleDone(occ.id)}
-                  >
-                    × Mark complete
-                  </button>
-                </div>
-                <button
-                  className="sheetBtn isDanger"
-                  onClick={() => strikeEntry(occ.id)}
+                )}
+                {occ.text}
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    color: "var(--ink-soft)",
+                    marginLeft: 8,
+                  }}
                 >
-                  Strike out (no longer relevant)
+                  on {pageLabel(pk)}
+                </span>
+              </div>
+              <div style={S.sheetRow}>
+                <button
+                  className="sheetBtn isCompact"
+                  onClick={() => toggleDone(occ.id)}
+                >
+                  × Mark complete
                 </button>
               </div>
-            ))}
-            <button className="sheetBtn isQuiet" onClick={onClose}>
-              Close
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+              <button
+                className="sheetBtn isDanger"
+                onClick={() => strikeEntry(occ.id)}
+              >
+                Strike out (no longer relevant)
+              </button>
+            </div>
+          ))}
+          <button className="sheetBtn isQuiet" onClick={onClose}>
+            Close
+          </button>
+        </>
+      )}
+    </BottomSheet>
   );
 }

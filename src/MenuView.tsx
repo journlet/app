@@ -16,6 +16,7 @@ import {
   requestNotificationPermission,
 } from "./store/reminders";
 import { GRID } from "./lib/grid";
+import { S } from "./ui/styles";
 import type { ThemePref } from "./lib/theme";
 import { checkForUpdate } from "./store/appUpdate";
 import type { UpdateCheckResult } from "./store/appUpdate";
@@ -176,28 +177,28 @@ export default function MenuView({
   return (
     <div>
       <div style={ST.head}>
-        <h2 style={ST.title}>Menu</h2>
-        <span style={ST.sub}>go to a page, or manage your journal</span>
+        <h2 style={S.sectionTitle}>Menu</h2>
+        <span style={S.sectionSub}>go to a page, or manage your journal</span>
       </div>
 
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Go to</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Go to</div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Index</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Index</div>
             <div style={ST.rowDesc}>
               Every page with entries, plus collections and the future log.
             </div>
           </div>
-          <div style={ST.rowBtn}>
+          <div style={S.rowBtn}>
             <button className="miniBtn" onClick={onOpenIndex}>
               open index
             </button>
           </div>
         </div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Find</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Find</div>
             <div style={ST.rowDesc}>
               Look up any entry by its words, including completed and migrated
               ones. Also on the capture bar at the bottom of every journal
@@ -205,7 +206,7 @@ export default function MenuView({
               server could not read it even if asked.
             </div>
           </div>
-          <div style={ST.rowBtn}>
+          <div style={S.rowBtn}>
             <button className="miniBtn" onClick={onOpenSearch}>
               find an entry
             </button>
@@ -213,14 +214,14 @@ export default function MenuView({
         </div>
       </section>
 
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Sync</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Sync</div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Sync and account</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Sync and account</div>
             <div style={ST.rowDesc}>{SYNC_LABEL[syncStatus]}</div>
           </div>
-          <div style={ST.rowBtn}>
+          <div style={S.rowBtn}>
             <button className="miniBtn" onClick={onOpenSync}>
               open sync
             </button>
@@ -228,11 +229,11 @@ export default function MenuView({
         </div>
       </section>
 
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Export and backup</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Export and backup</div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Export journal</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Export journal</div>
             <div style={ST.rowDesc}>
               Download the whole journal as a Markdown file, in purist notation.
               For reading and keeping, not for restoring: it leaves out timestamps,
@@ -240,30 +241,30 @@ export default function MenuView({
               cannot read it back in. Use a backup below for that.
             </div>
           </div>
-          <div style={ST.rowBtn}>
+          <div style={S.rowBtn}>
             <button className="miniBtn" onClick={onExport}>
               export journal
             </button>
           </div>
         </div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Back up journal</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Back up journal</div>
             <div style={ST.rowDesc}>
               Download a backup file that Journlet can restore from, holding
               everything the export leaves out. The file is not encrypted, so keep
               it somewhere you would keep the journal itself.
             </div>
           </div>
-          <div style={ST.rowBtn}>
+          <div style={S.rowBtn}>
             <button className="miniBtn" onClick={onBackup}>
               back up journal
             </button>
           </div>
         </div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Restore from a backup</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Restore from a backup</div>
             <div style={ST.rowDesc}>
               Adds anything the backup holds that this journal is missing. It never
               removes or overwrites: entries written since the backup was taken stay
@@ -271,7 +272,7 @@ export default function MenuView({
             </div>
             {restoreNote && <div style={ST.rowNote}>{restoreNote}</div>}
           </div>
-          <div style={ST.rowBtn}>
+          <div style={S.rowBtn}>
             <input
               ref={fileRef}
               type="file"
@@ -297,15 +298,15 @@ export default function MenuView({
         </div>
       </section>
 
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Notifications</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Notifications</div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Reminders</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Reminders</div>
             <div style={ST.rowDesc}>{notifDesc}</div>
           </div>
           {supported && perm === "default" && (
-            <div style={ST.rowBtn}>
+            <div style={S.rowBtn}>
               <button className="miniBtn" onClick={enableNotifications}>
                 turn on
               </button>
@@ -315,15 +316,15 @@ export default function MenuView({
       </section>
 
       {installMode !== "hidden" && (
-        <section style={ST.group}>
-          <div style={ST.groupLabel}>Install</div>
+        <section style={S.section}>
+          <div style={S.subGroupLabel}>Install</div>
           <div style={ST.row}>
-            <div style={ST.rowText}>
-              <div style={ST.rowLabel}>Install app</div>
+            <div style={S.rowText}>
+              <div style={S.rowLabel}>Install app</div>
               <div style={ST.rowDesc}>{installDesc}</div>
             </div>
             {canPromptInstall && (
-              <div style={ST.rowBtn}>
+              <div style={S.rowBtn}>
                 <button className="miniBtn" onClick={onInstall}>
                   install
                 </button>
@@ -333,17 +334,17 @@ export default function MenuView({
         </section>
       )}
 
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Updates</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Updates</div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Check for updates</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Check for updates</div>
             <div style={ST.rowDesc}>{updateDesc}</div>
             <div style={ST.rowDesc}>
               This build: {__BUILD_TIME__} · commit {__BUILD_COMMIT__}
             </div>
           </div>
-          <div style={ST.rowBtn}>
+          <div style={S.rowBtn}>
             <button
               className="miniBtn"
               onClick={() => void runUpdateCheck()}
@@ -355,11 +356,11 @@ export default function MenuView({
         </div>
       </section>
 
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Storage</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Storage</div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>This volume</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>This volume</div>
             <div style={ST.rowDesc}>
               {vol.entries} {vol.entries === 1 ? "entry" : "entries"}, {docKB} KB
               on this device
@@ -379,11 +380,11 @@ export default function MenuView({
         </div>
       </section>
 
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Preferences</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Preferences</div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Theme</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Theme</div>
             <div style={ST.rowDesc}>
               Light, dark, or follow your device.
             </div>
@@ -416,11 +417,11 @@ export default function MenuView({
           wrong would be a strange thing to optimise for. The address is written out
           as well as linked, because a device with no mail client configured needs
           something it can copy (spec §13.1). */}
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Feedback</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Feedback</div>
         <div style={ST.row}>
-          <div style={ST.rowText}>
-            <div style={ST.rowLabel}>Send feedback</div>
+          <div style={S.rowText}>
+            <div style={S.rowLabel}>Send feedback</div>
             <div style={ST.rowDesc}>
               Report something broken, or say what you would change. Composed here
               and sent to hello@journlet.com from wherever you write email, in a
@@ -428,7 +429,7 @@ export default function MenuView({
               from your journal is attached.
             </div>
           </div>
-          <div style={ST.rowBtn}>
+          <div style={S.rowBtn}>
             <button className="miniBtn" onClick={onOpenFeedback}>
               send feedback
             </button>
@@ -456,30 +457,12 @@ const ST = {
     paddingBottom: 4,
     marginBottom: GRID - 5,
   },
-  title: {
-    fontFamily: "'Fraunces', serif",
-    fontWeight: 600,
-    fontSize: 20,
-    margin: 0,
-    lineHeight: `${GRID}px`,
-  },
-  sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
-  group: { marginBottom: GRID },
-  groupLabel: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    color: INK_SOFT,
-    lineHeight: `${GRID}px`,
-    margin: "0 4px",
-  },
   row: {
     display: "flex",
     alignItems: "flex-start",
     gap: 12,
     padding: "4px 4px",
   },
-  rowText: { flex: 1, minWidth: 0 },
   // Height matches the label's line box and buttons centre within it, so the
   // control lines up with the "Theme" label rather than floating above it
   segmented: {
@@ -489,16 +472,6 @@ const ST = {
     height: GRID,
     alignItems: "center",
   },
-  // Match the row label's line box (GRID tall) and centre the pill in it,
-  // so the button lines up with the label text and stays put when the
-  // description wraps to a second line.
-  rowBtn: {
-    flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    height: GRID,
-  },
-  rowLabel: { fontSize: 14, lineHeight: `${GRID}px` },
   rowDesc: {
     fontSize: 11.5,
     lineHeight: "16px",
