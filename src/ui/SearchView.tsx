@@ -16,6 +16,7 @@ import type { CSSProperties } from "react";
 import { GLYPH, STATE_GLYPH } from "../lib/types";
 import type { Entry } from "../lib/types";
 import { GRID } from "../lib/grid";
+import { S } from "./styles";
 import { MAX_HITS, detailsSnippet, highlight } from "../lib/search";
 import type { EntryHit, SearchResults } from "../lib/search";
 
@@ -148,8 +149,8 @@ export default function SearchView({
   return (
     <div>
       <div style={ST.head}>
-        <h2 style={ST.title}>Find</h2>
-        <span style={ST.sub}>this device only — nothing is sent anywhere</span>
+        <h2 style={S.sectionTitle}>Find</h2>
+        <span style={S.sectionSub}>this device only — nothing is sent anywhere</span>
       </div>
 
       <div style={ST.fieldRow}>
@@ -213,9 +214,9 @@ export default function SearchView({
       </div>
 
       {pageHits.length > 0 && (
-        <section style={ST.group}>
-          <div style={ST.groupLabel}>Collections</div>
-          <ul style={ST.list}>
+        <section style={S.section}>
+          <div style={S.subGroupLabel}>Collections</div>
+          <ul style={S.list}>
             {pageHits.map((p) => (
               <li key={`${p.kind}-${p.collectionId}-${p.name}`}>
                 <button
@@ -238,7 +239,7 @@ export default function SearchView({
                     </span>
                   </span>
                   {p.kind === "habit" && (
-                    <span style={ST.count}>on {p.parentName ?? "a tracker"}</span>
+                    <span style={S.count}>on {p.parentName ?? "a tracker"}</span>
                   )}
                 </button>
               </li>
@@ -248,14 +249,14 @@ export default function SearchView({
       )}
 
       {groups.map((g) => (
-        <section key={g.pageKey} style={ST.group}>
+        <section key={g.pageKey} style={S.section}>
           <div style={ST.groupHead}>
             <span style={ST.headLabel}>{g.label}</span>
-            <span style={ST.count}>
+            <span style={S.count}>
               {g.hits.length} {g.hits.length === 1 ? "match" : "matches"}
             </span>
           </div>
-          <ul style={ST.list}>
+          <ul style={S.list}>
             {g.hits.map((hit) => renderHit(hit, g.pageKey, g.label))}
           </ul>
         </section>
@@ -282,14 +283,6 @@ const ST = {
     paddingBottom: 4,
     marginBottom: GRID - 5,
   },
-  title: {
-    fontFamily: "'Fraunces', serif",
-    fontWeight: 600,
-    fontSize: 20,
-    margin: 0,
-    lineHeight: `${GRID}px`,
-  },
-  sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
   fieldRow: {
     display: "flex",
     alignItems: "center",
@@ -326,7 +319,6 @@ const ST = {
     color: INK_SOFT,
     margin: "0 4px",
   },
-  group: { marginBottom: GRID },
   // one GRID label + 2px pad + 1px rule - 3px margin = one row, matching
   // the future log's group heads
   groupHead: {
@@ -345,22 +337,6 @@ const ST = {
     letterSpacing: "0.08em",
     color: INK_SOFT,
     lineHeight: `${GRID}px`,
-  },
-  groupLabel: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    color: INK_SOFT,
-    lineHeight: `${GRID}px`,
-    margin: "0 4px",
-  },
-  list: { listStyle: "none", margin: 0, padding: 0 },
-  count: {
-    fontSize: 11.5,
-    lineHeight: "13px",
-    color: INK_SOFT,
-    flexShrink: 0,
-    marginLeft: 10,
   },
   // 13px line box on its own line: a details snippet must not stretch the
   // entry's GRID row, so it wraps as a block beneath the text

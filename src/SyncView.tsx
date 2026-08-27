@@ -1135,7 +1135,6 @@ const ST = {
     lineHeight: 1.15,
   },
   sub: { fontSize: 11.5, color: INK_SOFT },
-  nav: { marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 },
   p: { fontSize: 13.5, lineHeight: 1.5, color: INK, maxWidth: 480 },
   row: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
   input: {

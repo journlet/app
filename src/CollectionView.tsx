@@ -10,6 +10,7 @@ import { applyOrder } from "./store/pageOrder";
 import type { EntryOrder } from "./lib/order";
 import type { EntryFilter } from "./lib/filter";
 import { GRID } from "./lib/grid";
+import { S } from "./ui/styles";
 import type { Collection, Entry, Habit } from "./lib/types";
 import { addHabit, toggleHabitMark } from "./store/journal";
 
@@ -94,11 +95,11 @@ export default function CollectionView({
   return (
     <section style={{ marginBottom: 18 }}>
       <div style={ST.head}>
-        <h2 style={ST.title}>{collection.name}</h2>
-        <span style={ST.sub}>
+        <h2 style={S.sectionTitle}>{collection.name}</h2>
+        <span style={S.sectionSub}>
           {collection.kind === "habits" ? "habit tracker" : "collection"}
         </span>
-        <span style={ST.nav}>
+        <span style={S.sectionNav}>
           <button className="miniBtn" onClick={onDelete}>
             delete collection
           </button>
@@ -116,7 +117,7 @@ export default function CollectionView({
                   } hidden by the filter`}
             </div>
           )}
-          <ul style={ST.list}>{shown.map((e) => renderEntry(e))}</ul>
+          <ul style={S.list}>{shown.map((e) => renderEntry(e))}</ul>
           {threadedHere}
         </>
       )}
@@ -240,15 +241,6 @@ const ST = {
     paddingBottom: 4,
     marginBottom: GRID - 5,
   },
-  title: {
-    fontFamily: "'Fraunces', serif",
-    fontWeight: 600,
-    fontSize: 20,
-    margin: 0,
-    lineHeight: `${GRID}px`,
-  },
-  sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
-  nav: { marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 },
   empty: {
     color: INK_SOFT,
     fontSize: 12.5,
@@ -256,7 +248,6 @@ const ST = {
     lineHeight: `${GRID}px`,
     padding: "0 4px",
   },
-  list: { listStyle: "none", margin: 0, padding: 0 },
   legend: {
     fontSize: 11,
     color: INK_SOFT,

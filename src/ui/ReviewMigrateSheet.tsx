@@ -9,6 +9,7 @@ import type { Scope } from "../lib/dates";
 import type { Entry } from "../lib/types";
 import { migrateEntry, strikeEntry } from "../store/journal";
 import { S } from "./styles";
+import BottomSheet from "./BottomSheet";
 
 interface ReviewMigrateSheetProps {
   pastOpen: { pk: string; entry: Entry }[];
@@ -22,74 +23,70 @@ export default function ReviewMigrateSheet({
   onClose,
 }: ReviewMigrateSheetProps) {
   return (
-        <div style={S.sheetBackdrop} onClick={onClose}>
-          <div
-            style={{ ...S.sheet, maxHeight: "80vh", overflowY: "auto" }}
-            role="dialog"
-            aria-label="Migration review"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            <div style={S.sheetHandle} />
-            <div style={S.sheetGroupLabel}>Migration review</div>
-            {pastOpen.length === 0 ? (
-              <>
-                <div style={S.sheetEntry}>
-                  All done — every past task has been dealt with.
-                </div>
-                <button
-                  className="sheetBtn isQuiet"
-                  onClick={onClose}
-                >
-                  Close
-                </button>
-              </>
-            ) : (
-              <>
-                <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "0 4px 12px" }}>
-                  Decide what each open task deserves: bring it forward, or
-                  strike it out if it no longer matters. Originals stay on
-                  their old page marked ›.
-                </p>
-                {pastOpen.map(({ pk, entry }) => (
-                  <div key={entry.id} style={{ marginBottom: 14 }}>
-                    <div style={S.sheetEntry}>
-                      <span style={{ marginRight: 8 }}>•</span>
-                      {entry.priority && <span className="prio"><i>*</i></span>}
-                      {entry.text}
-                      <span
-                        style={{ fontSize: 11.5, color: "var(--ink-soft)", marginLeft: 8 }}
-                      >
-                        from {pageLabel(pk)}
-                      </span>
-                    </div>
-                    <div style={S.sheetRow}>
-                      {SCOPES.map((t) => (
-                        <button
-                          key={t}
-                          className="sheetBtn isCompact"
-                          onClick={() => migrateEntry(entry.id, nowKeys[t])}
-                        >
-                          › {SCOPE_LABEL[t]}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      className="sheetBtn isDanger"
-                      onClick={() => strikeEntry(entry.id)}
+        <BottomSheet
+          label="Migration review"
+          onClose={onClose}
+          style={{ maxHeight: "80vh" }}
+        >
+          <div style={S.sheetGroupLabel}>Migration review</div>
+          {pastOpen.length === 0 ? (
+            <>
+              <div style={S.sheetEntry}>
+                All done — every past task has been dealt with.
+              </div>
+              <button
+                className="sheetBtn isQuiet"
+                onClick={onClose}
+              >
+                Close
+              </button>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "0 4px 12px" }}>
+                Decide what each open task deserves: bring it forward, or
+                strike it out if it no longer matters. Originals stay on
+                their old page marked ›.
+              </p>
+              {pastOpen.map(({ pk, entry }) => (
+                <div key={entry.id} style={{ marginBottom: 14 }}>
+                  <div style={S.sheetEntry}>
+                    <span style={{ marginRight: 8 }}>•</span>
+                    {entry.priority && <span className="prio"><i>*</i></span>}
+                    {entry.text}
+                    <span
+                      style={{ fontSize: 11.5, color: "var(--ink-soft)", marginLeft: 8 }}
                     >
-                      Strike out (no longer relevant)
-                    </button>
+                      from {pageLabel(pk)}
+                    </span>
                   </div>
-                ))}
-                <button
-                  className="sheetBtn isQuiet"
-                  onClick={onClose}
-                >
-                  Finish later
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+                  <div style={S.sheetRow}>
+                    {SCOPES.map((t) => (
+                      <button
+                        key={t}
+                        className="sheetBtn isCompact"
+                        onClick={() => migrateEntry(entry.id, nowKeys[t])}
+                      >
+                        › {SCOPE_LABEL[t]}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="sheetBtn isDanger"
+                    onClick={() => strikeEntry(entry.id)}
+                  >
+                    Strike out (no longer relevant)
+                  </button>
+                </div>
+              ))}
+              <button
+                className="sheetBtn isQuiet"
+                onClick={onClose}
+              >
+                Finish later
+              </button>
+            </>
+          )}
+        </BottomSheet>
   );
 }

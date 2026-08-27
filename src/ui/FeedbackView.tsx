@@ -131,8 +131,8 @@ export default function FeedbackView({
   return (
     <section style={{ maxWidth: 480 }}>
       <div style={ST.head}>
-        <h2 style={ST.title}>Send feedback</h2>
-        <span style={ST.sub}>by email, however you send email</span>
+        <h2 style={S.sectionTitle}>Send feedback</h2>
+        <span style={S.sectionSub}>by email, however you send email</span>
       </div>
 
       <p style={S.onboardLede}>
@@ -181,7 +181,7 @@ export default function FeedbackView({
       />
 
       <div style={ST.box}>
-        <div style={ST.boxLabel}>What will be attached</div>
+        <div style={S.boxLabel}>What will be attached</div>
         {/* Shown rather than summarised. The list is short enough to read, and a
             person who can read it is the only person who can consent to it. */}
         <p style={{ ...S.onboardNote, marginTop: 0 }}>
@@ -215,15 +215,15 @@ export default function FeedbackView({
       <div style={ST.groupLabel}>How to send it</div>
 
       <div style={ST.row}>
-        <div style={ST.rowText}>
-          <div style={ST.rowLabel}>Gmail in a browser</div>
+        <div style={S.rowText}>
+          <div style={S.rowLabel}>Gmail in a browser</div>
           <div style={ST.rowDesc}>
             Opens Gmail's own compose window with this already in it, using
             whichever Google account that browser is signed in to. Nothing is sent
             to Google unless you tap it.
           </div>
         </div>
-        <div style={ST.rowBtn}>
+        <div style={S.rowBtn}>
           {gmail.tooLong ? (
             <span style={ST.rowDesc}>too long</span>
           ) : (
@@ -243,15 +243,15 @@ export default function FeedbackView({
       </div>
 
       <div style={ST.row}>
-        <div style={ST.rowText}>
-          <div style={ST.rowLabel}>A mail app on this device</div>
+        <div style={S.rowText}>
+          <div style={S.rowLabel}>A mail app on this device</div>
           <div style={ST.rowDesc}>
             For Apple Mail, Outlook, Thunderbird or whatever else this device opens
             email links with. If nothing is set up, this offers to set one up
             instead of composing anything: cancel it and use one of the others.
           </div>
         </div>
-        <div style={ST.rowBtn}>
+        <div style={S.rowBtn}>
           {mailto.tooLong ? (
             <span style={ST.rowDesc}>too long</span>
           ) : (
@@ -269,8 +269,8 @@ export default function FeedbackView({
       </div>
 
       <div style={ST.row}>
-        <div style={ST.rowText}>
-          <div style={ST.rowLabel}>Copy it and paste it yourself</div>
+        <div style={S.rowText}>
+          <div style={S.rowLabel}>Copy it and paste it yourself</div>
           <div style={ST.rowDesc}>
             Works everywhere, and it is the route for any other webmail: Outlook,
             Proton, Fastmail, iCloud, a work account. Copy this, then paste it into
@@ -278,7 +278,7 @@ export default function FeedbackView({
             first line, since a pasted message cannot carry one of its own.
           </div>
         </div>
-        <div style={ST.rowBtn}>
+        <div style={S.rowBtn}>
           <button
             className="miniBtn"
             disabled={empty}
@@ -355,14 +355,6 @@ const ST = {
     paddingBottom: 4,
     marginBottom: GRID - 5,
   },
-  title: {
-    fontFamily: "'Fraunces', serif",
-    fontWeight: 600,
-    fontSize: 20,
-    margin: 0,
-    lineHeight: `${GRID}px`,
-  },
-  sub: { fontSize: 11.5, color: "var(--ink-soft)", lineHeight: "13px" },
   groupLabel: {
     fontSize: 11,
     textTransform: "uppercase",
@@ -384,13 +376,6 @@ const ST = {
     padding: "10px 14px",
     margin: "4px 0 14px",
   },
-  boxLabel: {
-    fontSize: 11,
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-    color: "var(--ink-soft)",
-    marginBottom: 5,
-  },
   // The Menu's row, deliberately: these are the same kind of thing, a named
   // action with a sentence saying what it does and a control on the right.
   row: {
@@ -399,21 +384,11 @@ const ST = {
     gap: 12,
     padding: "4px 0",
   },
-  rowText: { flex: 1, minWidth: 0 },
-  rowLabel: { fontSize: 14, lineHeight: `${GRID}px` },
   rowDesc: {
     fontSize: 11.5,
     lineHeight: "16px",
     color: "var(--ink-soft)",
     paddingBottom: 4,
-  },
-  // Height matches the label's line box so the control lines up with the label
-  // rather than floating above a wrapped description.
-  rowBtn: {
-    flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    height: GRID,
   },
   actions: {
     display: "flex",

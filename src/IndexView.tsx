@@ -8,6 +8,7 @@ import type { Scope } from "./lib/dates";
 import { colPageKey } from "./lib/types";
 import type { Collection, Entry, Habit } from "./lib/types";
 import { GRID } from "./lib/grid";
+import { S } from "./ui/styles";
 
 const GROUP_LABEL: Record<Scope, string> = {
   day: "Days",
@@ -56,9 +57,9 @@ export default function IndexView({
   return (
     <div>
       <div style={ST.head}>
-        <h2 style={ST.title}>Index</h2>
-        <span style={ST.sub}>collections and every page with entries</span>
-        <span style={ST.nav}>
+        <h2 style={S.sectionTitle}>Index</h2>
+        <span style={S.sectionSub}>collections and every page with entries</span>
+        <span style={S.sectionNav}>
           <button className="miniBtn" onClick={onNewCollection}>
             new collection
           </button>
@@ -67,12 +68,12 @@ export default function IndexView({
       {/* Future log sits at the front of the book, as in a physical
           journal (spec §4.2, revised 21 July 2026) */}
       {futureCount > 0 && (
-        <section style={ST.group}>
-          <ul style={ST.list}>
+        <section style={S.section}>
+          <ul style={S.list}>
             <li>
               <button className="indexRow" onClick={onOpenFutureLog}>
                 <span style={{ fontWeight: 600 }}>Future log</span>
-                <span style={ST.count}>
+                <span style={S.count}>
                   {futureCount} item{futureCount === 1 ? "" : "s"}
                 </span>
               </button>
@@ -80,15 +81,15 @@ export default function IndexView({
           </ul>
         </section>
       )}
-      <section style={ST.group}>
-        <div style={ST.groupLabel}>Collections</div>
+      <section style={S.section}>
+        <div style={S.subGroupLabel}>Collections</div>
         {collections.length === 0 && (
           <div style={ST.empty}>
             No collections yet — a collection is a freeform named page, like a
             reading list or a habit tracker.
           </div>
         )}
-        <ul style={ST.list}>
+        <ul style={S.list}>
           {collections.map((c) => {
             const colEntries = days[colPageKey(c.id)] || [];
             const open = colEntries.filter(
@@ -114,7 +115,7 @@ export default function IndexView({
                       {c.kind === "habits" ? "habit tracker" : "list"}
                     </span>
                   </span>
-                  <span style={ST.count}>{meta}</span>
+                  <span style={S.count}>{meta}</span>
                 </button>
               </li>
             );
@@ -128,9 +129,9 @@ export default function IndexView({
       )}
       {SCOPES.map((sc) =>
         groups[sc].length === 0 ? null : (
-          <section key={sc} style={ST.group}>
-            <div style={ST.groupLabel}>{GROUP_LABEL[sc]}</div>
-            <ul style={ST.list}>
+          <section key={sc} style={S.section}>
+            <div style={S.subGroupLabel}>{GROUP_LABEL[sc]}</div>
+            <ul style={S.list}>
               {groups[sc].map((pk) => {
                 const entries = days[pk];
                 const open = entries.filter(
@@ -146,7 +147,7 @@ export default function IndexView({
                           <span style={ST.nowTag}> · current</span>
                         )}
                       </span>
-                      <span style={ST.count}>
+                      <span style={S.count}>
                         {entries.length} entr{entries.length === 1 ? "y" : "ies"}
                         {open > 0 ? ` · ${open} open` : ""}
                       </span>
@@ -180,15 +181,6 @@ const ST = {
     paddingBottom: 4,
     marginBottom: GRID - 5,
   },
-  title: {
-    fontFamily: "'Fraunces', serif",
-    fontWeight: 600,
-    fontSize: 20,
-    margin: 0,
-    lineHeight: `${GRID}px`,
-  },
-  sub: { fontSize: 11.5, color: INK_SOFT, lineHeight: "13px" },
-  nav: { marginLeft: "auto", display: "flex", gap: 4, flexShrink: 0 },
   empty: {
     color: INK_SOFT,
     fontSize: 13,
@@ -196,28 +188,11 @@ const ST = {
     lineHeight: `${GRID}px`,
     padding: "0 4px",
   },
-  group: { marginBottom: GRID },
-  groupLabel: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    color: INK_SOFT,
-    lineHeight: `${GRID}px`,
-    margin: "0 4px",
-  },
-  list: { listStyle: "none", margin: 0, padding: 0 },
   // 13px line boxes: small text must not stretch the 22px grid rows
   nowTag: {
     fontSize: 11.5,
     lineHeight: "13px",
     color: INK_SOFT,
     fontWeight: 400,
-  },
-  count: {
-    fontSize: 11.5,
-    lineHeight: "13px",
-    color: INK_SOFT,
-    flexShrink: 0,
-    marginLeft: 10,
   },
 } as const satisfies Record<string, CSSProperties>;

@@ -686,4 +686,37 @@ export const S = {
     fontFamily: "inherit",
     marginBottom: 10,
   },
+  // Settings and feedback rows, shared by MenuView and FeedbackView: a named
+  // action with a sentence saying what it does and a control on the right.
+  // rowLabel's line box and rowBtn's height are both one GRID row, so the
+  // control lines up with the label rather than floating above a description
+  // that has wrapped to a second line.
+  rowText: { flex: 1, minWidth: 0 },
+  rowLabel: { fontSize: 14, lineHeight: `${GRID}px` },
+  // rowDesc, the sentence under the label, stays private to each view: its
+  // 16px line box is neither a full row nor the 13px short box, and the grid
+  // contract in tests/grid.test.ts allows only those two inside this file.
+  rowBtn: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    height: GRID,
+  },
+  // How many entries a page or group holds, said beside its name. 13px line
+  // box, so this small text cannot stretch the GRID row it sits in.
+  count: {
+    fontSize: 11.5,
+    lineHeight: "13px",
+    color: INK_SOFT,
+    flexShrink: 0,
+    marginLeft: 10,
+  },
+  // The label on a bordered box: the recovery code, the diagnostics block.
+  boxLabel: {
+    fontSize: 11,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: INK_SOFT,
+    marginBottom: 5,
+  },
 } as const satisfies Record<string, CSSProperties>;
