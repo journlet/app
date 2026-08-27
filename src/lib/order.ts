@@ -36,18 +36,30 @@ export const ORDER_NOTE: Record<EntryOrder, string> = {
 };
 
 /**
- * What the page says about itself while the reading block is shut.
+ * What the header badge says about a non-default order, with the short form
+ * the narrow screen uses — the same long/short pair the filter's own wording
+ * keeps (spec §4.9a, revised 27 August 2026).
  *
- * The filter gets away with a header badge because it subtracts: the page is
- * plainly shorter, and the badge says why. An order is not a subtraction —
- * the page looks like an ordinary page, in an order the journal never put it
- * in — so it says so on the page, in words, where it cannot be missed. Empty
- * for "logged", which is the page as it was written and needs no caption.
+ * This replaced a standing caption on the page. The caption was there because
+ * an order is not a subtraction: a sorted page looks like an ordinary page in
+ * an order the journal never put it in, so it had to say so somewhere. It said
+ * so in 11.5px italic soft ink on a 33px line, which is the filter note's
+ * styling in the filter note's slot, and it read as a control that had failed
+ * to close rather than as a statement about the page. The badge carries it
+ * instead, where it sits beside the filter's state and cannot be mistaken for
+ * a leftover row. Empty for "logged": that is the page as written.
  */
-export const ORDER_STANDING: Record<EntryOrder, string> = {
+export const ORDER_BADGE: Record<EntryOrder, string> = {
   logged: "",
-  priority: "priority marks first",
-  type: "in type order",
+  priority: "priority first",
+  type: "type order",
+};
+
+/** The same, shortened below 480px (see lib/reading.ts for the measurements). */
+export const ORDER_BADGE_SHORT: Record<EntryOrder, string> = {
+  logged: "",
+  priority: "priority",
+  type: "type",
 };
 
 export const ORDER_ARIA: Record<EntryOrder, string> = {

@@ -6,8 +6,9 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   ORDERS,
   ORDER_LABEL,
+  ORDER_BADGE,
+  ORDER_BADGE_SHORT,
   ORDER_NOTE,
-  ORDER_STANDING,
   compareTop,
   loadOrder,
   saveOrder,
@@ -37,14 +38,22 @@ describe("the vocabulary", () => {
     for (const o of ORDERS) {
       expect(ORDER_LABEL[o]).toBeTruthy();
       expect(ORDER_NOTE[o]).toBeTruthy();
-      expect(typeof ORDER_STANDING[o]).toBe("string");
+      expect(typeof ORDER_BADGE[o]).toBe("string");
+      expect(typeof ORDER_BADGE_SHORT[o]).toBe("string");
     }
   });
 
-  test("as logged says nothing on the page — it is the page as written", () => {
-    expect(ORDER_STANDING.logged).toBe("");
-    expect(ORDER_STANDING.priority).toBeTruthy();
-    expect(ORDER_STANDING.type).toBeTruthy();
+  test("as logged says nothing on the badge — it is the page as written", () => {
+    expect(ORDER_BADGE.logged).toBe("");
+    expect(ORDER_BADGE_SHORT.logged).toBe("");
+    expect(ORDER_BADGE.priority).toBeTruthy();
+    expect(ORDER_BADGE.type).toBeTruthy();
+  });
+
+  test("the short form is never longer than the long one (that is its job)", () => {
+    for (const o of ORDERS) {
+      expect(ORDER_BADGE_SHORT[o].length).toBeLessThanOrEqual(ORDER_BADGE[o].length);
+    }
   });
 });
 
