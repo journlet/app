@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import type { SyncStatus } from "./store/sync";
+import type { SyncStatus } from "./store/syncStatus";
 import { countUpdates } from "./store/sync";
 import { serverUsage } from "./store/usage";
 import type { ServerUsage } from "./store/usage";

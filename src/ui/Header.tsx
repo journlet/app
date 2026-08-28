@@ -22,7 +22,7 @@ import type { EntryFilter } from "../lib/filter";
 import { readingActive, readingAria, readingBadge } from "../lib/reading";
 import type { ReadingOrder } from "../lib/reading";
 import { syncSlotWord } from "../lib/syncSlot";
-import type { SyncStatus } from "../store/sync";
+import type { SyncStatus } from "../store/syncStatus";
 import { S } from "./styles";
 
 // Search deliberately does not live here. It sits bottom-left on the capture

@@ -4,7 +4,7 @@
 // device only and never reach the server. This banner makes that state
 // impossible to miss and offers a plainly labelled route to sign back in.
 
-import type { SyncStatus } from "../store/sync";
+import type { SyncStatus } from "../store/syncStatus";
 
 /**
  * Which sync states mean "writing here reaches nothing".

@@ -30,7 +30,7 @@ import {
   takeJournalKey,
   verifyEmailCode,
 } from "./store/sync";
-import type { SyncStatus } from "./store/sync";
+import type { SyncStatus } from "./store/syncStatus";
 import {
   forgetDevice,
   forgetGoneDevices,

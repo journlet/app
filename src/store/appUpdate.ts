@@ -4,15 +4,17 @@
 // a plainly labelled "Update ready — Reload" banner. Reloading applies the
 // waiting worker in place, so there is no need to close and reopen the app.
 
-type Listener = () => void;
+import { createEmitter } from "../lib/emitter";
+
 
 // Result of a manual "check for updates" (Menu). "found" — a new build is
 // waiting (the Reload banner will show); "current" — already up to date;
 // "offline" — no connection to check; "unavailable" — no service worker in
 // this context (e.g. the dev server).
+
 export type UpdateCheckResult = "found" | "current" | "offline" | "unavailable";
 
-const listeners = new Set<Listener>();
+const events = createEmitter();
 let needRefresh = false;
 // The reload function returned by vite-plugin-pwa's registerSW. Calling it
 // with `true` tells the waiting worker to activate and reloads once it takes
@@ -21,10 +23,6 @@ let updateSW: ((reloadPage?: boolean) => Promise<void>) | null = null;
 // Manual update check, wired to the live service worker registration in
 // main.tsx. Asks the server for a newer worker right now.
 let checker: (() => Promise<UpdateCheckResult>) | null = null;
-
-function emit() {
-  listeners.forEach((l) => l());
-}
 
 export function setUpdateSW(fn: (reloadPage?: boolean) => Promise<void>) {
   updateSW = fn;
@@ -45,16 +43,23 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
 export function markUpdateReady() {
   if (needRefresh) return;
   needRefresh = true;
-  emit();
+  events.emit();
 }
 
 export function getUpdateReady(): boolean {
   return needRefresh;
 }
 
-export function onUpdateReady(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+/**
+ * Subscribe to the flag changing.
+ *
+ * Shaped for useSyncExternalStore alongside getUpdateReady, which is how App
+ * reads it: `useState(getUpdateReady())` plus an effect that subscribes has a gap
+ * between the two, and a worker that finished precaching inside it raised no
+ * banner until the next reload. See lib/emitter.ts.
+ */
+export function onUpdateReady(listener: () => void): () => void {
+  return events.subscribe(listener);
 }
 
 // User has tapped Reload. Local journal state lives in IndexedDB via Yjs, which
