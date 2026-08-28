@@ -1354,7 +1354,27 @@ const subscribe = () => {
 
 const doConnect = async (): Promise<void> => {
   if (!supabase || !session) return;
-  if (connectedUserId === session.user.id && channel) return;
+  /**
+   * The session this connect is for, held rather than re-read.
+   *
+   * Same hazard, and the same remedy, as `held` in ensureJournalKeys. `session`
+   * is module state, and the auth listener assigns to it: a token refresh that
+   * fails, an expiry, or a sign-out in another tab all set it to null part-way
+   * through the awaits below, and `await reconcile("connect")` is a network round
+   * trip, so the window is real rather than theoretical. TypeScript keeps the
+   * narrowing from the guard above across every await, so reading `session.user`
+   * at the end compiled and would then have thrown a TypeError, which is the
+   * fault already recorded against `ring` in wipeThisDevice and was still live
+   * here. A throw there is worse than it looks: connect()'s continuation is a
+   * `.then`, so an exception skipped the branch that arms the retry.
+   *
+   * Compared by identity rather than checked for null, because a session that has
+   * been replaced is as wrong as one that has gone: sign out and back in as
+   * another account inside one connect, and `connectedUserId` would record the
+   * new user for a reconcile and a channel belonging to the old one.
+   */
+  const held = session;
+  if (connectedUserId === held.user.id && channel) return;
   clearError();
   setStatus("connecting");
   ring = await ensureKeys();
@@ -1406,7 +1426,27 @@ const doConnect = async (): Promise<void> => {
   // After connectedUserId is set, which is what lets the live-edit handler push
   // it. Before that assignment the handler ignores every local change, so the
   // row would sit unpushed until some later reconcile happened to notice it.
-  connectedUserId = session.user.id;
+  // Abandon rather than claim: the session this connect was for has gone or been
+  // replaced, so there is nothing to declare connected. The two reasons need
+  // opposite treatment, and getting that wrong strands the device.
+  if (session !== held) {
+    if (session) {
+      // Replaced. The auth listener did fire `void connect()` for the new
+      // session, and the single-flight below swallowed it because this connect
+      // was still in the air, so nothing else is going to start one. Leaving the
+      // status on "connecting" would then be permanent: scheduleRetry arms only
+      // for "pending" or "offline" (see its own guard), so a return on
+      // "connecting" is a device that never tries again, which is the same dead
+      // end the throw produced and the reason this branch is not a bare return.
+      setStatus(navigator.onLine ? "pending" : "offline");
+    }
+    // Gone. The listener has already torn down and put the right screen up,
+    // whether that is signed-out or the not-syncing banner. Setting "pending"
+    // over the top of it would claim this device is still trying to sync an
+    // account it no longer has.
+    return;
+  }
+  connectedUserId = held.user.id;
   subscribe();
   touchThisDevice();
   setStatus("synced");
@@ -1510,6 +1550,18 @@ const connect = (): Promise<void> =>
     .then(() => {
       if (connectedUserId) cancelRetry();
       else scheduleRetry();
+    })
+    .catch((e: unknown) => {
+      // A throw used to skip the branch above, so nothing armed the retry and
+      // nothing reported the failure: the app sat on "connecting" with no way
+      // back but a foreground or a network event. scheduleRetry's own comment
+      // claims every failure path arms it, and this is the path that did not.
+      // Swallowed rather than rethrown because every caller is a fire-and-forget
+      // `void connect()`, so a rejection here is an unhandled rejection and
+      // nothing more.
+      setError(e instanceof Error ? e.message : "Could not sync");
+      setStatus(navigator.onLine ? "pending" : "offline");
+      scheduleRetry();
     })
     .finally(() => {
       connecting = null;
