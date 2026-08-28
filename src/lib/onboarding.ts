@@ -8,7 +8,7 @@
 // an untested behaviour nobody chose: write locally, sign into an account that
 // already has a journal, and the local entries merge into it.
 
-import type { SyncStatus } from "../store/sync";
+import type { SyncStatus } from "../store/syncStatus";
 
 export interface OnboardingInput {
   /** Does this build have Supabase configured at all? */

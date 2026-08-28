@@ -9,8 +9,7 @@
 // realtime inserts stream in from other devices.
 
 import * as Y from "yjs";
-import { createClient } from "@supabase/supabase-js";
-import type { RealtimeChannel, Session, SupabaseClient } from "@supabase/supabase-js";
+import type { RealtimeChannel, Session } from "@supabase/supabase-js";
 import { doc, REMOTE_ORIGIN, wipeLocalJournal } from "./journal";
 import {
   listDevices,
@@ -80,11 +79,9 @@ import {
   markSessionSeen,
   sessionSeen,
 } from "../lib/sessionMark";
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabaseConfig";
 import {
   clearError,
   getSyncStatus,
-  isConfigured,
   resetLinkState,
   setError,
   setRemoved,
@@ -94,6 +91,7 @@ import {
 } from "./syncStatus";
 import type { SyncStatus } from "./syncStatus";
 import { DEFAULT_VOLUME, getActiveVolume, setActiveVolume } from "../lib/volume";
+import { supabase } from "./supabaseClient";
 import { wipeDeviceStorage } from "../lib/storageKeys";
 
 const PAGE = 1000;
@@ -111,9 +109,10 @@ export {
   wasRemoved,
 } from "./syncStatus";
 
-export const supabase: SupabaseClient | null = isConfigured()
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
+// Constructed in store/supabaseClient.ts and re-exported here, so that reading a
+// client does not mean evaluating this file and registering its listeners. Kept as
+// an export because plenty of callers, and several tests, read it from here.
+export { supabase } from "./supabaseClient";
 
 // ---------- status + listeners ----------
 
@@ -1633,7 +1632,12 @@ export const startSync = (): void => {
    * signed-out screen appearing at the first honest opportunity to show it.
    */
   const recheck = (): void => {
-    if (session || answered || !sessionSeen()) return;
+    // Its own guard on the client, not the enclosing function's. `supabase` is an
+    // imported binding since it moved to store/supabaseClient.ts, and TypeScript
+    // does not carry a null narrowing from an enclosing scope into a closure for
+    // one, as it did while this was a module-local const. The check is free and
+    // this function is called from a listener, so the honest guard belongs here.
+    if (session || answered || !sessionSeen() || !supabase) return;
     void supabase.auth.refreshSession();
   };
 

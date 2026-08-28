@@ -11,7 +11,10 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 let response: { data: unknown; error: unknown } = { data: null, error: null };
 let selected = "";
 
-vi.mock("../src/store/sync", () => ({
+// The client alone, not the sync engine. Until store/supabaseClient.ts existed
+// this had to stub all of store/sync.ts, which is a large lie to ask a small
+// question: the readout only ever calls .from() on a client.
+vi.mock("../src/store/supabaseClient", () => ({
   supabase: {
     from: () => ({
       select: (cols: string) => {

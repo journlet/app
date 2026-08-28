@@ -4,7 +4,7 @@
 // what makes this possible: the running total the quota trigger maintains is the
 // same number the Menu shows. Nothing else reads it.
 
-import { supabase } from "./sync";
+import { supabase } from "./supabaseClient";
 
 export interface ServerUsage {
   readonly bytes: number;

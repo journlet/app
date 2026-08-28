@@ -12,7 +12,7 @@
 // failure mode of getting it wrong is a device that has stopped reaching the
 // server and says so nowhere.
 
-import type { SyncStatus } from "../store/sync";
+import type { SyncStatus } from "../store/syncStatus";
 
 const SLOT: Record<SyncStatus, string> = {
   // Working, so nothing to say. A slot that says something every time you look
