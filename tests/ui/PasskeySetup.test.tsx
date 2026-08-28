@@ -14,7 +14,14 @@
 // rule broken (spec §4.1).
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { CredentialRefusedError, PrfUnsupportedError } from "../../src/lib/prf";
 
 let routes = 0;
@@ -678,12 +685,26 @@ describe("the list of saved routes (§6.1l)", () => {
     expect(screen.getByText("Not recognised")).toBeTruthy();
 
     // What a sync delivers: the register changes under the screen.
+    //
+    // Inside act(), because noteUnlock is not a React event: it writes to the Yjs
+    // document, the credentials observer fires synchronously, and the component's
+    // subscription starts an async reload whose setState therefore lands outside
+    // anything React is watching. Without act() the assertion below is a race
+    // against that reload rather than a check on its result, and waitFor's default
+    // budget is the only thing standing between the two. It held locally with fifty
+    // times the headroom to spare and failed once in CI on 28 August 2026, in a run
+    // whose only change was a new test file elsewhere. That failure was not
+    // reproduced, so this is not offered as its diagnosis: it removes the race the
+    // test should not have had either way, which is the part that is defensible
+    // without one.
     routeRows = [NAMED];
-    noteUnlock({ wrapId: NAMED.wrapId, attachment: "cross-platform" });
+    await act(async () => {
+      noteUnlock({ wrapId: NAMED.wrapId, attachment: "cross-platform" });
+    });
 
-    await waitFor(() =>
-      expect(screen.getByText(/Set up on Installed app \(macOS\)/i)).toBeTruthy()
-    );
+    expect(
+      screen.getByText(/Set up on Installed app \(macOS\)/i)
+    ).toBeTruthy();
   });
 
   test("removing a route corrects the count above it", async () => {
