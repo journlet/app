@@ -1,5 +1,7 @@
 // Journlet entry model — purist Ryder Carroll notation throughout.
 
+import type { Scope } from "./dates";
+
 /**
  * Every value of these unions, as a runtime list as well as a type.
  *
@@ -51,12 +53,35 @@ export interface Entry {
   recurrenceId?: string;
 }
 
-// Character-identical to `Scope` in lib/dates.ts, and `pageScope` below is
-// semantically a Scope. Left as two names for now because unifying them touches
-// the date helpers and the meaning of pageScope; the runtime list is here so the
-// decoder has something to check against either way.
+/**
+ * The unit a repeat counts in.
+ *
+ * Deliberately not the same type as `Scope` in lib/dates.ts, though today it has
+ * the same four members, and this comment used to say they should be unified. They
+ * should not, because they are different things that happen to coincide: a `Scope`
+ * is a kind of page the journal has, and a `RecurrenceUnit` is a cadence. The
+ * foreseeable divergence goes one way only. "Every fortnight" is an ordinary thing
+ * to want from a repeat and there is no fortnight page, so a unit could be added
+ * that is not a scope; a page scope that is not a usable cadence is hard to
+ * imagine.
+ *
+ * So the relationship is a subset, `Scope` ⊆ `RecurrenceUnit`, rather than an
+ * equality, and it is load-bearing: on a week, month or year page the cadence is
+ * locked to that page's scope, so a Scope is assigned straight into `unit` (see
+ * saveRepeat in ui/EntryActionsSheet.tsx).
+ *
+ * The assertion below states that invariant. It is not the only thing that would
+ * catch breaking it, and it is honest to say so: adding a page scope produces
+ * about a dozen errors, mostly from the `Record<Scope, …>` tables that have to be
+ * exhaustive. This is the one that names the rule rather than a consequence of it,
+ * which is worth having when a reader is working out why the build went red.
+ */
 export const RECURRENCE_UNITS = ["day", "week", "month", "year"] as const;
 export type RecurrenceUnit = (typeof RECURRENCE_UNITS)[number];
+
+/** Compile-time only: every page scope must remain a usable cadence. */
+const _scopeIsAUnit: RecurrenceUnit = "day" as Scope;
+void _scopeIsAUnit;
 
 /** A recurring entry rule; instances materialise client-side, no server */
 export interface Recurrence {
@@ -68,9 +93,17 @@ export interface Recurrence {
   everyN: number;
   /** cadence unit; on non-day pages this always equals pageScope */
   unit: RecurrenceUnit;
-  /** scope of the pages instances land on (day pages unless the rule was
-   *  created on a week/month/year page). Legacy rules default to "day". */
-  pageScope: RecurrenceUnit;
+  /**
+   * Scope of the pages instances land on: day pages unless the rule was created
+   * on a week, month or year page. Legacy rules default to "day".
+   *
+   * A `Scope`, not a `RecurrenceUnit`, which it was typed as until 28 August 2026
+   * on the strength of the two unions being identical. Every consumer already
+   * treated it as a scope: periodKey, SCOPE_NOW_WORD and shiftAnchor all take one,
+   * and it compiled only because the members happened to line up. Typed as what it
+   * is, so the day the two diverge this field stays correct.
+   */
+  pageScope: Scope;
   /** first occurrence day (YYYY-MM-DD); a day inside the first period */
   anchor: string;
   /** optional reminder time for each occurrence, "HH:MM" */
