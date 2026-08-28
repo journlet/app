@@ -1217,8 +1217,42 @@ const reportTally = (tally: SkipTally): void => {
   }
 };
 
+/**
+ * Apply one row delivered by realtime.
+ *
+ * Wrapped, because reconcile wraps the identical pair of applyUpdate calls on the
+ * paged path and this one did not, so the same failure was reported on one route
+ * into the journal and silently swallowed on the other. decryptRow already
+ * accounts for a row it cannot open, tallying it and returning null; what is left
+ * is a row that decrypts and then will not apply, which Yjs throws on. That threw
+ * out of an async function nobody awaits, so it became an unhandled rejection, the
+ * update was lost, and `reportTally` never ran, meaning nothing was said about it
+ * either. store/sync.ts's own rule is that a journal quietly dropping content
+ * while the badge reads "synced" is worse than one that admits a problem.
+ *
+ * Reported the way reconcile reports it, and retried for the same reason: a row
+ * this device could not apply is a row it is now behind on, and the reconcile the
+ * retry runs is what fetches it again.
+ */
 const applyRemotePayload = async (payloadB64: string): Promise<void> => {
   const tally = newTally();
+  try {
+    await applyRemoteUpdate(payloadB64, tally);
+  } catch (e) {
+    setError(e);
+    setStatus(navigator.onLine ? "pending" : "offline");
+    scheduleRetry();
+  } finally {
+    // In a finally, so a skipped row is surfaced whether or not the apply threw.
+    // Counting it and then failing before saying so is the fault twice over.
+    reportTally(tally);
+  }
+};
+
+const applyRemoteUpdate = async (
+  payloadB64: string,
+  tally: SkipTally
+): Promise<void> => {
   const update = await decryptRow(payloadB64, tally);
   if (update) {
     // The shadow tracks what the server holds, and a row delivered by realtime
@@ -1231,7 +1265,6 @@ const applyRemotePayload = async (payloadB64: string): Promise<void> => {
     Y.applyUpdate(ensureShadow(), update);
     Y.applyUpdate(doc, update, REMOTE_ORIGIN);
   }
-  reportTally(tally);
 };
 
 let reconciling = false;
