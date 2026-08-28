@@ -30,7 +30,7 @@ import {
   rejectRecord,
   repairField,
 } from "./decode";
-import { isFutureKey } from "../lib/dates";
+import { SCOPES, isFutureKey } from "../lib/dates";
 import { docNameForVolume, getActiveVolume } from "../lib/volume";
 import { REMOTE_ORIGIN_TAG } from "../lib/storageKeys";
 import { canNest } from "./pageOrder";
@@ -726,7 +726,10 @@ const toRecurrence = (m: Y.Map<unknown>): Recurrence | null => {
     // Unlike `unit`, a bad pageScope only says which kind of page the rule
     // belongs to. It was already defaulted to "day" before this change, because
     // rules written before the field existed have none.
-    pageScope: readOneOf(m, "pageScope", RECURRENCE_UNITS) ?? "day",
+    // SCOPES, not RECURRENCE_UNITS: this field is a page scope (see lib/types.ts),
+    // and checking it against the cadence list would start accepting cadences that
+    // are not pages the moment the two lists differ.
+    pageScope: readOneOf(m, "pageScope", SCOPES) ?? "day",
     anchor,
     remindTime: readString(m, "remindTime"),
     materialisedThrough,

@@ -1,8 +1,18 @@
 // Date helpers ported from journlet-prototype-v17
 
-export type Scope = "day" | "week" | "month" | "year";
-
-export const SCOPES: Scope[] = ["day", "week", "month", "year"];
+/**
+ * The kinds of page the journal has, as a runtime list and a type.
+ *
+ * The type derives from the list rather than being written beside it, because
+ * nothing checked that the two agreed: `SCOPES: Scope[]` is satisfied by any
+ * subset, so a member could be dropped from the list and the union would still
+ * claim it existed. SCOPES is what the index, the page picker and the spread all
+ * iterate, so a missing member would quietly stop a whole kind of page appearing
+ * anywhere, and nothing would fail. Same treatment as ENTRY_TYPES and the rest in
+ * lib/types.ts, for the same reason.
+ */
+export const SCOPES = ["day", "week", "month", "year"] as const;
+export type Scope = (typeof SCOPES)[number];
 
 export const SCOPE_LABEL: Record<Scope, string> = {
   day: "Today",
