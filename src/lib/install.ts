@@ -15,7 +15,8 @@
 // dismissal are naturally per-device, so they live in localStorage, never the
 // synced journal.
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+import { createEmitter } from "./emitter";
 import { HAS_CAPTURED_KEY, INSTALL_DISMISSED_KEY } from "./storageKeys";
 
 // `beforeinstallprompt` isn't in the standard lib.dom types yet.
@@ -33,9 +34,8 @@ const DISMISSED_KEY = INSTALL_DISMISSED_KEY;
 let deferred: BeforeInstallPromptEvent | null = null;
 let installed = false;
 
-type Listener = () => void;
-const listeners = new Set<Listener>();
-const emit = (): void => listeners.forEach((l) => l());
+const events = createEmitter();
+const emit = events.emit;
 
 if (typeof window !== "undefined") {
   window.addEventListener("beforeinstallprompt", (e) => {
@@ -44,6 +44,15 @@ if (typeof window !== "undefined") {
     e.preventDefault();
     deferred = e as BeforeInstallPromptEvent;
     emit();
+  });
+  // The user may install or switch display mode without a fresh load, so returning
+  // to the app re-evaluates. Registered here rather than inside the hook, where it
+  // used to be: one listener whatever is mounted, and it has to go through emit()
+  // so the snapshot moves. Calling a subscriber without moving the version is a
+  // notification useSyncExternalStore is entitled to ignore, which is the trap in
+  // replacing a tick counter with a real store.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") emit();
   });
   window.addEventListener("appinstalled", () => {
     installed = true;
@@ -140,21 +149,13 @@ function currentMode(): InstallMode {
 }
 
 export function useInstallState(): InstallState {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const l = () => setTick((n) => n + 1);
-    listeners.add(l);
-    // The user may install or switch display mode without a fresh load; a
-    // visibility check re-evaluates cheaply on return to the app.
-    const onVis = () => {
-      if (document.visibilityState === "visible") l();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      listeners.delete(l);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, []);
+  // Nothing here is stored, so there is nothing to snapshot but the count of
+  // notifications: the mode is read from the display media query, the banner from
+  // a localStorage flag and whether a deferred prompt event exists. The count is
+  // what tells React that one of those might have moved (see lib/emitter.ts), and
+  // useSyncExternalStore rather than useState plus useEffect because the latter
+  // loses anything that fires between the render and the subscription.
+  useSyncExternalStore(events.subscribe, events.version);
 
   const mode = currentMode();
   // The auto-banner only fires for the clean, actionable cases — a one-tap

@@ -796,8 +796,7 @@ export default function App() {
 
   // A newer build is precached and waiting. Show a plainly labelled banner so
   // the user can reload in place (no app restart) whenever it suits them.
-  const [updateReady, setUpdateReady] = useState(getUpdateReady());
-  useEffect(() => onUpdateReady(() => setUpdateReady(true)), []);
+  const updateReady = useSyncExternalStore(onUpdateReady, getUpdateReady);
 
   // Install-to-home-screen nudge (spec §3, §12 step 9). The banner appears
   // after the first capture (see submitEntry); the menu keeps a permanent
