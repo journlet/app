@@ -5,9 +5,14 @@
 // Platforms differ sharply:
 //  - Android / desktop Chrome & Edge fire `beforeinstallprompt`. We capture it
 //    and offer a one-tap "Install" button that triggers the real native prompt.
-//  - iOS has no such event in ANY browser (all are WebKit under the hood).
-//    Safari can Add to Home Screen from its Share menu, so we show the steps.
-//    Chrome/Firefox/Edge on iOS bury or omit it, so we steer the user to Safari.
+//  - iOS has no such event in ANY browser (all are WebKit under the hood), so
+//    every route there is written instructions. iOS 16.4 (March 2023) opened
+//    Add to Home Screen to third-party browsers, which this file got wrong for
+//    the whole life of the app: it told Chrome users to go and open Safari.
+//    Safari and Chrome now get the same confident steps; anything else on iOS
+//    gets steps plus a fallback, because Edge and Firefox carry the control on
+//    most builds and not all, and nothing here has been tested on either.
+//    Prototype v24 has the evidence, and spec §11 Q24 has the decision to hedge.
 //  - Already installed (standalone) or a browser with no install path: show
 //    nothing.
 //
@@ -84,6 +89,11 @@ const isIOS = (): boolean =>
 const isIOSSafari = (): boolean =>
   isIOS() && !/crios|fxios|edgios|opt\/|opr\//i.test(navigator.userAgent);
 
+// Chrome, which tags itself CriOS. Named separately from the others because it
+// is the one third-party browser whose Add to Home Screen we have actually seen
+// work, on Gary's iPhone on 1 September 2026.
+const isIOSChrome = (): boolean => isIOS() && /crios/i.test(navigator.userAgent);
+
 const read = (key: string): boolean => {
   try {
     return localStorage.getItem(key) === "1";
@@ -116,8 +126,11 @@ export type InstallMode =
   | "prompt"
   // iOS Safari — show Add to Home Screen steps
   | "ios-safari"
-  // on iOS but not Safari — steer the user to open in Safari
-  | "ios-other"
+  // iOS Chrome — the same steps, in Chrome's words
+  | "ios-chrome"
+  // on iOS in something we do not recognise — the steps, plus somewhere to go
+  // if this browser turns out not to offer them
+  | "ios-unknown"
   // desktop (or any browser) with no native prompt available: Chrome/Edge
   // before the event fires, or Firefox/Safari which never fire it. We still
   // give a route via the browser's own install control.
@@ -140,7 +153,11 @@ function currentMode(): InstallMode {
   if (isStandalone() || installed) return "hidden";
   if (deferred) return "prompt";
   if (isIOSSafari()) return "ios-safari";
-  if (isIOS()) return "ios-other";
+  if (isIOSChrome()) return "ios-chrome";
+  // Edge, Firefox, and everything with a user agent we have never seen. The
+  // Safari copy would very likely be right, since these are all WebKit shells,
+  // but "very likely" is not something to put in an instruction.
+  if (isIOS()) return "ios-unknown";
   // Chrome/Edge before beforeinstallprompt has fired, or Firefox / desktop
   // Safari which never fire it. There's still a manual route via the browser's
   // own install control, so the menu always offers one; it upgrades to
@@ -161,7 +178,12 @@ export function useInstallState(): InstallState {
   // The auto-banner only fires for the clean, actionable cases — a one-tap
   // native prompt or clear iOS steps. The vague "desktop" case (find your
   // browser's install control) would be nagging, so it lives in the menu only.
-  const bannerModes: InstallMode[] = ["prompt", "ios-safari", "ios-other"];
+  const bannerModes: InstallMode[] = [
+    "prompt",
+    "ios-safari",
+    "ios-chrome",
+    "ios-unknown",
+  ];
   return {
     mode,
     canPrompt: mode === "prompt" && !!deferred,

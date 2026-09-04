@@ -1667,12 +1667,31 @@ export default function App() {
                 Got it
               </button>
             </>
-          ) : (
-            // ios-other: no Add to Home Screen here; steer to Safari.
+          ) : install.mode === "ios-chrome" ? (
+            // Chrome on iOS has offered Add to Home Screen since iOS 16.4. This
+            // branch used to send people to Safari for no reason (prototype v24).
             <>
               <span style={S.installText}>
-                To install, open journlet.com in Safari, then Share → “Add to
-                Home Screen”.
+                Add Journlet to your Home Screen: in Chrome, tap Share, then
+                “Add to Home Screen”.
+              </span>
+              <button
+                className="toastBtn"
+                style={S.installDismiss}
+                aria-label="Dismiss install prompt"
+                onClick={install.dismissBanner}
+              >
+                Got it
+              </button>
+            </>
+          ) : (
+            // ios-unknown: the steps are almost certainly right here too, but we
+            // have not seen this browser, so it gets somewhere to go (§11 Q24).
+            <>
+              <span style={S.installText}>
+                Add Journlet to your Home Screen: look for “Add to Home
+                Screen” in this browser’s Share or menu. If it is not there,
+                open journlet.com in Safari or Chrome.
               </span>
               <button
                 className="toastBtn"
