@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -146,6 +147,32 @@ type View =
   | "search"
   | "feedback"
   | { col: string };
+
+/**
+ * What a remembered scroll offset belongs to (4 September 2026).
+ *
+ * `<main style={S.paper}>` is this app's only scroller and it lives outside
+ * every view, so nothing moved it when the view changed and each screen opened
+ * at the last one's offset, clamped to its own height. Reported from the
+ * installed app: the feedback screen, tapped from the foot of a long day page,
+ * opened part way into its own diagnostics box.
+ *
+ * A view alone is not enough of a key for the spread, which is one scrolling
+ * page holding four sections with their own browsing anchors: the view does not
+ * change when you step to another day, so an offset stored against "spread"
+ * could in principle be restored onto different content. In practice it cannot,
+ * because the offset is only ever restored by `back` and changing an anchor
+ * means being on the spread — with one exception, the day rolling over at
+ * midnight while you are away from it, which resets the anchors. Including the
+ * anchors here turns that exception into a miss, and a miss opens at the top,
+ * which is the right answer for a page that is no longer the one you left.
+ */
+export const scrollKey = (view: View, spreadAnchors: string): string =>
+  view === "spread"
+    ? `spread:${spreadAnchors}`
+    : typeof view === "string"
+      ? view
+      : `col:${view.col}`;
 
 // Fold state is a device preference, not journal content — kept local like
 // sticky capture state, never synced. Keys are namespaced: a Future log month
@@ -321,9 +348,36 @@ export default function App() {
   const viewRef = useRef<View>("spread");
   viewRef.current = view;
   const navHistory = useRef<View[]>([]);
+  // The scroller itself, so navigation can put it where the next screen should
+  // start. Nothing else in this file touches it: the one other scripted scroll
+  // brings a followed search result into view, and that one owns its moment.
+  const paper = useRef<HTMLElement | null>(null);
+  // Where each page was left. Keyed by scrollKey, so the spread's entry belongs
+  // to the anchors it was taken on.
+  const scrollMem = useRef<Map<string, number>>(new Map());
+  // Where the view about to be committed should sit: the top on the way
+  // forward, and on the way back whatever that page was left at.
+  const nextScroll = useRef(0);
+  // Refreshed below, once `anchors` exists. Held as a ref so setView and goBack
+  // can read the current spread key without taking a dependency on state that
+  // changes whenever anybody steps to another day.
+  const spreadAnchors = useRef("");
+  // Read in a layout effect that must not fight the search-result scroll, and
+  // mirrored rather than added to that effect's dependencies: the mark clears
+  // itself after four seconds, and re-running on that would yank the page.
+  const foundRef = useRef<string | null>(null);
+  foundRef.current = foundEntry;
   const setView = useCallback(
     (next: View) => {
       clearFound();
+      // Remember where this page was left before leaving it, then open the next
+      // one at its top: a screen that starts part way down reads as broken, and
+      // the reader has no way of knowing they are not at the beginning of it.
+      scrollMem.current.set(
+        scrollKey(viewRef.current, spreadAnchors.current),
+        paper.current?.scrollTop ?? 0
+      );
+      nextScroll.current = 0;
       navHistory.current.push(viewRef.current);
       setViewRaw(next);
     },
@@ -331,7 +385,13 @@ export default function App() {
   );
   const goBack = useCallback(() => {
     clearFound();
-    setViewRaw(navHistory.current.pop() ?? "spread");
+    const prev = navHistory.current.pop() ?? "spread";
+    // Back is a return rather than an arrival, so it goes where you were. A page
+    // with nothing remembered, or a spread whose anchors have moved since, opens
+    // at the top.
+    nextScroll.current =
+      scrollMem.current.get(scrollKey(prev, spreadAnchors.current)) ?? 0;
+    setViewRaw(prev);
   }, [clearFound]);
 
   const [newCol, setNewCol] = useState<{ name: string; kind: CollectionKind } | null>(null);
@@ -346,6 +406,11 @@ export default function App() {
     month: todayKey(),
     year: todayKey(),
   }));
+  // Every anchor, in a fixed order: the spread shows all four sections at once,
+  // so any of them moving means the page is a different length and an offset
+  // taken on the old one belongs to nothing.
+  spreadAnchors.current = `${anchors.day}|${anchors.week}|${anchors.month}|${anchors.year}`;
+
   // The day inside the page capture is logging into (see ui/PagePicker). The
   // kind of page is sticky; which one is not — it resets to today whenever the
   // form opens, so a session left open overnight can't quietly log into a page
@@ -1235,6 +1300,22 @@ export default function App() {
       </li>
     );
 
+  // Put the scroller where the committed view should start (4 September 2026).
+  //
+  // A layout effect rather than an effect, so it happens before the browser
+  // paints and there is no visible jump from the old offset to the new one.
+  //
+  // Guarded on the search mark, and the guard is the whole subtlety here. A
+  // followed result navigates and marks the entry in the same handler, so both
+  // land in one commit, and the ref callback that scrolls the entry into view
+  // runs before layout effects — resetting here would undo it and leave the
+  // reader at the top of a page with a highlighted line somewhere below.
+  useLayoutEffect(() => {
+    const el = paper.current;
+    if (!el || foundRef.current) return;
+    el.scrollTop = nextScroll.current;
+  }, [view]);
+
   return (
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <Header
@@ -1266,7 +1347,7 @@ export default function App() {
         syncStatus={syncStatus}
       />
 
-      <main style={S.paper}>
+      <main style={S.paper} ref={paper}>
         <div style={S.paperInner}>
         {updateReady && (
           <button className="reviewBanner" onClick={() => void applyUpdate()}>
