@@ -32,7 +32,6 @@ const renderMenu = () =>
       onOpenIndex={vi.fn()}
       onOpenSearch={vi.fn()}
       onOpenSync={vi.fn()}
-      onOpenFeedback={vi.fn()}
       onExport={vi.fn()}
       onBackup={vi.fn()}
       onRestore={vi.fn(async () => "")}

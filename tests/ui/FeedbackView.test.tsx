@@ -26,12 +26,15 @@ vi.mock("../../src/store/metrics", () => ({
 
 const FeedbackView = (await import("../../src/ui/FeedbackView")).default;
 
-const renderView = (over: { syncError?: string | null; installed?: boolean } = {}) =>
+const renderView = (
+  over: { syncError?: string | null; installed?: boolean; journalOpen?: boolean } = {}
+) =>
   render(
     <FeedbackView
       syncStatus="synced"
       syncError={over.syncError ?? null}
       installed={over.installed ?? true}
+      journalOpen={over.journalOpen ?? true}
     />
   );
 
@@ -57,6 +60,17 @@ describe("the report", () => {
     expect(text).toContain("sync: synced");
     expect(text).toContain("sync error: permission denied for table");
     expect(text).toContain("journal: 412 entries, 96.4 KB on this device");
+  });
+
+  // Opened from a gate (4 September 2026): the doc behind this screen is empty
+  // because the journal has not been read or cannot be, so the one line a reader
+  // can check has to say that rather than reporting a journal with nothing in it.
+  test("does not claim an empty journal when it was opened from a gate", () => {
+    renderView({ journalOpen: false, syncError: "PGRST301 JWT expired" });
+    const text = reportBox().value;
+    expect(text).toContain("journal: not open on this device");
+    expect(text).not.toContain("412 entries");
+    expect(text).toContain("sync error: PGRST301 JWT expired");
   });
 
   test("can be emptied, and then nothing of it is attached", () => {
