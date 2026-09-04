@@ -64,14 +64,13 @@ export default function CannotLoadView({
         Nothing you write is lost while this is on screen, but hold off until it
         clears: this device has no copy of the journal to add to yet.
       </p>
-      {/* The Menu's feedback screen needs a journal on screen, and this screen is
-          the state where there is not one. So the address is written out here
-          rather than linked to a route that cannot be reached from here, and the
-          error above is the thing worth quoting into it (spec §13.1). */}
-      <p style={S.onboardNote}>
-        If this does not clear on its own, email hello@journlet.com. Anything shown
-        above is worth quoting.
-      </p>
+      {/* The address used to be written out here, because the Menu's feedback
+          screen needed a journal on screen and this is the state where there is
+          not one. Since 4 September 2026 the feedback row sits at the foot of this
+          screen like every other, and it does the job properly: the report it
+          composes carries the build, the sync state and the error above, which a
+          hand-typed email does not. So the sentence goes rather than saying the
+          same thing worse, six lines above the row that means it. */}
     </section>
   );
 }

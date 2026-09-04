@@ -14,7 +14,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.112.3",
+    "@supabase/supabase-js": "^2.112.4",
     "jsqr": "^1.4.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
