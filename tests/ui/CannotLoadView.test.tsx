@@ -74,13 +74,21 @@ describe("what it says", () => {
       .toBeTruthy();
   });
 
-  test("offers a way to report it, since feedback is behind the Menu", () => {
-    // The Menu's feedback screen needs a journal on screen and this is the state
-    // where there is not one, so the address is written out here rather than
-    // linked to a route that cannot be reached from here (spec §13.1).
+  test("does not hand out an address of its own any more", () => {
+    // It used to, and the reason was sound while it lasted: the Menu's feedback
+    // screen needed a journal on screen and this is the state where there is not
+    // one, so the address was written out here in prose (spec §13.1).
+    //
+    // Since 4 September 2026 the feedback row sits at the foot of this screen
+    // like every other, and it does the same job properly — the report it
+    // composes carries the build, the sync state and the error this screen is
+    // quoting, none of which a hand-typed email brings. Two routes to the same
+    // place, six lines apart, with the worse one first, is what this asserts is
+    // gone. That the row is actually there is App's wiring, and
+    // tests/ui/AppFeedbackRow.test.tsx is where it is held.
     renderView();
 
-    expect(screen.getByText(/hello@journlet.com/)).toBeTruthy();
+    expect(screen.queryByText(/hello@journlet.com/)).toBeNull();
   });
 
   test("copes with no error text", () => {

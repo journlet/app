@@ -60,7 +60,6 @@ interface Props {
   onOpenIndex: () => void;
   onOpenSearch: () => void;
   onOpenSync: () => void;
-  onOpenFeedback: () => void;
   onExport: () => void;
   onBackup: () => void;
   /** Returns what to tell the user, whether it worked or not. */
@@ -77,7 +76,6 @@ export default function MenuView({
   onOpenIndex,
   onOpenSearch,
   onOpenSync,
-  onOpenFeedback,
   onExport,
   onBackup,
   onRestore,
@@ -412,30 +410,17 @@ export default function MenuView({
           </div>
         </div>
       </section>
-      {/* Last, and its own section rather than a line in Preferences: it is not a
-          setting, and burying the one route by which somebody can say the app is
-          wrong would be a strange thing to optimise for. The address is written out
-          as well as linked, because a device with no mail client configured needs
-          something it can copy (spec §13.1). */}
-      <section style={S.section}>
-        <div style={S.subGroupLabel}>Feedback</div>
-        <div style={ST.row}>
-          <div style={S.rowText}>
-            <div style={S.rowLabel}>Send feedback</div>
-            <div style={ST.rowDesc}>
-              Report something broken, or say what you would change. Composed here
-              and sent to hello@journlet.com from wherever you write email, in a
-              browser or in a mail app, so you read it before it leaves. Nothing
-              from your journal is attached.
-            </div>
-          </div>
-          <div style={S.rowBtn}>
-            <button className="miniBtn" onClick={onOpenFeedback}>
-              send feedback
-            </button>
-          </div>
-        </div>
-      </section>
+      {/* Feedback used to be the last section on this screen, and it is not here
+          any more. Not because it went: it is at the foot of every screen now
+          (ui/FeedbackRow, rendered by App), the Menu among them, and it lands in
+          the same place it always did because it was already last.
+
+          Rendered from one place rather than two, and Gary asked for exactly that
+          on 4 September 2026 once he had seen it in both. A screen that keeps its
+          own copy of a thing every screen has is a second call site to forget: it
+          would take the wording, the rule above it and the measurements out of
+          step with everywhere else the first time one of them changed here. So
+          this screen no longer takes an onOpenFeedback either. */}
     </div>
   );
 }

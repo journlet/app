@@ -84,6 +84,18 @@ export interface FeedbackFacts {
   syncStatus: SyncStatus;
   /** Last server error, or null. The single most useful line here. */
   syncError: string | null;
+  /**
+   * Is the journal actually open on this device?
+   *
+   * False on every screen that stands in front of it: sign-in, signed out,
+   * unlock, a removed device, cannot-load. Needed because the two counts below
+   * are read from the in-memory doc, which is empty in all of those states, so
+   * without this the block reported `0 entries, 0.1 KB` to somebody whose
+   * journal is intact and merely shut. That is the one line on this block a
+   * reader can check against what they know, and it would have been wrong in
+   * exactly the states this route was extended to serve (4 September 2026).
+   */
+  journalOpen: boolean;
   entries: number;
   /** Encoded CRDT size on this device. A size, never a content. */
   docBytes: number;
@@ -117,7 +129,9 @@ export const diagnosticLines = (f: FeedbackFacts): string[] => [
   `network: ${f.online ? "online" : "offline"}`,
   `sync: ${f.syncStatus}`,
   `sync error: ${f.syncError ?? "none"}`,
-  `journal: ${f.entries} ${f.entries === 1 ? "entry" : "entries"}, ${kb(f.docBytes)} on this device`,
+  f.journalOpen
+    ? `journal: ${f.entries} ${f.entries === 1 ? "entry" : "entries"}, ${kb(f.docBytes)} on this device`
+    : "journal: not open on this device",
   `unreadable: ${f.decodeFaults}`,
 ];
 

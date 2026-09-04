@@ -36,6 +36,7 @@ const facts = (over: Partial<FeedbackFacts> = {}): FeedbackFacts => ({
   online: true,
   syncStatus: "synced",
   syncError: null,
+  journalOpen: true,
   entries: 412,
   docBytes: 98700,
   decodeFaults: "none",
@@ -89,6 +90,20 @@ describe("the diagnostics block", () => {
 
   test("one entry is not one entries", () => {
     expect(diagnosticText(facts({ entries: 1 }))).toContain("journal: 1 entry,");
+  });
+
+  // 4 September 2026, with the row that made it reachable from the gates. The
+  // counts come from the in-memory doc, which is empty on every screen that
+  // stands in front of the journal, so the block used to report an empty journal
+  // to somebody whose journal was intact and merely shut — and it would have done
+  // so in exactly the states this route was extended to serve.
+  test("says the journal is shut rather than empty when it is not open", () => {
+    const shut = diagnosticText(facts({ journalOpen: false, entries: 0, docBytes: 0 }));
+    expect(shut).toContain("journal: not open on this device");
+    expect(shut).not.toContain("0 entries");
+    // Everything else on the block is still worth having from a gate, and the
+    // sync error is the whole reason somebody is writing in from one.
+    expect(shut).toContain("sync: synced");
   });
 
   test("holds no address, no page name and no entry text", () => {

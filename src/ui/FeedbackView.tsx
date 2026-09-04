@@ -54,6 +54,12 @@ interface FeedbackViewProps {
   syncError: string | null;
   /** Running from the home screen rather than a browser tab. */
   installed: boolean;
+  /**
+   * Is the journal open behind this screen? False when this was opened from one
+   * of the gates, where the doc is empty because it has not been read or cannot
+   * be — see FeedbackFacts.journalOpen for what it stops the block claiming.
+   */
+  journalOpen: boolean;
 }
 
 const KINDS: { value: FeedbackKind; label: string }[] = [
@@ -69,6 +75,7 @@ export default function FeedbackView({
   syncStatus,
   syncError,
   installed,
+  journalOpen,
 }: FeedbackViewProps) {
   const [kind, setKind] = useState<FeedbackKind>("broken");
   const [message, setMessage] = useState(() => loadDraft());
@@ -86,6 +93,7 @@ export default function FeedbackView({
       online: navigator.onLine,
       syncStatus,
       syncError,
+      journalOpen,
       entries: vol.entries,
       docBytes: vol.docBytes,
       decodeFaults: decodeFaultLine(),
