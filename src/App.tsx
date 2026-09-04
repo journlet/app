@@ -115,6 +115,7 @@ import RecoveryCodeView from "./ui/RecoveryCodeView";
 import UnlockView from "./ui/UnlockView";
 import CannotLoadView from "./ui/CannotLoadView";
 import StartingView from "./ui/StartingView";
+import FeedbackRow from "./ui/FeedbackRow";
 import NotSyncingBanner, { notSyncingReason } from "./ui/NotSyncingBanner";
 import {
   cannotLoadYet,
@@ -761,6 +762,14 @@ export default function App() {
   // a flag would render the journal behind the screen meant to replace it, and the
   // two that matter most are the capture launcher and the capture form, where the
   // consequence is an entry written into a journal nobody is looking at.
+  // Send feedback is now reachable from screens that stand in front of the
+  // journal, so it is the one view that can be on screen while a gate applies.
+  // Every gate below is suppressed while it is, and it renders in their place —
+  // which also gives the way back for nothing: `back` sets the view to whatever
+  // preceded it, the gate's own predicate is untouched by the view, so the gate
+  // reasserts itself the moment feedback closes.
+  const feedbackOpen = view === "feedback";
+
   const journalOnScreen =
     !starting &&
     !onboarding &&
@@ -1230,7 +1239,10 @@ export default function App() {
     <div style={{ ...S.page, ["--grid" as string]: `${GRID}px` }}>
       <Header
         showBack={
-          journalOnScreen &&
+          // Feedback opened from a gate has no journal on screen and still needs
+          // the way out; without this it was a screen you could reach and not
+          // leave.
+          (journalOnScreen || feedbackOpen) &&
           view !== "spread"
         }
         showMenu={
@@ -1274,10 +1286,10 @@ export default function App() {
             index.html rather than appearing beneath a header. What it replaced
             was a bare "opening journal…" line with the empty journal already
             drawn around it. */}
-        {starting && (
+        {starting && !feedbackOpen && (
           <StartingView loaded={loaded} checkingAccount={syncStatus === "starting"} />
         )}
-        {onboarding && (
+        {onboarding && !feedbackOpen && (
           <OnboardingView>
             <SyncView />
           </OnboardingView>
@@ -1288,7 +1300,7 @@ export default function App() {
             signed-out without it, and the other four need a session. The predicate
             test pins that, since a state with no screen renders an empty journal
             and a state with two renders both. */}
-        {choosing && (
+        {choosing && !feedbackOpen && (
           <SignedOutView
             onErase={async () => {
               await signOutAndWipe();
@@ -1298,10 +1310,10 @@ export default function App() {
             <SyncView />
           </SignedOutView>
         )}
-        {!starting && !onboarding && !unlocking && settling && (
+        {!starting && !onboarding && !unlocking && !feedbackOpen && settling && (
           <div style={S.empty}>opening your journal…</div>
         )}
-        {!starting && !onboarding && !unlocking && !settling && stuck && (
+        {!starting && !onboarding && !unlocking && !settling && !feedbackOpen && stuck && (
           <CannotLoadView
             error={sync.error}
             offline={syncStatus === "offline"}
@@ -1312,7 +1324,7 @@ export default function App() {
             }}
           />
         )}
-        {!onboarding && unlocking && (
+        {!onboarding && unlocking && !feedbackOpen && (
           <UnlockView
             removed={removed}
             onSignOut={() => void signOutAndWipe()}
@@ -1320,7 +1332,7 @@ export default function App() {
             <SyncView />
           </UnlockView>
         )}
-        {!onboarding && !unlocking && showRecovery && recoveryCode && (
+        {!onboarding && !unlocking && !feedbackOpen && showRecovery && recoveryCode && (
           <RecoveryCodeView
             code={recoveryCode}
             onContinue={() => {
@@ -1389,15 +1401,20 @@ export default function App() {
         {journalOnScreen && loaded && view === "sync" && (
           <SyncView />
         )}
-        {/* Reached from the Menu, so it needs a journal on screen like the rest.
-            The case this cannot serve is somebody stuck before that point, on the
-            unlock or sign-in screen, which is why the site carries the address too
-            (spec §13.1). */}
-        {journalOnScreen && loaded && view === "feedback" && (
+        {/* Reachable from every screen, which is the whole of the change of
+            4 September 2026: the row at the foot of this page opens it, and the
+            gates above stand aside while it is open. The condition is only
+            `starting`, because that screen lives for a moment and carries no row,
+            so there is no way to arrive here from it.
+
+            journalOpen is what stops the diagnostics claiming an empty journal on
+            a device whose journal is merely shut (lib/feedback.ts). */}
+        {feedbackOpen && !starting && (
           <FeedbackView
             syncStatus={syncStatus}
             syncError={sync.error}
             installed={install.mode === "hidden"}
+            journalOpen={journalOnScreen && loaded}
           />
         )}
         {journalOnScreen && loaded && view === "menu" && (
@@ -1411,7 +1428,6 @@ export default function App() {
             onOpenIndex={() => setView("index")}
             onOpenSearch={openSearch}
             onOpenSync={() => setView("sync")}
-            onOpenFeedback={() => setView("feedback")}
             onExport={() => {
               const md = buildMarkdown(days, collections, habits);
               download(
@@ -1512,6 +1528,20 @@ export default function App() {
             filter={filter}
             renderRow={renderScheduledRow}
           />
+        )}
+
+        {/* Every screen, at the foot of whatever the screen is for, and this is
+            the only place it is rendered.
+
+            Off the two transients — the launch screen and the second or so of
+            settling — where it would flash past rather than be read, and off the
+            feedback screen itself. The Menu is not an exception: it used to render
+            its own copy in its own section, and having seen the row in both places
+            Gary asked for the duplicate to go (4 September 2026). It lands where
+            that section did, since Feedback was already the last thing on that
+            screen. */}
+        {!starting && !settling && !feedbackOpen && (
+          <FeedbackRow onOpen={() => setView("feedback")} />
         )}
         </div>
       </main>
