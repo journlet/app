@@ -555,6 +555,49 @@ test("repeat mode starts the rule and tags the entry with it", () => {
   expect(props.closeSheet).toHaveBeenCalledTimes(1);
 });
 
+// Reported 23 September 2026: one task made to repeat twice, from two entries
+// on the same week page three days apart, arrived twice every eight weeks.
+describe("repeating words that already repeat", () => {
+  const existing: Recurrence = {
+    id: "r0",
+    text: "Write Report",
+    type: "task",
+    priority: false,
+    everyN: 8,
+    unit: "week",
+    pageScope: "day",
+    anchor: "2026-07-20",
+    materialisedThrough: "2026-07-24",
+    createdAt: new Date(2026, 6, 20, 9, 0).getTime(),
+  };
+
+  test("warns, says which repeat and when, and names the button for what it does", () => {
+    setup({ recurrences: [existing] });
+    openRepeat();
+    const warning = screen.getByText(/already repeats/);
+    expect(warning.textContent).toMatch(/“Write Report” already repeats every 8 weeks/);
+    expect(warning.textContent).toMatch(/20 July 2026/);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start a second repeat" })
+    );
+    // a warning, not a refusal: a second repeat of the same words can be meant
+    expect(addRecurrence).toHaveBeenCalledTimes(1);
+  });
+
+  test("a stopped repeat of the same words is no reason to warn", () => {
+    setup({ recurrences: [{ ...existing, endedAt: 1 }] });
+    openRepeat();
+    expect(screen.queryByText(/already repeats/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Start repeating" })).toBeTruthy();
+  });
+
+  test("nor is one that lands on a different kind of page", () => {
+    setup({ recurrences: [{ ...existing, pageScope: "week", unit: "week" }] });
+    openRepeat();
+    expect(screen.queryByText(/already repeats/)).toBeNull();
+  });
+});
+
 // Nesting, one level deep (spec §4.1). Any top-level entry on the page can be
 // the parent, so the actions list offers a picker sub-view rather than naming
 // the single entry above.

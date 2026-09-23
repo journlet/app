@@ -29,6 +29,7 @@
 // anything else of its own.
 
 import { dkey, endLabel, periodKey, todayKey, toDate } from "../lib/dates";
+import { normalise } from "../lib/search";
 import type {
   Entry,
   EntryState,
@@ -159,6 +160,34 @@ export const isSpent = (r: Recurrence, today: string): boolean => {
   if (r.endedAt) return true;
   const last = lastOccurrence(r);
   return last !== null && last < periodKey(r.pageScope, today);
+};
+
+/**
+ * A live rule that already repeats this entry's words on this kind of page.
+ *
+ * Reported 23 September 2026: "Clean washing machine" arrived twice every eight
+ * weeks, because the same task on one week page had been made to repeat on the
+ * 28th and again on the 31st of July, from two entries. Two rules are two
+ * sources, so the dedupe pass, which groups by rule, rightly never merges their
+ * occurrences; the moment to catch it is before the second rule exists. Matched
+ * on the words, case and accents aside, and on the page scope, since that is
+ * where both rules would land. A spent or stopped rule makes nothing more, so
+ * it is not a match. Only a warning: a second repeat of the same words can be
+ * meant.
+ */
+export const matchingRule = (
+  rules: Recurrence[],
+  text: string,
+  pageScope: Recurrence["pageScope"],
+  today: string
+): Recurrence | undefined => {
+  const words = (s: string) => normalise(s.trim());
+  const want = words(text);
+  if (!want) return undefined;
+  return rules.find(
+    (r) =>
+      r.pageScope === pageScope && words(r.text) === want && !isSpent(r, today)
+  );
 };
 
 /**
