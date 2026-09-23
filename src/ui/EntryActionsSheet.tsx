@@ -1386,6 +1386,11 @@ export default function EntryActionsSheet({
                   ["migrated from", sheetEntry.migratedFrom],
                   ["repeat rule", sheetEntry.recurrenceId],
                   [
+                    "rule created",
+                    rule ? new Date(rule.createdAt).toISOString() : undefined,
+                  ],
+                  ["rule starts", rule?.anchor],
+                  [
                     "rule filled to",
                     rule ? rule.materialisedThrough : undefined,
                   ],
