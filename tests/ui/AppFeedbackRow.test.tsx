@@ -23,7 +23,7 @@
 // count from the in-memory doc, which is empty on every gate, so opened from one
 // it used to describe an intact journal as an empty one.
 
-import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 // Mutable so one file can mount both a gate and the journal: the gates are
@@ -93,6 +93,15 @@ vi.mock("../../src/store/metrics", () => ({
 }));
 
 const { default: App } = await import("../../src/App");
+
+// The mocked journal files its entry under 4 September 2026 and the app opens on
+// today's page, so the clock is pinned to that day or the entry is not on
+// screen. Only Date is faked: React and testing-library still need real timers.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 4, 12, 0, 0));
+});
+afterAll(() => vi.useRealTimers());
 
 beforeAll(() => {
   vi.stubGlobal(

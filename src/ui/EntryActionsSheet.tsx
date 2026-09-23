@@ -1357,6 +1357,58 @@ export default function EntryActionsSheet({
               { danger: true }
             )}
           </div>
+
+          {/* ── The record itself ───────────────────────────────────────── */}
+          {/* Folded away by default: this is for telling two identical-looking
+              rows apart (same id = a rendering bug, different ids = two
+              records), not something to read on every open. */}
+          <details style={S.removeGroup}>
+            <summary style={{ ...S.formLbl, marginTop: 0, cursor: "pointer" }}>
+              Record
+            </summary>
+            <dl
+              style={{
+                display: "grid",
+                gridTemplateColumns: "auto 1fr",
+                gap: "4px 12px",
+                margin: "8px 0 0",
+                fontSize: 12,
+                color: "var(--ink-soft)",
+              }}
+            >
+              {(
+                [
+                  ["id", sheetEntry.id],
+                  ["page", sheetEntry.pageKey],
+                  ["created", new Date(sheetEntry.createdAt).toISOString()],
+                  ["state", sheetEntry.state],
+                  ["parent", sheetEntry.parentId],
+                  ["migrated from", sheetEntry.migratedFrom],
+                  ["repeat rule", sheetEntry.recurrenceId],
+                  [
+                    "rule filled to",
+                    rule ? rule.materialisedThrough : undefined,
+                  ],
+                ] as [string, string | undefined][]
+              )
+                .filter(([, v]) => v)
+                .map(([k, v]) => (
+                  <div key={k} style={{ display: "contents" }}>
+                    <dt>{k}</dt>
+                    <dd
+                      style={{
+                        margin: 0,
+                        fontFamily: "ui-monospace, monospace",
+                        wordBreak: "break-all",
+                        userSelect: "all",
+                      }}
+                    >
+                      {v}
+                    </dd>
+                  </div>
+                ))}
+            </dl>
+          </details>
         </>
       )}
     </FullScreenSheet>

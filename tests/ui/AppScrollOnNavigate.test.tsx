@@ -17,7 +17,7 @@
 // with it. The behaviour was also measured in a real browser, in
 // spec/journlet-prototype-v28-scroll-on-navigate.html.
 
-import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const snapshot = {
@@ -72,6 +72,15 @@ const { default: App, scrollKey } = await import("../../src/App");
 // when — and it is honest about being no evidence of what a browser then does.
 let offset = 0;
 let writes: number[] = [];
+
+// The mocked journal files its entry under 4 September 2026 and the app opens on
+// today's page, so the clock is pinned to that day or the entry is not on
+// screen. Only Date is faked: React and testing-library still need real timers.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 4, 12, 0, 0));
+});
+afterAll(() => vi.useRealTimers());
 
 beforeAll(() => {
   // jsdom does not implement it, and the followed-result path calls it.
