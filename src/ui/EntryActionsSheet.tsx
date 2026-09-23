@@ -40,6 +40,7 @@ import {
   SCOPES,
   SCOPE_LABEL,
   defaultRemindAt,
+  fmt,
   formatRemindAt,
   keyScope,
   keyToAnchor,
@@ -79,6 +80,7 @@ import {
   cadenceLabel,
   isSpent,
   lastOccurrence,
+  matchingRule,
   nextOccurrence,
   ruleSentence,
 } from "../store/recurrence";
@@ -432,6 +434,12 @@ export default function EntryActionsSheet({
           createdAt: 0,
         }
       : null;
+  /** A live rule already repeating these words on this kind of page, which
+   *  the Repeat step warns about before a second one is made. */
+  const existingRepeat =
+    editRepeat && scope
+      ? matchingRule(recurrences, sheetEntry.text, scope, today)
+      : undefined;
   const endsBase: Recurrence | null = activeRule
     ? { ...activeRule, endsOn: undefined, endsAfter: undefined }
     : null;
@@ -689,6 +697,19 @@ export default function EntryActionsSheet({
 
       {step === "repeat" && editRepeat !== null && (
         <>
+          {existingRepeat && (
+            <div style={S.sheetWarn} role="status">
+              “{existingRepeat.text}” already{" "}
+              {ruleSentence(existingRepeat, today)} (set up{" "}
+              {fmt(new Date(existingRepeat.createdAt), {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })}
+              ). Starting another puts two copies on every page where both
+              repeats land.
+            </div>
+          )}
           <div style={S.formLbl}>Repeat this entry</div>
           <div
             style={{
@@ -783,7 +804,7 @@ export default function EntryActionsSheet({
             onClick={saveRepeat}
             disabled={endsError !== null}
           >
-            Start repeating
+            {existingRepeat ? "Start a second repeat" : "Start repeating"}
           </button>
         </>
       )}

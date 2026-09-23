@@ -17,6 +17,7 @@ import {
   endClause,
   isSpent,
   lastOccurrence,
+  matchingRule,
   materialiseRecurrences,
   occurrenceKey,
   occurrencesThrough,
@@ -54,6 +55,29 @@ const rule = (over: Partial<Recurrence> = {}): Recurrence => ({
 });
 
 const TODAY = "2026-08-26";
+
+describe("a repeat that already makes these words", () => {
+  test("matches on the words, whatever their case, accents or spacing", () => {
+    const r = rule({ text: "Café  run" });
+    expect(matchingRule([r], " cafe  RUN ", "day", TODAY)).toBe(r);
+    expect(matchingRule([r], "cafe run twice", "day", TODAY)).toBeUndefined();
+  });
+
+  test("only on the kind of page the new repeat would land on", () => {
+    expect(matchingRule([rule()], "Water the plants", "week", TODAY)).toBeUndefined();
+  });
+
+  test("not once it has stopped or run out, since it makes nothing more", () => {
+    expect(matchingRule([rule({ endedAt: 1 })], "Water the plants", "day", TODAY)).toBeUndefined();
+    expect(
+      matchingRule([rule({ endsOn: "2026-07-01" })], "Water the plants", "day", TODAY)
+    ).toBeUndefined();
+  });
+
+  test("and empty words match nothing", () => {
+    expect(matchingRule([rule({ text: "" })], "  ", "day", TODAY)).toBeUndefined();
+  });
+});
 
 describe("counting occurrences", () => {
   test("the anchor is the first one, not the one before them", () => {
