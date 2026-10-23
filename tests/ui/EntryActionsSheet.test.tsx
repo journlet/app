@@ -32,6 +32,9 @@ vi.mock("../../src/store/journal", () => ({
 vi.mock("../../src/store/recurrence", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/store/recurrence")>()),
   nextOccurrence: vi.fn(() => "2026-08-01"),
+  // A write over the journal, so mocked like the journal's own mutators; the
+  // time-of-day and label helpers beside it stay real (23 October 2026).
+  applySeriesReminder: vi.fn(() => []),
 }));
 vi.mock("../../src/store/reminders", () => ({
   notificationPermission: vi.fn(() => "granted"),
@@ -53,6 +56,7 @@ import {
   toggleStruck,
   toggleThread,
 } from "../../src/store/journal";
+import { applySeriesReminder } from "../../src/store/recurrence";
 
 afterEach(() => {
   cleanup();
@@ -976,5 +980,174 @@ describe("Type step", () => {
       (screen.getByRole("button", { name: "Signifiers…" }) as HTMLButtonElement)
         .disabled
     ).toBe(false);
+  });
+});
+
+// Reminders on repeating items (23 October 2026, requirements FR1). Changing a
+// reminder on an occurrence of a live repeat asks whether it is for this entry
+// or the whole repeating item, and writes nothing until one is picked.
+describe("reminder on a repeating entry", () => {
+  const occurrence: Entry = { ...openTask, recurrenceId: "r1" };
+  const dailyRule: Recurrence = {
+    id: "r1",
+    text: "write report",
+    type: "task",
+    priority: false,
+    everyN: 1,
+    unit: "day",
+    pageScope: "day",
+    anchor: "2026-07-20",
+    materialisedThrough: "2026-07-24",
+    createdAt: 0,
+  };
+  const eveningBefore = new Date(2026, 6, 23, 21, 0).getTime();
+  const saveAt = (value: string) => {
+    openRemind();
+    typeInto("Reminder date and time", value);
+    fireEvent.click(screen.getByRole("button", { name: "Save reminder" }));
+  };
+
+  test("saving on an occurrence asks first and writes nothing yet", () => {
+    const props = setup({ sheetEntry: occurrence, recurrences: [dailyRule] });
+    saveAt("2026-07-23T21:00");
+    expect(screen.getByTestId("remind-scope-entry")).toBeTruthy();
+    expect(screen.getByTestId("remind-scope-series")).toBeTruthy();
+    expect(setReminder).not.toHaveBeenCalled();
+    expect(applySeriesReminder).not.toHaveBeenCalled();
+    expect(props.closeSheet).not.toHaveBeenCalled();
+  });
+
+  test("Only this entry writes this entry's reminder and nothing else", async () => {
+    const props = setup({ sheetEntry: occurrence, recurrences: [dailyRule] });
+    saveAt("2026-07-23T21:00");
+    fireEvent.click(screen.getByTestId("remind-scope-entry"));
+    await vi.waitFor(() => expect(props.closeSheet).toHaveBeenCalledTimes(1));
+    expect(setReminder).toHaveBeenCalledWith("e1", eveningBefore);
+    expect(applySeriesReminder).not.toHaveBeenCalled();
+  });
+
+  test("the whole repeating item applies the time of day from this page on", async () => {
+    const props = setup({ sheetEntry: occurrence, recurrences: [dailyRule] });
+    saveAt("2026-07-23T21:00");
+    fireEvent.click(screen.getByTestId("remind-scope-series"));
+    await vi.waitFor(() => expect(props.closeSheet).toHaveBeenCalledTimes(1));
+    expect(applySeriesReminder).toHaveBeenCalledWith(dailyRule, {
+      from: "2026-07-24",
+      via: "entry",
+      actedOnId: "e1",
+      time: "21:00",
+    });
+    expect(setReminder).not.toHaveBeenCalled();
+  });
+
+  test("the whole-item button names the time and the day it lands on", () => {
+    setup({ sheetEntry: occurrence, recurrences: [dailyRule] });
+    saveAt("2026-07-23T21:00");
+    expect(screen.getByTestId("remind-scope-series").textContent).toBe(
+      "The whole repeating item — 21:00 on each occurrence's day from here on"
+    );
+  });
+
+  test("on a week page the button says it lands on each Monday", () => {
+    setup({
+      sheet: { scope: "week", pk: "2026-W30", id: "e1" },
+      sheetEntry: { ...occurrence, pageKey: "2026-W30" },
+      recurrences: [
+        {
+          ...dailyRule,
+          unit: "week",
+          pageScope: "week",
+          materialisedThrough: "2026-W30",
+        },
+      ],
+    });
+    saveAt("2026-07-22T18:30");
+    expect(screen.getByTestId("remind-scope-series").textContent).toBe(
+      "The whole repeating item — 18:30 each Monday from here on"
+    );
+  });
+
+  test("removing on an occurrence offers the same choice", async () => {
+    const props = setup({
+      sheetEntry: { ...occurrence, remindAt: eveningBefore },
+      recurrences: [dailyRule],
+    });
+    openRemind();
+    fireEvent.click(screen.getByRole("button", { name: "Remove reminder" }));
+    expect(setReminder).not.toHaveBeenCalled();
+    expect(screen.getByTestId("remind-scope-series").textContent).toBe(
+      "The whole repeating item — no reminder from here on"
+    );
+    fireEvent.click(screen.getByTestId("remind-scope-series"));
+    await vi.waitFor(() => expect(props.closeSheet).toHaveBeenCalledTimes(1));
+    expect(applySeriesReminder).toHaveBeenCalledWith(
+      dailyRule,
+      expect.objectContaining({ time: null, actedOnId: "e1" })
+    );
+  });
+
+  test("Back from the choice writes nothing and returns to the time", () => {
+    const props = setup({ sheetEntry: occurrence, recurrences: [dailyRule] });
+    saveAt("2026-07-23T21:00");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.queryByTestId("remind-scope-series")).toBeNull();
+    expect(
+      (screen.getByLabelText("Reminder date and time") as HTMLInputElement)
+        .value
+    ).toBe("2026-07-23T21:00");
+    expect(setReminder).not.toHaveBeenCalled();
+    expect(applySeriesReminder).not.toHaveBeenCalled();
+    expect(props.closeSheet).not.toHaveBeenCalled();
+  });
+
+  test("an entry that is not an occurrence of a live repeat saves directly", async () => {
+    for (const over of [
+      { sheetEntry: openTask },
+      // a migrated copy carries the rule's id but is not its occurrence
+      {
+        sheetEntry: { ...occurrence, migratedFrom: "e0" },
+        recurrences: [dailyRule],
+      },
+      // a spent repeat has nothing left to reach
+      { sheetEntry: occurrence, recurrences: [{ ...dailyRule, endedAt: 1 }] },
+    ]) {
+      const props = setup(over);
+      saveAt("2026-07-24T10:00");
+      expect(screen.queryByTestId("remind-scope-series")).toBeNull();
+      await vi.waitFor(() => expect(props.closeSheet).toHaveBeenCalledTimes(1));
+      cleanup();
+    }
+    expect(setReminder).toHaveBeenCalledTimes(3);
+    expect(applySeriesReminder).not.toHaveBeenCalled();
+  });
+
+  test("a whole-item change the journal refuses is said, not swallowed", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(applySeriesReminder).mockImplementationOnce(() => {
+      throw new Error("e1 is not an occurrence of rule r1");
+    });
+    const props = setup({ sheetEntry: occurrence, recurrences: [dailyRule] });
+    saveAt("2026-07-23T21:00");
+    fireEvent.click(screen.getByTestId("remind-scope-series"));
+    expect(
+      (await screen.findByRole("alert")).textContent
+    ).toMatch(/nothing was saved/);
+    expect(props.closeSheet).not.toHaveBeenCalled();
+    err.mockRestore();
+  });
+
+  test("a week repeat keeps its reminder time and reminds on the Monday", () => {
+    setup({ sheet: { scope: "week", pk: "2026-W30", id: "e1" } });
+    openRepeat();
+    typeInto("Reminder time for each occurrence", "09:00");
+    fireEvent.click(screen.getByRole("button", { name: "Start repeating" }));
+    expect(addRecurrence).toHaveBeenCalledWith(
+      expect.objectContaining({ pageScope: "week", remindTime: "09:00" })
+    );
+    // Monday 20 July 2026, the first day of ISO week 30
+    expect(setReminder).toHaveBeenCalledWith(
+      "e1",
+      new Date(2026, 6, 20, 9, 0).getTime()
+    );
   });
 });

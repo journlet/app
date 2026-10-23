@@ -77,12 +77,16 @@ import {
   tagEntryRecurrence,
 } from "../store/journal";
 import {
+  applySeriesReminder,
   cadenceLabel,
   isSpent,
   lastOccurrence,
   matchingRule,
   nextOccurrence,
+  remindAtForPeriod,
+  remindTimeOf,
   ruleSentence,
+  seriesTimeLabel,
 } from "../store/recurrence";
 import {
   notificationPermission,
@@ -180,6 +184,18 @@ export default function EntryActionsSheet({
   /** draft for the "when it ends" step (spec §11 Q17) */
   const [editEnds, setEditEnds] = useState<EditEnds | null>(null);
   const [editRemind, setEditRemind] = useState<string | null>(null);
+  /**
+   * The reminder change waiting on "this entry or the whole repeating item?"
+   * (23 October 2026). Set instead of writing when the entry is an occurrence
+   * of a live repeat; `at` is the instant chosen, or null for a removal. Nothing
+   * is written until one of the two is picked, so leaving saves nothing.
+   */
+  const [remindChoice, setRemindChoice] = useState<{
+    at: number | null;
+  } | null>(null);
+  /** Shown when a whole-item change was refused because the journal changed
+   *  under the step, rather than the tap appearing to do nothing. */
+  const [remindRefused, setRemindRefused] = useState<string | null>(null);
   // Thread-to-a-page: null = closed, otherwise the current filter text (spec
   // §4.4). A sub-view rather than inline buttons so the length doesn't grow with
   // the number of collections.
@@ -264,11 +280,12 @@ export default function EntryActionsSheet({
     const scope = keyScope(sheet.pk);
     if (!scope) return; // no recurrence on collections (no timeline to walk)
     const n = Math.max(1, parseInt(editRepeat.n, 10) || 1);
-    // Timed reminders only apply to day-scope recurrences
-    const time =
-      scope === "day" && /^\d{2}:\d{2}$/.test(editRepeat.time)
-        ? editRepeat.time
-        : undefined;
+    // Every scope since 23 October 2026: a week, month or year repeat reminds
+    // on its period's first day (remindAtForPeriod). Until then the time was
+    // dropped here for anything but a day page, silently.
+    const time = /^\d{2}:\d{2}$/.test(editRepeat.time)
+      ? editRepeat.time
+      : undefined;
     // The end set in the same step, if any (spec §11 Q17). Stored as the form
     // it was given in: a count is not turned into the date it implies, since
     // "ten of these" and "nothing after September" are different statements.
@@ -298,18 +315,13 @@ export default function EntryActionsSheet({
           : undefined,
     });
     tagEntryRecurrence(sheet.id, rule.id);
-    if (time && !sheetEntry.remindAt) {
-      const [hh, mm] = time.split(":").map(Number);
-      const d = new Date(sheet.pk + "T00:00");
-      const ts = new Date(
-        d.getFullYear(),
-        d.getMonth(),
-        d.getDate(),
-        hh,
-        mm
-      ).getTime();
-      setReminder(sheet.id, ts);
-    }
+    // The same instant the materialiser gives every later occurrence, from the
+    // same function, so the first one cannot disagree with the rest.
+    const ts =
+      time && !sheetEntry.remindAt && repeatBase
+        ? remindAtForPeriod({ ...repeatBase, remindTime: time }, sheet.pk)
+        : undefined;
+    if (ts !== undefined) setReminder(sheet.id, ts);
     closeSheet();
   };
 
@@ -328,9 +340,60 @@ export default function EntryActionsSheet({
       Number(m[5])
     ).getTime();
     if (Number.isNaN(ts)) return;
-    if (notificationPermission() === "default")
+    // An occurrence of a live repeat asks first: see writeReminder.
+    if (seriesRule) {
+      setRemindRefused(null);
+      setRemindChoice({ at: ts });
+      return;
+    }
+    await writeReminder(ts, "entry");
+  };
+
+  const removeReminder = () => {
+    if (seriesRule) {
+      setRemindRefused(null);
+      setRemindChoice({ at: null });
+      return;
+    }
+    void writeReminder(null, "entry");
+  };
+
+  /**
+   * Write a reminder to this entry only, or to the whole repeating item from
+   * this occurrence onward (23 October 2026, requirements FR1 and FR2).
+   *
+   * The whole-item write keeps the time of day and moves it onto each
+   * occurrence's own day, so a reminder set for the evening before becomes
+   * 21:00 on the day; the button that picks it says so before anything is
+   * saved. Which existing occurrences follow is applySeriesReminder's call.
+   * It throws only when the journal changed while the step was open (the
+   * occurrence went, say), and that is said in place rather than swallowed.
+   */
+  const writeReminder = async (
+    at: number | null,
+    reach: "entry" | "series"
+  ): Promise<void> => {
+    if (at !== null && notificationPermission() === "default")
       await requestNotificationPermission();
-    setReminder(sheet.id, ts);
+    if (reach === "entry" || !seriesRule) {
+      setReminder(sheet.id, at);
+      closeSheet();
+      return;
+    }
+    try {
+      applySeriesReminder(seriesRule, {
+        from: sheet.pk,
+        via: "entry",
+        actedOnId: sheet.id,
+        time: at === null ? null : remindTimeOf(at),
+      });
+    } catch (err) {
+      console.error("journlet series reminder:", err);
+      setRemindRefused(
+        "The repeating item changed while this was open, so nothing was saved. Try again."
+      );
+      return;
+    }
     closeSheet();
   };
 
@@ -379,6 +442,12 @@ export default function EntryActionsSheet({
   // One way back from every step, so the header button means the same thing
   // wherever you are: leave this step, or close the view if you are at the top.
   const back = () => {
+    // The this-entry-or-whole-item choice is a step within Reminder, so Back
+    // returns to the time it was asked about rather than past it.
+    if (remindChoice) {
+      setRemindChoice(null);
+      return;
+    }
     setEditText(null);
     setEditRepeat(null);
     setEditEnds(null);
@@ -414,6 +483,20 @@ export default function EntryActionsSheet({
   // the note below says so rather than leaving the row silent (spec §11 Q17).
   const activeRule = rule && !isSpent(rule, today) ? rule : undefined;
   const spentRule = rule && isSpent(rule, today) ? rule : undefined;
+  /** The repeat a reminder change here could reach as a whole: only from the
+   *  rule's own occurrence, and only while it is live. A migrated copy carries
+   *  the rule's id for provenance but is not an occurrence (see the head of
+   *  store/recurrence.ts), so it keeps the single-step reminder. */
+  const seriesRule =
+    activeRule && !sheetEntry.migratedFrom ? activeRule : undefined;
+  /** "21:00 on each occurrence's day", "09:00 each Monday": what the
+   *  whole-item button promises, named before it is tapped (review R-02). */
+  const seriesWhen = (at: number): string => {
+    const time = remindTimeOf(at);
+    if (!seriesRule || seriesRule.pageScope === "day")
+      return `${time} on each occurrence's day`;
+    return seriesTimeLabel({ ...seriesRule, remindTime: time }) ?? time;
+  };
 
   const scope = keyScope(sheet.pk);
   /** The rule the Repeat step is about to make, so its Ends control can resolve
@@ -762,22 +845,24 @@ export default function EntryActionsSheet({
               )}
             </div>
           </div>
-          {keyScope(sheet.pk) === "day" && (
-            <>
-              <div style={S.formLbl}>
-                Reminder time on each occurrence (optional)
-              </div>
-              <input
-                type="time"
-                value={editRepeat.time}
-                onChange={(ev) =>
-                  setEditRepeat({ ...editRepeat, time: ev.target.value })
-                }
-                style={{ ...S.sheetInput, maxWidth: 160 }}
-                aria-label="Reminder time for each occurrence"
-              />
-            </>
-          )}
+          {/* Every scope since 23 October 2026; a week, month or year
+              occurrence is reminded on its period's first day. */}
+          <div style={S.formLbl}>
+            {keyScope(sheet.pk) === "day"
+              ? "Reminder time on each occurrence (optional)"
+              : `Reminder time on the first day of each ${keyScope(
+                  sheet.pk
+                )} (optional)`}
+          </div>
+          <input
+            type="time"
+            value={editRepeat.time}
+            onChange={(ev) =>
+              setEditRepeat({ ...editRepeat, time: ev.target.value })
+            }
+            style={{ ...S.sheetInput, maxWidth: 160 }}
+            aria-label="Reminder time for each occurrence"
+          />
           <p style={S.subLede}>
             Starting from this entry's page, a fresh copy appears{" "}
             {cadenceLabel(
@@ -839,7 +924,42 @@ export default function EntryActionsSheet({
         </>
       )}
 
-      {step === "remind" && editRemind !== null && (
+      {step === "remind" && editRemind !== null && remindChoice && (
+        <>
+          <p style={S.subLede}>
+            This entry repeats.{" "}
+            {remindChoice.at === null
+              ? "Remove the reminder from this entry only, or from the whole repeating item from here on?"
+              : "Set this reminder on this entry only, or on the whole repeating item from here on?"}{" "}
+            Any occurrence with a reminder of its own keeps it.
+          </p>
+          {remindRefused && (
+            <div style={S.sheetWarn} role="alert">
+              {remindRefused}
+            </div>
+          )}
+          <button
+            className="sheetBtn"
+            data-testid="remind-scope-entry"
+            onClick={() => void writeReminder(remindChoice.at, "entry")}
+          >
+            Only this entry
+          </button>
+          <button
+            className="sheetBtn"
+            data-testid="remind-scope-series"
+            onClick={() => void writeReminder(remindChoice.at, "series")}
+          >
+            {remindChoice.at === null
+              ? "The whole repeating item — no reminder from here on"
+              : `The whole repeating item — ${seriesWhen(
+                  remindChoice.at
+                )} from here on`}
+          </button>
+        </>
+      )}
+
+      {step === "remind" && editRemind !== null && !remindChoice && (
         <>
           <div style={S.formLbl}>Remind me at</div>
           <input
@@ -864,13 +984,7 @@ export default function EntryActionsSheet({
             Save reminder
           </button>
           {sheetEntry.remindAt && (
-            <button
-              className="sheetBtn isDanger"
-              onClick={() => {
-                setReminder(sheet.id, null);
-                closeSheet();
-              }}
-            >
+            <button className="sheetBtn isDanger" onClick={removeReminder}>
               Remove reminder
             </button>
           )}
