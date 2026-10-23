@@ -9,18 +9,29 @@
 // overflowing a phone. Its draft is local because nothing outside this sheet
 // outlives it — unlike the entry view's, which App holds because the row that
 // opens it is one of sixteen.
+//
+// A second step since 23 October 2026 (requirements FR3): the repeat's
+// reminder, shown here and changeable from today's occurrence onward. Same
+// shape as the end step, for the same reason.
 
 import { useState } from "react";
 import { GLYPH } from "../lib/types";
 import type { Recurrence } from "../lib/types";
-import { pageLabel } from "../lib/dates";
+import { DEFAULT_REMIND_HOUR, pageLabel, periodKey } from "../lib/dates";
 import { endRecurrence, setRecurrenceEnd } from "../store/journal";
 import {
+  applySeriesReminder,
   cadenceLabel,
+  isSpent,
   lastOccurrence,
   ruleSentence,
+  seriesTimeLabel,
   skipOccurrence,
 } from "../store/recurrence";
+import {
+  notificationPermission,
+  requestNotificationPermission,
+} from "../store/reminders";
 import EndsForm, {
   endsDraftFor,
   endsSaveLabel,
@@ -46,10 +57,51 @@ export default function RuleActionsSheet({
   const [ends, setEnds] = useState<EditEnds | null>(null);
   const base: Recurrence = { ...rule, endsOn: undefined, endsAfter: undefined };
   const endsRes = ends ? resolveEnds(base, ends, today) : null;
+  /** the reminder time being chosen, "HH:MM"; null while the step is closed */
+  const [remind, setRemind] = useState<string | null>(null);
+  const [remindRefused, setRemindRefused] = useState<string | null>(null);
+  const remindLabel = seriesTimeLabel(rule);
+  // A stopped or spent repeat makes nothing more, so a reminder for it would
+  // reach nothing: it is shown, but not offered for change.
+  const live = !isSpent(rule, today);
+  const timeIsValid =
+    remind !== null && /^([01]\d|2[0-3]):[0-5]\d$/.test(remind);
+
+  /**
+   * Change the repeat's reminder from the current period on (requirements FR3).
+   * Today's occurrence is updated if it is open and follows the repeat; earlier
+   * pages and any occurrence with a reminder of its own are left alone, which
+   * is applySeriesReminder's rule rather than this sheet's. A refusal (the rule
+   * went while the step was open) is said in place rather than swallowed.
+   */
+  const saveRemind = async (time: string | null) => {
+    if (time !== null && notificationPermission() === "default")
+      await requestNotificationPermission();
+    try {
+      applySeriesReminder(rule, {
+        from: periodKey(rule.pageScope, today),
+        via: "settings",
+        time,
+      });
+    } catch (err) {
+      console.error("journlet series reminder:", err);
+      setRemindRefused(
+        "That reminder could not be saved because the repeat changed. Try again."
+      );
+      return;
+    }
+    onClose();
+  };
 
   return (
     <BottomSheet
-      label={ends ? "When this repeat ends" : "Repeating entry actions"}
+      label={
+        ends
+          ? "When this repeat ends"
+          : remind !== null
+            ? "Reminder for this repeat"
+            : "Repeating entry actions"
+      }
       onClose={onClose}
     >
       <div style={S.sheetGroupLabel}>Repeating entry</div>
@@ -72,8 +124,64 @@ export default function RuleActionsSheet({
           </span>
         </span>
       </div>
+      <p style={S.subLede} data-testid="rule-reminder-current">
+        {remindLabel ? `Reminder: ${remindLabel}` : "No reminder"}
+      </p>
 
-      {ends ? (
+      {remind !== null ? (
+        <>
+          <div style={S.formLbl}>
+            Remind me at, from{" "}
+            {pageLabel(periodKey(rule.pageScope, today))} on
+          </div>
+          <input
+            type="time"
+            value={remind}
+            onChange={(ev) => setRemind(ev.target.value)}
+            style={{ ...S.sheetInput, maxWidth: 160 }}
+            aria-label="Reminder time for this repeat"
+            data-testid="rule-reminder-time"
+          />
+          <p style={S.subLede}>
+            {rule.pageScope === "day"
+              ? "On the day of each occurrence."
+              : "On the first day of each one."}{" "}
+            Any occurrence with a reminder of its own keeps it.
+          </p>
+          {remindRefused && (
+            <div style={S.sheetWarn} role="alert">
+              {remindRefused}
+            </div>
+          )}
+          <button
+            className="sheetBtn"
+            disabled={!timeIsValid}
+            onClick={() => void saveRemind(remind)}
+            data-testid="rule-reminder-save"
+          >
+            Save reminder
+          </button>
+          {remindLabel && (
+            <button
+              className="sheetBtn isDanger"
+              onClick={() => void saveRemind(null)}
+              data-testid="rule-reminder-remove"
+            >
+              Remove reminder
+            </button>
+          )}
+          <button
+            className="sheetBtn isQuiet"
+            onClick={() => {
+              setRemindRefused(null);
+              setRemind(null);
+            }}
+            data-testid="rule-reminder-back"
+          >
+            Back
+          </button>
+        </>
+      ) : ends ? (
         <>
           <EndsForm
             base={base}
@@ -126,6 +234,20 @@ export default function RuleActionsSheet({
               ? "Change when it ends…"
               : "Set when it ends…"}
           </button>
+          {live && (
+            <button
+              className="sheetBtn"
+              onClick={() =>
+                setRemind(
+                  rule.remindTime ??
+                    `${String(DEFAULT_REMIND_HOUR).padStart(2, "0")}:00`
+                )
+              }
+              data-testid="rule-reminder-set"
+            >
+              {remindLabel ? "Change reminder…" : "Set reminder…"}
+            </button>
+          )}
           <button
             className="sheetBtn"
             onClick={() => {

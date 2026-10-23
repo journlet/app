@@ -106,7 +106,18 @@ export interface Recurrence {
   pageScope: Scope;
   /** first occurrence day (YYYY-MM-DD); a day inside the first period */
   anchor: string;
-  /** optional reminder time for each occurrence, "HH:MM" */
+  /**
+   * Optional reminder time for each occurrence, "HH:MM". Day repeats remind on
+   * the occurrence's day; week, month and year repeats on the period's first day
+   * (the Monday, the 1st, 1 January). Editable after creation, from an
+   * occurrence or from the rule's own settings (23 October 2026).
+   *
+   * Changing it reaches occurrences already in the journal only through
+   * applySeriesReminder in store/recurrence.ts, which leaves earlier pages and
+   * any occurrence carrying a reminder of its own alone. Versions before
+   * 23 October 2026 read it on day repeats only, which is why the week, month
+   * and year use is safe for them: they simply give those occurrences nothing.
+   */
   remindTime?: string;
   /** occurrences up to and including this day already exist */
   materialisedThrough: string;

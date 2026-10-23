@@ -1,0 +1,14 @@
+{
+  "stage": "code-generation",
+  "version": 1,
+  "writes": [
+    { "path": "src/lib/types.ts" },
+    { "path": "src/store/journal.ts" },
+    { "path": "src/store/recurrence.ts" },
+    { "path": "src/ui/EntryActionsSheet.tsx" },
+    { "path": "src/ui/RuleActionsSheet.tsx" },
+    { "path": "tests/seriesReminders.test.ts" },
+    { "path": "tests/ui/EntryActionsSheet.test.tsx" },
+    { "path": "tests/ui/RuleActionsSheet.test.tsx" }
+  ]
+}

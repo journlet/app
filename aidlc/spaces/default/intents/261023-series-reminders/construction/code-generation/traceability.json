@@ -1,0 +1,169 @@
+{
+  "stage": "code-generation",
+  "upstream_ids": [
+    "AC1.1",
+    "AC1.2",
+    "AC1.3",
+    "AC1.4",
+    "AC1.5",
+    "AC2.1",
+    "AC2.2",
+    "AC2.3",
+    "AC2.4",
+    "AC3.1",
+    "AC3.2",
+    "AC3.3",
+    "AC3.4",
+    "AC4.1",
+    "AC4.2",
+    "AC4.3",
+    "AC4.4",
+    "AC5.1",
+    "AC5.2",
+    "AC5.3",
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR4",
+    "NFR5",
+    "NFR6",
+    "NFR7"
+  ],
+  "coverage": [
+    {
+      "id": "AC1.1",
+      "status": "OK",
+      "target": "tests/ui/EntryActionsSheet.test.tsx"
+    },
+    {
+      "id": "AC1.2",
+      "status": "OK",
+      "target": "tests/ui/EntryActionsSheet.test.tsx"
+    },
+    {
+      "id": "AC1.3",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC1.4",
+      "status": "OK",
+      "target": "tests/ui/EntryActionsSheet.test.tsx"
+    },
+    {
+      "id": "AC1.5",
+      "status": "OK",
+      "target": "tests/ui/EntryActionsSheet.test.tsx"
+    },
+    {
+      "id": "AC2.1",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC2.2",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC2.3",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC2.4",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC3.1",
+      "status": "OK",
+      "target": "tests/ui/RuleActionsSheet.test.tsx"
+    },
+    {
+      "id": "AC3.2",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC3.3",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC3.4",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC4.1",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC4.2",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC4.3",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC4.4",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC5.1",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC5.2",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "AC5.3",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "src/store/reminders.ts"
+    },
+    {
+      "id": "NFR2",
+      "status": "OK",
+      "target": "src/store/recurrence.ts"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "src/lib/types.ts"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "src/store/reminders.ts"
+    },
+    {
+      "id": "NFR5",
+      "status": "Deferred",
+      "target": "Single-device case met: the series write and the materialiser share one thread and the write is one doc.transact (src/store/recurrence.ts). The cross-device race (a series change meeting another device's materialisation of the same period) can leave two twins with different remindAt, which carriesItsOwn deliberately keeps; changing dedupe would put completed work at risk (18 August 2026). Recorded as accepted risk D8 in code-summary.md."
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "tests/seriesReminders.test.ts"
+    },
+    {
+      "id": "NFR7",
+      "status": "OK",
+      "target": "src/store/sync.ts"
+    }
+  ]
+}

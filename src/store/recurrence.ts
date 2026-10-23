@@ -28,7 +28,15 @@
 // occurrence onto the twin it keeps, and refuses to delete a twin that carries
 // anything else of its own.
 
-import { dkey, endLabel, periodKey, todayKey, toDate } from "../lib/dates";
+import {
+  dkey,
+  endLabel,
+  keyScope,
+  keyToAnchor,
+  periodKey,
+  todayKey,
+  toDate,
+} from "../lib/dates";
 import { normalise } from "../lib/search";
 import type {
   Entry,
@@ -46,6 +54,8 @@ import {
   readRecurrences,
   removeEntry,
   REMOTE_ORIGIN,
+  setRecurrenceRemindTime,
+  setReminder,
 } from "./journal";
 
 const MAX_CATCHUP = 100; // occurrences per rule per pass — safety valve
@@ -262,13 +272,141 @@ export const skipOccurrence = (rule: Recurrence, occKey: string): void => {
   });
 };
 
-const remindAtFor = (r: Recurrence, dayKey: string): number | undefined => {
-  if (!r.remindTime) return undefined;
+/**
+ * The reminder instant a rule gives its occurrence on one page, or undefined
+ * when the rule has no (or an unreadable) reminder time.
+ *
+ * Until 23 October 2026 only day repeats had one, and the week, month and year
+ * occurrences got nothing because "a week has no single clock time". It has a
+ * first day, though, and that is where defaultRemindAt in lib/dates.ts already
+ * puts a one-off reminder on those pages: the Monday, the 1st, 1 January. The
+ * series reminder now goes to the same place, so the two can never disagree
+ * about where a week begins.
+ *
+ * Shared by the materialiser, the repeat sheet and applySeriesReminder below,
+ * because "does this occurrence follow the series?" is answered by comparing
+ * against exactly this value, and two copies of it would drift.
+ */
+export const remindAtForPeriod = (
+  r: Recurrence,
+  pageKey: string
+): number | undefined => {
+  if (!r.remindTime || !keyScope(pageKey)) return undefined;
   const m = r.remindTime.match(/^(\d{2}):(\d{2})$/);
   if (!m) return undefined;
-  const d = toDate(dayKey);
+  const d = toDate(keyToAnchor(pageKey));
   d.setHours(Number(m[1]), Number(m[2]), 0, 0);
   return d.getTime();
+};
+
+/** The time of day of a reminder instant, as "HH:MM". This is how an entry
+ *  reminder becomes a series one: a reminder set for the evening before keeps
+ *  its 21:00 and moves onto each occurrence's own day (requirements FR2.2). */
+export const remindTimeOf = (remindAt: number): string => {
+  const d = new Date(remindAt);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(
+    d.getMinutes()
+  ).padStart(2, "0")}`;
+};
+
+const DAY_OF_PERIOD: Record<Recurrence["pageScope"], string> = {
+  day: "",
+  week: "each Monday",
+  month: "on the 1st",
+  year: "on 1 January",
+};
+
+/**
+ * The series reminder in words, for the sheets: "08:30 each day", "09:00 each
+ * Monday", "09:00 on the 1st", "09:00 on 1 January". Undefined when there is
+ * none, so the caller says "No reminder" in its own words. A day-page rule that
+ * does not repeat daily says so rather than claiming every day.
+ */
+export const seriesTimeLabel = (r: Recurrence): string | undefined => {
+  if (!r.remindTime || !/^\d{2}:\d{2}$/.test(r.remindTime)) return undefined;
+  if (r.pageScope !== "day")
+    return `${r.remindTime} ${DAY_OF_PERIOD[r.pageScope]}`;
+  return r.unit === "day" && r.everyN === 1
+    ? `${r.remindTime} each day`
+    : `${r.remindTime} on each day it repeats`;
+};
+
+export interface SeriesReminderChange {
+  /** the first page the change reaches, in the rule's own page scope */
+  from: string;
+  /** an occurrence's sheet, or the repeating item's own settings */
+  via: "entry" | "settings";
+  /** the occurrence acted on; required, and updated whatever its state, when
+   *  via is "entry" */
+  actedOnId?: string;
+  /** "HH:MM", or null to remove the series reminder */
+  time: string | null;
+}
+
+/**
+ * Change a repeating item's reminder from one page onward (23 October 2026).
+ *
+ * The rule's `remindTime` is the whole of the stored change, so occurrences not
+ * made yet pick it up when the materialiser creates them, on every device, and
+ * an older version still reads it on day repeats (requirements NFR3). Nothing
+ * records where the change took effect. It does not need to: the materialiser
+ * only ever makes the current period's occurrence, so the only ones already in
+ * the journal on or after `from` are the acted-on one and at most the current
+ * period's, and those are updated here, in the same transaction as the rule.
+ * Earlier occurrences keep the `remindAt` they already hold.
+ *
+ * Which existing occurrences move is decided by comparison, not by a marker
+ * (requirements FR5.3): one follows the series when its `remindAt` is what the
+ * rule as it stood before this change gives its page, and no reminder follows a
+ * series that had none. Anything else is the person's own and stays put. The
+ * acted-on occurrence is the exception, because the person acted on it
+ * directly, so it changes whatever its state. Otherwise only open occurrences
+ * move: a completed or struck one is finished and a reminder on it is history.
+ * A migrated copy is never touched, for the reason at the head of this file.
+ *
+ * Returns the ids of the occurrences whose reminder was written.
+ */
+export const applySeriesReminder = (
+  rule: Recurrence,
+  change: SeriesReminderChange
+): string[] => {
+  const { from, via, actedOnId, time } = change;
+  // Validated before anything is written, so a bad call changes nothing.
+  if (time !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time))
+    throw new RangeError(`reminder time must be HH:MM, got "${time}"`);
+  if (via === "entry" && !actedOnId)
+    throw new Error("a change from an occurrence needs the occurrence's id");
+
+  // Read afresh: the caller's copy may predate a change synced since it opened.
+  const before = readRecurrences().find((r) => r.id === rule.id);
+  if (!before) {
+    console.warn(`journlet series reminder: rule ${rule.id} is gone`);
+    return [];
+  }
+  const after: Recurrence = { ...before, remindTime: time ?? undefined };
+  const occurrences = readAll().filter(
+    (e) => e.recurrenceId === before.id && !e.migratedFrom
+  );
+  if (actedOnId && !occurrences.some((e) => e.id === actedOnId))
+    throw new Error(`${actedOnId} is not an occurrence of rule ${before.id}`);
+
+  const follows = (e: Entry) =>
+    (e.remindAt ?? null) === (remindAtForPeriod(before, e.pageKey) ?? null);
+  const covered = occurrences.filter(
+    (e) =>
+      e.id === actedOnId ||
+      (e.state === "open" &&
+        (via === "entry" ? e.pageKey > from : e.pageKey >= from) &&
+        follows(e))
+  );
+
+  doc.transact(() => {
+    setRecurrenceRemindTime(before.id, time);
+    covered.forEach((e) =>
+      setReminder(e.id, remindAtForPeriod(after, e.pageKey) ?? null)
+    );
+  });
+  return covered.map((e) => e.id);
 };
 
 /**
@@ -486,10 +624,10 @@ export const materialiseRecurrences = (): void => {
             state: "open",
             pageKey: next,
             createdAt: Date.now(),
-            // Timed reminders only make sense on day pages; a week/month/year
-            // occurrence has no single clock time.
-            remindAt:
-              rule.pageScope === "day" ? remindAtFor(rule, next) : undefined,
+            // Every scope since 23 October 2026: a week, month or year
+            // occurrence is reminded on its period's first day (see
+            // remindAtForPeriod).
+            remindAt: remindAtForPeriod(rule, next),
             recurrenceId: rule.id,
           });
           existing.add(`${rule.id}:${next}`);

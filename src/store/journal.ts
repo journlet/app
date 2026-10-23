@@ -783,10 +783,11 @@ export const addRecurrence = (
  * settles that by taking the earlier of the two, identically on every device,
  * rather than this write trying to guess which one was meant.
  *
- * This is the first edit a rule has ever had. Everything else about a rule is
+ * This was the first edit a rule ever had. Everything else about a rule was
  * written once at creation, `materialisedThrough` is advanced only by the
  * materialiser, and `endedAt` is a one-way switch; an end that can be changed
- * after the fact is the reason this function exists at all.
+ * after the fact is the reason this function exists at all. The reminder time
+ * joined it on 23 October 2026 (setRecurrenceRemindTime below).
  */
 export const setRecurrenceEnd = (
   id: string,
@@ -800,6 +801,37 @@ export const setRecurrenceEnd = (
     if (end && "on" in end) m.set("endsOn", end.on);
     if (end && "after" in end)
       m.set("endsAfter", Math.max(1, Math.floor(end.after)));
+  });
+};
+
+/** "HH:MM", 00:00 to 23:59. The same shape the time input produces and the
+ *  materialiser reads, so a value that passes here always yields a reminder. */
+const REMIND_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Set or clear a rule's reminder time (23 October 2026).
+ *
+ * Only the rule: the occurrences already on pages each hold their own
+ * `remindAt`, and which of them should follow is a decision about the person's
+ * intent that belongs to applySeriesReminder in store/recurrence.ts, which
+ * calls this inside its own transaction. The key is the one rules have always
+ * had, so a version that predates this still reads the new time on day repeats.
+ *
+ * A malformed time throws rather than being stored: a rule holding "8:30" would
+ * silently give every future occurrence no reminder at all, and nothing on the
+ * page would say why.
+ */
+export const setRecurrenceRemindTime = (
+  id: string,
+  time: string | null
+): void => {
+  if (time !== null && !REMIND_TIME.test(time))
+    throw new RangeError(`reminder time must be HH:MM, got "${time}"`);
+  const m = findRecurrenceMap(id);
+  if (!m) return;
+  doc.transact(() => {
+    if (time === null) m.delete("remindTime");
+    else m.set("remindTime", time);
   });
 };
 

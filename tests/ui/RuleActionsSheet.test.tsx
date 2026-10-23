@@ -13,10 +13,19 @@ vi.mock("../../src/store/journal", () => ({
 vi.mock("../../src/store/recurrence", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/store/recurrence")>()),
   skipOccurrence: vi.fn(),
+  applySeriesReminder: vi.fn(() => []),
+}));
+vi.mock("../../src/store/reminders", () => ({
+  notificationPermission: vi.fn(() => "default"),
+  requestNotificationPermission: vi.fn(() => Promise.resolve("granted")),
 }));
 
 import { endRecurrence, setRecurrenceEnd } from "../../src/store/journal";
-import { skipOccurrence } from "../../src/store/recurrence";
+import {
+  applySeriesReminder,
+  skipOccurrence,
+} from "../../src/store/recurrence";
+import { requestNotificationPermission } from "../../src/store/reminders";
 
 afterEach(() => {
   cleanup();
@@ -156,5 +165,123 @@ describe("when it ends", () => {
     expect(
       screen.getByRole("button", { name: "Save when it ends" })
     ).toHaveProperty("disabled", true);
+  });
+});
+
+// The repeat's reminder (23 October 2026, requirements FR3): shown here, and
+// changed from the current period on through applySeriesReminder.
+describe("the repeat's reminder", () => {
+  const current = () => screen.getByTestId("rule-reminder-current").textContent;
+  const setTime = (value: string) =>
+    fireEvent.change(screen.getByTestId("rule-reminder-time"), {
+      target: { value },
+    });
+
+  test("shows the current reminder, or says there is none", () => {
+    setup({ ...rule, remindTime: "08:30" });
+    expect(current()).toBe("Reminder: 08:30 each day");
+    cleanup();
+    setup({ ...rule, unit: "week", pageScope: "week", remindTime: "09:00" });
+    expect(current()).toBe("Reminder: 09:00 each Monday");
+    cleanup();
+    setup();
+    expect(current()).toBe("No reminder");
+    expect(screen.getByTestId("rule-reminder-set").textContent).toBe(
+      "Set reminder…"
+    );
+  });
+
+  test("setting one applies it from today's period and closes", async () => {
+    const { onClose } = setup();
+    fireEvent.click(screen.getByTestId("rule-reminder-set"));
+    setTime("07:45");
+    fireEvent.click(screen.getByTestId("rule-reminder-save"));
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(requestNotificationPermission).toHaveBeenCalledTimes(1);
+    expect(applySeriesReminder).toHaveBeenCalledWith(rule, {
+      from: "2026-07-24",
+      via: "settings",
+      time: "07:45",
+    });
+  });
+
+  test("a week repeat changes from this week on", async () => {
+    const weekly: Recurrence = {
+      ...rule,
+      unit: "week",
+      pageScope: "week",
+      remindTime: "09:00",
+      materialisedThrough: "2026-W30",
+    };
+    const { onClose } = setup(weekly);
+    fireEvent.click(screen.getByTestId("rule-reminder-set"));
+    setTime("10:15");
+    fireEvent.click(screen.getByTestId("rule-reminder-save"));
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(applySeriesReminder).toHaveBeenCalledWith(
+      weekly,
+      expect.objectContaining({ from: "2026-W30", time: "10:15" })
+    );
+  });
+
+  test("removing it clears the repeat's reminder", async () => {
+    const withTime = { ...rule, remindTime: "08:30" };
+    const { onClose } = setup(withTime);
+    expect(screen.getByTestId("rule-reminder-set").textContent).toBe(
+      "Change reminder…"
+    );
+    fireEvent.click(screen.getByTestId("rule-reminder-set"));
+    fireEvent.click(screen.getByTestId("rule-reminder-remove"));
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(requestNotificationPermission).not.toHaveBeenCalled();
+    expect(applySeriesReminder).toHaveBeenCalledWith(withTime, {
+      from: "2026-07-24",
+      via: "settings",
+      time: null,
+    });
+  });
+
+  test("an empty or impossible time keeps Save disabled", () => {
+    setup();
+    fireEvent.click(screen.getByTestId("rule-reminder-set"));
+    const save = () =>
+      screen.getByTestId("rule-reminder-save") as HTMLButtonElement;
+    expect(save().disabled).toBe(false); // opens on 09:00
+    setTime("");
+    expect(save().disabled).toBe(true);
+    // no remove offered when there is nothing to remove
+    expect(screen.queryByTestId("rule-reminder-remove")).toBeNull();
+    fireEvent.click(save());
+    expect(applySeriesReminder).not.toHaveBeenCalled();
+  });
+
+  test("Back leaves the step without writing", () => {
+    const { onClose } = setup();
+    fireEvent.click(screen.getByTestId("rule-reminder-set"));
+    fireEvent.click(screen.getByTestId("rule-reminder-back"));
+    expect(screen.queryByTestId("rule-reminder-time")).toBeNull();
+    expect(applySeriesReminder).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test("a stopped repeat shows its reminder but offers no change", () => {
+    setup({ ...rule, remindTime: "08:30", endedAt: 1 });
+    expect(current()).toBe("Reminder: 08:30 each day");
+    expect(screen.queryByTestId("rule-reminder-set")).toBeNull();
+  });
+
+  test("a refused change is said in place and the sheet stays open", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(applySeriesReminder).mockImplementationOnce(() => {
+      throw new Error("gone");
+    });
+    const { onClose } = setup();
+    fireEvent.click(screen.getByTestId("rule-reminder-set"));
+    fireEvent.click(screen.getByTestId("rule-reminder-save"));
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /could not be saved/
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    err.mockRestore();
   });
 });
