@@ -1,0 +1,235 @@
+{
+  "stage": "code-generation",
+  "upstream_ids": [
+    "FR1.1",
+    "FR1.2",
+    "FR1.3",
+    "FR1.4",
+    "FR1.5",
+    "FR1.6",
+    "FR1.7",
+    "FR1.8",
+    "FR2.1",
+    "FR2.2",
+    "FR2.3",
+    "FR2.4",
+    "FR3.1",
+    "FR3.2",
+    "FR3.3",
+    "FR3.4",
+    "FR3.5",
+    "FR3.6",
+    "FR4.1",
+    "FR4.2",
+    "FR4.3",
+    "FR4.4",
+    "FR4.5",
+    "FR4.6",
+    "FR5.1",
+    "FR5.2",
+    "FR5.3",
+    "FR5.4",
+    "FR5.5",
+    "FR6.1",
+    "FR6.2",
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR4",
+    "NFR5",
+    "NFR6",
+    "NFR7"
+  ],
+  "coverage": [
+    {
+      "id": "FR1.1",
+      "status": "OK",
+      "target": "tests/ui/SpreadView.test.tsx"
+    },
+    {
+      "id": "FR1.2",
+      "status": "OK",
+      "target": "tests/ui/CollectionView.test.tsx"
+    },
+    {
+      "id": "FR1.3",
+      "status": "OK",
+      "target": "tests/ui/SpreadView.test.tsx"
+    },
+    {
+      "id": "FR1.4",
+      "status": "OK",
+      "target": "tests/quickTap.test.ts"
+    },
+    {
+      "id": "FR1.5",
+      "status": "OK",
+      "target": "tests/ui/SpreadView.test.tsx"
+    },
+    {
+      "id": "FR1.6",
+      "status": "OK",
+      "target": "tests/ui/SpreadView.test.tsx"
+    },
+    {
+      "id": "FR1.7",
+      "status": "Deferred",
+      "target": "Deferred: the keyboard-on-first-tap part is unproven until the post-deployment real-phone check (Step 5, skipped by the person; owner: the person at the approval gate, stage: after deployment). The in-app part (focus moved synchronously inside the tap's pointerup) is covered by tests/ui/QuickLine.test.tsx."
+    },
+    {
+      "id": "FR1.8",
+      "status": "OK",
+      "target": "src/ui/QuickLine.tsx"
+    },
+    {
+      "id": "FR2.1",
+      "status": "OK",
+      "target": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "id": "FR2.2",
+      "status": "OK",
+      "target": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "id": "FR2.3",
+      "status": "OK",
+      "target": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "id": "FR2.4",
+      "status": "OK",
+      "target": "src/ui/QuickLine.tsx"
+    },
+    {
+      "id": "FR3.1",
+      "status": "OK",
+      "target": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "id": "FR3.2",
+      "status": "OK",
+      "target": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "id": "FR3.3",
+      "status": "OK",
+      "target": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "id": "FR3.4",
+      "status": "OK",
+      "target": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "id": "FR3.5",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR3.6",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR4.1",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR4.2",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR4.3",
+      "status": "N/A",
+      "target": "N/A: no current filter (\"all\", \"tasks only\", \"open only\") can hide a new open task, so the hidden-row case cannot be reached and no test exercises it. Covered by inspection: App.logQuick shows the message whether or not the row is drawn, and leaves the filter alone. tests/ui/AppQuickLine.test.tsx checks the message and filter under \"open only\" only."
+    },
+    {
+      "id": "FR4.4",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR4.5",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR4.6",
+      "status": "OK",
+      "target": "tests/ui/UndoToast.test.tsx"
+    },
+    {
+      "id": "FR5.1",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR5.2",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR5.3",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR5.4",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "FR5.5",
+      "status": "OK",
+      "target": "tests/ui/SpreadView.test.tsx"
+    },
+    {
+      "id": "FR6.1",
+      "status": "OK",
+      "target": "tests/ui/CaptureForm.test.tsx"
+    },
+    {
+      "id": "FR6.2",
+      "status": "OK",
+      "target": "tests/ui/SpreadView.test.tsx"
+    },
+    {
+      "id": "NFR1",
+      "status": "Deferred",
+      "target": "Deferred: the on-device part (keyboard up within 0.5 s) is unproven until the post-deployment real-phone check (Step 5, skipped by the person; owner: the person at the approval gate, stage: after deployment). The in-app part (tap to focus under 0.5 s) is covered by the jsdom timing test in tests/ui/AppQuickLine.test.tsx."
+    },
+    {
+      "id": "NFR2",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "id": "NFR4",
+      "status": "Deferred",
+      "target": "Deferred: keeping the open line and its button row above the phone keyboard is checked only on a real phone. The Step 5 real-phone check was skipped by the person (no non-production sign-in) and moves to after deployment (owner: the person at the approval gate). The code path is src/ui/QuickLine.tsx (visualViewport resize, scrollIntoView)."
+    },
+    {
+      "id": "NFR5",
+      "status": "OK",
+      "target": "tests/ui/SpreadView.test.tsx"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "tests/ui/AppQuickLine.test.tsx"
+    },
+    {
+      "id": "NFR7",
+      "status": "OK",
+      "target": "vitest.config.ts"
+    }
+  ]
+}

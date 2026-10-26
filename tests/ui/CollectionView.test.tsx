@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import CollectionView from "../../src/CollectionView";
+import QuickLine from "../../src/ui/QuickLine";
 import { dkey } from "../../src/lib/dates";
 import type { Collection, Entry, Habit } from "../../src/lib/types";
 import type { EntryFilter } from "../../src/lib/filter";
@@ -236,5 +237,78 @@ describe("a list collection", () => {
     cleanup();
     setup({ collection: tracker });
     expect(screen.getByText("habit tracker")).toBeTruthy();
+  });
+});
+
+// Quick task entry on a list collection (26 October 2026, quick capture FR1.2).
+// The page hands App the collection's own page key, so a quick task lands in
+// the collection rather than on a day; a habit tracker gets no line at all.
+describe("quick task line", () => {
+  const quickLine = vi.fn(
+    (_pk: string, heading: string, emptyText: string | null) => (
+      <QuickLine
+        sectionKey="collection"
+        pageLabel={heading}
+        open={false}
+        text=""
+        emptyText={emptyText}
+        onOpen={() => {}}
+        onChangeText={() => {}}
+        onLog={() => {}}
+        onCancel={() => {}}
+        onMore={() => {}}
+      />
+    )
+  );
+  const item = (id: string, text: string): Entry => ({
+    id,
+    type: "task",
+    text,
+    priority: false,
+    state: "open",
+    pageKey: "col:c1",
+    createdAt: 1,
+  });
+
+  test("a list collection has a tap area under its entries", () => {
+    setup({
+      collection: list,
+      entries: [item("a", "Middlemarch")],
+      renderQuickLine: quickLine,
+    });
+    const tap = screen.getByTestId("quick-tap-collection");
+    // Node.compareDocumentPosition: 4 = the argument follows the reference node
+    expect(screen.getByText("Middlemarch").compareDocumentPosition(tap) & 4).toBeTruthy();
+    expect(tap.textContent).toBe("");
+  });
+
+  test("a habit tracker has none", () => {
+    setup({ collection: tracker, renderQuickLine: quickLine });
+    expect(screen.queryByTestId("quick-tap-collection")).toBeNull();
+    expect(quickLine).not.toHaveBeenCalled();
+  });
+
+  test("an empty list's \"nothing logged\" is the tap area (FR1.3)", () => {
+    setup({ collection: list, renderQuickLine: quickLine });
+    const tap = screen.getByTestId("quick-tap-collection");
+    expect(tap.tagName).toBe("BUTTON");
+    expect(tap.textContent).toBe("nothing logged");
+    expect(screen.getAllByText("nothing logged")).toHaveLength(1);
+  });
+
+  test("logs into the collection's own page, not a day's", () => {
+    setup({ collection: list, renderQuickLine: quickLine });
+    expect(quickLine).toHaveBeenCalledWith("col:c1", "Reading list", "nothing logged");
+  });
+
+  test("the tap area is named for the collection (NFR5)", () => {
+    setup({
+      collection: list,
+      entries: [item("a", "Middlemarch")],
+      renderQuickLine: quickLine,
+    });
+    expect(
+      screen.getByRole("button", { name: "Add a task to Reading list" })
+    ).toBeTruthy();
   });
 });

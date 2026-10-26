@@ -11,6 +11,7 @@ import type { EntryOrder } from "./lib/order";
 import type { EntryFilter } from "./lib/filter";
 import { GRID } from "./lib/grid";
 import { S } from "./ui/styles";
+import { colPageKey } from "./lib/types";
 import type { Collection, Entry, Habit } from "./lib/types";
 import { addHabit, toggleHabitMark } from "./store/journal";
 
@@ -63,6 +64,16 @@ interface Props {
   /** entries elsewhere referencing this collection (spec §4.4 Threading) */
   threadedHere: ReactNode;
   onDelete: () => void;
+  /** the quick task line (26 October 2026, quick capture FR1.2), for list
+   *  collections only: a habit tracker has no entries to add a task to. Given
+   *  the collection's page key and name, and its empty-state text when it has
+   *  nothing to show, which the line's tap area then wears (FR1.3). Optional:
+   *  without it the page reads exactly as it did before quick entry. */
+  renderQuickLine?: (
+    pk: string,
+    heading: string,
+    emptyText: string | null
+  ) => ReactNode;
 }
 
 export default function CollectionView({
@@ -74,12 +85,25 @@ export default function CollectionView({
   order,
   threadedHere,
   onDelete,
+  renderQuickLine,
 }: Props) {
   // Filter first, then re-read what is left in the chosen order (§4.9a):
   // ordering a page the filter has already emptied of context would move
   // rows past neighbours that are not on screen.
   const shown = applyOrder(applyFilter(entries, filter), order);
   const hidden = entries.length - shown.length;
+  const emptyText =
+    shown.length > 0
+      ? null
+      : hidden === 0
+        ? "nothing logged"
+        : `nothing matching — ${hidden} entr${
+            hidden === 1 ? "y" : "ies"
+          } hidden by the filter`;
+  const quickLine =
+    collection.kind === "list" && renderQuickLine
+      ? renderQuickLine(colPageKey(collection.id), collection.name, emptyText)
+      : null;
   const [habitName, setHabitName] = useState<string | null>(null);
 
   const submitHabit = () => {
@@ -108,16 +132,13 @@ export default function CollectionView({
 
       {collection.kind === "list" && (
         <>
-          {shown.length === 0 && (
-            <div style={ST.empty}>
-              {hidden === 0
-                ? "nothing logged"
-                : `nothing matching — ${hidden} entr${
-                    hidden === 1 ? "y" : "ies"
-                  } hidden by the filter`}
-            </div>
+          {/* With a quick line the empty-state text is its tap area, drawn
+              by the line under the list (see SpreadView for why there) */}
+          {emptyText && !quickLine && (
+            <div style={ST.empty}>{emptyText}</div>
           )}
           <ul style={S.list}>{shown.map((e) => renderEntry(e))}</ul>
+          {quickLine}
           {threadedHere}
         </>
       )}

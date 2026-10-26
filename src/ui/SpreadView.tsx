@@ -32,6 +32,26 @@ interface SpreadViewProps {
   renderScheduledRow: (row: ScheduledRow, grouped: boolean) => ReactNode;
   /** entries elsewhere referencing this page (spec §4.4 Threading) */
   renderThreadedHere: (pk: string) => ReactNode;
+  /** the quick task line for a section (26 October 2026, quick capture
+   *  option A), placed directly under the section's own entries and above
+   *  everything drawn from elsewhere (FR1.1). `heading` is what the section
+   *  reads as on screen, which names the line for screen readers and the
+   *  "Logged" message. `emptyText` is the section's empty-state text when it
+   *  has nothing to show, which the line's tap area then wears (FR1.3).
+   *  Asked for only on a current or future period (FR1.6). Optional: without
+   *  it the view reads exactly as it did before quick entry. */
+  renderQuickLine?: (
+    sc: Scope,
+    pk: string,
+    heading: string,
+    emptyText: string | null
+  ) => ReactNode;
+  /** the page an open quick line will log to, if any. The section showing
+   *  that page has its previous, next and "back to now" disabled until the
+   *  line is logged or cancelled (FR5.5, review R-01), so the page cannot
+   *  slide away from under the line. A section moved off it some other way
+   *  (a jump to an entry's page) is not locked, so the way back stays open. */
+  quickPage?: string | null;
   pastOpen: { pk: string; entry: Entry }[];
   dueItems: { pk: string; entry: Entry }[];
   days: Record<string, Entry[]>;
@@ -66,6 +86,8 @@ export default function SpreadView({
   renderEntry,
   renderScheduledRow,
   renderThreadedHere,
+  renderQuickLine,
+  quickPage = null,
   pastOpen,
   dueItems,
   days,
@@ -124,6 +146,22 @@ export default function SpreadView({
             // Filter, then re-read what is left in the chosen order (§4.9a)
             const entries = applyOrder(applyFilter(onPage, filter), order);
             const hidden = onPage.length - entries.length;
+            const heading = isCurrent ? SCOPE_LABEL[sc] : pageLabel(pk);
+            const emptyText =
+              entries.length > 0
+                ? null
+                : hidden === 0
+                  ? "nothing logged"
+                  : `nothing matching — ${hidden} entr${
+                      hidden === 1 ? "y" : "ies"
+                    } hidden by the filter`;
+            // Past pages take no new entries from here (FR1.6): no tap area,
+            // and their empty-state text stays plain text
+            const quickLine =
+              renderQuickLine && pk >= nowKeys[sc]
+                ? renderQuickLine(sc, pk, heading, emptyText)
+                : null;
+            const navLocked = quickPage === pk;
             const step = (delta: number) =>
               setAnchors((a) => ({
                 ...a,
@@ -148,9 +186,7 @@ export default function SpreadView({
             return (
               <section key={sc} style={S.section}>
                 <div style={S.sectionHead}>
-                  <h2 style={S.sectionTitle}>
-                    {isCurrent ? SCOPE_LABEL[sc] : pageLabel(pk)}
-                  </h2>
+                  <h2 style={S.sectionTitle}>{heading}</h2>
                   <span style={S.sectionSub}>
                     {isCurrent
                       ? periodSub(sc, anchors[sc])
@@ -163,6 +199,7 @@ export default function SpreadView({
                       className="miniBtn"
                       onClick={() => step(-1)}
                       aria-label={`Previous ${sc}`}
+                      disabled={navLocked}
                     >
                       ‹ <span className="navLong">previous</span>
                       <span className="navShort">prev</span>
@@ -174,6 +211,7 @@ export default function SpreadView({
                           setAnchors((a) => ({ ...a, [sc]: todayKey() }))
                         }
                         aria-label={`Back to current ${sc}`}
+                        disabled={navLocked}
                       >
                         <span className="navLong">back to now</span>
                         <span className="navShort">now</span>
@@ -183,6 +221,7 @@ export default function SpreadView({
                       className="miniBtn"
                       onClick={() => step(1)}
                       aria-label={`Next ${sc}`}
+                      disabled={navLocked}
                     >
                       next ›
                     </button>
@@ -193,19 +232,18 @@ export default function SpreadView({
                     filter is holding back. Sections that still show
                     something say nothing extra — the note under the filter
                     row already names what is hidden, and four running
-                    counts would put back the clutter the filter removes. */}
-                {entries.length === 0 && (
-                  <div style={S.sectionEmpty}>
-                    {hidden === 0
-                      ? "nothing logged"
-                      : `nothing matching — ${hidden} entr${
-                          hidden === 1 ? "y" : "ies"
-                        } hidden by the filter`}
-                  </div>
+                    counts would put back the clutter the filter removes.
+                    Where a quick line can open, the same words are its tap
+                    area instead, drawn by the line below so that it keeps
+                    one place in the tree whether or not the page is empty
+                    (and focus can come back to it after Log). */}
+                {emptyText && !quickLine && (
+                  <div style={S.sectionEmpty}>{emptyText}</div>
                 )}
                 <ul style={S.list}>
                   {entries.map((e) => renderEntry(e, pk, sc))}
                 </ul>
+                {quickLine}
                 {sc === "month" &&
                   isCurrent &&
                   (() => {

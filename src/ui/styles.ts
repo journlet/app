@@ -169,6 +169,95 @@ export const S = {
     lineHeight: `${GRID}px`,
     padding: "0 4px",
   },
+  // Quick task entry, add in place (26 October 2026, quick capture FR1.5,
+  // FR2.1 to FR2.3). The tap area is one GRID row of blank page across the
+  // whole list, so it costs no rhythm and reads as the next empty line of the
+  // journal; ui/quickTap's TAP_AREA_MIN_PX is the same 33px. Hover and focus
+  // come from the .quickTap rules in index.css (background too, so the hover
+  // can win over it), which inline styles can't do.
+  quickTap: {
+    display: "block",
+    width: "100%",
+    height: GRID,
+    border: "none",
+    borderRadius: 6,
+    padding: 0,
+    cursor: "text",
+  },
+  // The same tap area when the section is empty: it wears the empty-state
+  // text (sectionEmpty's look) and is still a full GRID row across the list,
+  // so the words are the target and so is the space after them (FR1.3)
+  quickTapEmpty: {
+    display: "block",
+    width: "100%",
+    height: GRID,
+    border: "none",
+    borderRadius: 6,
+    padding: "0 4px",
+    cursor: "text",
+    textAlign: "left",
+    color: INK_SOFT,
+    fontSize: 12.5,
+    fontStyle: "italic",
+    fontFamily: "inherit",
+    lineHeight: `${GRID}px`,
+  },
+  // The open line is built like an entry row (.entry: 4px pad, 22px bullet,
+  // 10px gap), so the "•" sits on the bullets' dot column. Opening it changes
+  // the box around the words and nothing else moves.
+  quickLine: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "0 4px",
+    height: GRID,
+  },
+  // The negative margin pulls the box out by its own padding and border, so
+  // the typed text starts where the entries' text does (FR2.1) while the box
+  // runs to the list's right edge (FR2.2). 16px rather than the entries'
+  // 15.5px: iOS zooms the page on focusing any input under 16px (see the
+  // viewport note in index.html), which would undo the alignment anyway.
+  quickInput: {
+    flex: 1,
+    minWidth: 0,
+    boxSizing: "border-box",
+    height: GRID - 4,
+    marginLeft: -9,
+    padding: "0 8px",
+    border: `1px solid ${INK}`,
+    borderRadius: 6,
+    background: "var(--surface)",
+    color: INK,
+    fontSize: 16,
+    fontFamily: "inherit",
+  },
+  // Cancel at the left, more and Log at the right, all under the text rather
+  // than the bullet (36px = 4px pad + 22px bullet + 10px gap). One GRID row,
+  // so the open line is exactly two dot rows and everything below it moves
+  // down by whole rows (FR2.3).
+  quickRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    height: GRID,
+    paddingLeft: 36,
+    paddingRight: 4,
+  },
+  quickCancel: {
+    border: "none",
+    fontSize: 13.5,
+    padding: "5px 2px",
+  },
+  quickMore: {
+    fontSize: 12,
+    padding: "5px 8px",
+    borderRadius: 6,
+  },
+  quickLog: {
+    fontSize: 13.5,
+    padding: "5px 14px",
+    borderRadius: 6,
+  },
   subGroupLabel: {
     fontSize: 11,
     textTransform: "uppercase",

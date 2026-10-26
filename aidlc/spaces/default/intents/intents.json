@@ -5,5 +5,12 @@
     "dirName": "261023-series-reminders",
     "scope": "poc",
     "status": "complete"
+  },
+  {
+    "uuid": "01a17777-32af-7a27-b132-08a5c4c05d25",
+    "slug": "quick-capture",
+    "dirName": "261026-quick-capture",
+    "scope": "quick-capture",
+    "status": "complete"
   }
 ]

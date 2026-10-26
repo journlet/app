@@ -2,6 +2,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import SpreadView from "../../src/ui/SpreadView";
+import QuickLine from "../../src/ui/QuickLine";
+import { TAP_AREA_MIN_PX } from "../../src/ui/quickTap";
 import { periodKey } from "../../src/lib/dates";
 import type { Scope } from "../../src/lib/dates";
 import type { Entry, Recurrence } from "../../src/lib/types";
@@ -296,5 +298,142 @@ describe("later this month", () => {
       laterThisMonth: [{ kind: "entry", sort: "2026-07-28", pk: "2026-07-28", entry: done }],
     });
     expect(screen.queryByText(/Later this month/)).toBeNull();
+  });
+});
+
+// Quick task entry, add in place (26 October 2026, quick capture option A).
+// The line itself is QuickLine's business and App's; what the spread owns is
+// where each section's line goes, which sections get one, and the navigation
+// it locks. The real QuickLine is drawn, closed, so the tests read the page a
+// person would.
+describe("quick task line", () => {
+  const quickLine = (
+    sc: Scope,
+    _pk: string,
+    heading: string,
+    emptyText: string | null
+  ) => (
+    <QuickLine
+      sectionKey={sc}
+      pageLabel={heading}
+      open={false}
+      text=""
+      emptyText={emptyText}
+      onOpen={() => {}}
+      onChangeText={() => {}}
+      onLog={() => {}}
+      onCancel={() => {}}
+      onMore={() => {}}
+    />
+  );
+  // Node.compareDocumentPosition: 4 = the argument follows the reference node
+  const follows = (a: Node, b: Node) => (a.compareDocumentPosition(b) & 4) !== 0;
+
+  test("sits under the section's own entries, above what is drawn from elsewhere (FR1.1)", () => {
+    const later: ScheduledRow = {
+      kind: "entry",
+      sort: "2026-07-28",
+      pk: "2026-07-28",
+      entry: { ...entry, id: "l1", text: "later on", pageKey: "2026-07-28" },
+    };
+    const monthEntry: Entry = { ...entry, id: "m1", text: "month goal", pageKey: nowKeys.month };
+    setup({
+      renderQuickLine: quickLine,
+      days: { [nowKeys.day]: [entry], [nowKeys.month]: [monthEntry] },
+      laterThisMonth: [later],
+    });
+    expect(follows(screen.getByText("on today's page"), screen.getByTestId("quick-tap-day"))).toBe(true);
+    const monthTap = screen.getByTestId("quick-tap-month");
+    expect(follows(screen.getByText("month goal"), monthTap)).toBe(true);
+    expect(follows(monthTap, screen.getByText("Later this month"))).toBe(true);
+  });
+
+  test("an empty section's \"nothing logged\" is itself the tap area (FR1.3)", () => {
+    setup({ renderQuickLine: quickLine, days: {} });
+    const tap = screen.getByTestId("quick-tap-day");
+    expect(tap.textContent).toBe("nothing logged");
+    expect(tap.tagName).toBe("BUTTON");
+    // and it is not said twice
+    expect(screen.getAllByText("nothing logged")).toHaveLength(4);
+  });
+
+  test("so is the note saying the filter is hiding everything (FR1.3)", () => {
+    const done: Entry = { ...entry, state: "done" };
+    setup({ renderQuickLine: quickLine, filter: "open", days: { [nowKeys.day]: [done] } });
+    expect(screen.getByTestId("quick-tap-day").textContent).toBe(
+      "nothing matching — 1 entry hidden by the filter"
+    );
+  });
+
+  test("a section showing a past period has none, and its empty text stays plain (FR1.6)", () => {
+    setup({
+      renderQuickLine: quickLine,
+      days: {},
+      anchors: { ...anchors, day: "2026-07-20" },
+    });
+    expect(screen.queryByTestId("quick-tap-day")).toBeNull();
+    // the other three are still current
+    expect(screen.getByTestId("quick-tap-week")).toBeTruthy();
+    // three tap areas wear the words; the past day's are plain text
+    const plain = screen
+      .getAllByText("nothing logged")
+      .filter((el) => el.tagName !== "BUTTON");
+    expect(plain).toHaveLength(1);
+  });
+
+  test("previous and next are disabled in the section with a line open, and only there (FR5.5)", () => {
+    setup({ renderQuickLine: quickLine, quickPage: nowKeys.day });
+    const disabled = (name: string) =>
+      (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
+    expect(disabled("Previous day")).toBe(true);
+    expect(disabled("Next day")).toBe(true);
+    expect(disabled("Previous week")).toBe(false);
+    expect(disabled("Next week")).toBe(false);
+  });
+
+  test("so is \"back to now\", so a future page cannot slide away from under the line (FR5.5, review R-01)", () => {
+    const tomorrow = periodKey("day", "2026-07-25");
+    setup({
+      renderQuickLine: quickLine,
+      anchors: { ...anchors, day: "2026-07-25" },
+      quickPage: tomorrow,
+    });
+    const disabled = (name: string) =>
+      (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
+    expect(disabled("Back to current day")).toBe(true);
+    expect(disabled("Previous day")).toBe(true);
+    expect(disabled("Next day")).toBe(true);
+  });
+
+  test("a section moved off the line's page some other way is not locked, so the way back is open (review R-01)", () => {
+    // The line is on the 25th; a jump to an entry's page has put the day
+    // section on the 26th, where the line is not drawn
+    setup({
+      renderQuickLine: quickLine,
+      anchors: { ...anchors, day: "2026-07-26" },
+      quickPage: periodKey("day", "2026-07-25"),
+    });
+    const disabled = (name: string) =>
+      (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
+    expect(disabled("Previous day")).toBe(false);
+    expect(disabled("Back to current day")).toBe(false);
+  });
+
+  test("each tap area is a button named for its page (NFR5)", () => {
+    setup({ renderQuickLine: quickLine });
+    for (const name of [
+      "Add a task to Today",
+      "Add a task to This week",
+      "Add a task to This month",
+      "Add a task to This year",
+    ])
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+  });
+
+  test("the tap area is at least one 33px dot row high and spans the list (FR1.5)", () => {
+    setup({ renderQuickLine: quickLine });
+    const tap = screen.getByTestId("quick-tap-day");
+    expect(parseFloat(tap.style.height)).toBeGreaterThanOrEqual(TAP_AREA_MIN_PX);
+    expect(tap.style.width).toBe("100%");
   });
 });

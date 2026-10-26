@@ -25,6 +25,8 @@
 
 <!-- Project-specific specialisation. -->
 
+- for real-phone checks, run a local-only dev build (blank SUPABASE_URL and SUPABASE_ANON_KEY in src/lib/supabaseConfig.ts for the check, then restore it) because there is no non-production database and the dev build otherwise needs a production sign-in (learned 2026-10-26) <!-- cid:261026-quick-capture:build-and-test:b6510b136480b4492d6acac65bb329fcf275d237076116cd7b66e57e493c8fda -->
+
 ## Guard Policy
 
 <!-- Project-specific. Mode: strict, relaxed, or off. Strict here holds for every intent and cannot be changed from chat. A section under the retired Change Control heading, written by an earlier release, is still read. -->

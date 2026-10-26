@@ -265,10 +265,21 @@ body {
 .typeBtn:focus-visible,
 .prioBtn:focus-visible,
 .filterBtn:focus-visible,
-.scopeBtn:focus-visible {
+.scopeBtn:focus-visible,
+.quickTap:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
   border-radius: 4px;
+}
+/* Quick entry's tap area (26 October 2026, quick capture FR1.1): blank page
+   until pointed at, then shaded like the segmented-control track so a mouse
+   can see where a click will open the line. The background lives here rather
+   than in S.quickTap because an inline one would beat the hover. */
+.quickTap {
+  background: none;
+}
+.quickTap:hover {
+  background: var(--track);
 }
 .etext {
   flex: 1;
@@ -385,6 +396,14 @@ body {
 .miniBtn:hover {
   border-color: var(--ink);
   color: var(--ink);
+}
+/* Previous and next while a quick line is open in that section (26 October
+   2026, quick capture FR5.5): plainly unavailable, and hover leaves them be */
+.miniBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  border-color: var(--line);
+  color: var(--ink-soft);
 }
 /* Section nav: full words where there's room, short ones on narrow
    screens so the page title never gets squashed. aria-labels carry the
@@ -654,6 +673,27 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .entry.isFound {
+    animation: none;
+  }
+}
+/* Where a quick entry just landed (26 October 2026, quick capture FR4.1): the
+   same mark as a found entry, fading over 1.6s rather than 4s, because you
+   were looking straight at the spot already. The 1.6s here must match the
+   timeout in App.logQuick. */
+.entry.isFresh {
+  background: var(--banner-bg);
+  animation: freshFade 1.6s ease-out forwards;
+}
+@keyframes freshFade {
+  0% {
+    background: var(--banner-bg);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry.isFresh {
     animation: none;
   }
 }

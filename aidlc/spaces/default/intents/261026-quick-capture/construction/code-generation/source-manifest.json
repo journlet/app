@@ -1,0 +1,48 @@
+{
+  "stage": "code-generation",
+  "version": 1,
+  "writes": [
+    {
+      "path": "src/ui/quickTap.ts"
+    },
+    {
+      "path": "src/ui/QuickLine.tsx"
+    },
+    {
+      "path": "src/ui/SpreadView.tsx"
+    },
+    {
+      "path": "src/CollectionView.tsx"
+    },
+    {
+      "path": "src/ui/UndoToast.tsx"
+    },
+    {
+      "path": "src/App.tsx"
+    },
+    {
+      "path": "src/ui/styles.ts"
+    },
+    {
+      "path": "src/index.css"
+    },
+    {
+      "path": "tests/quickTap.test.ts"
+    },
+    {
+      "path": "tests/ui/QuickLine.test.tsx"
+    },
+    {
+      "path": "tests/ui/SpreadView.test.tsx"
+    },
+    {
+      "path": "tests/ui/CollectionView.test.tsx"
+    },
+    {
+      "path": "tests/ui/UndoToast.test.tsx"
+    },
+    {
+      "path": "tests/ui/AppQuickLine.test.tsx"
+    }
+  ]
+}

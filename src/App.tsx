@@ -105,6 +105,7 @@ import NewCollectionDialog from "./ui/NewCollectionDialog";
 import ReviewMigrateSheet from "./ui/ReviewMigrateSheet";
 import EarlierOccurrencesSheet from "./ui/EarlierOccurrencesSheet";
 import UndoToast from "./ui/UndoToast";
+import QuickLine from "./ui/QuickLine";
 import SpreadView from "./ui/SpreadView";
 import SearchView from "./ui/SearchView";
 import { EMPTY_RESULTS, searchJournal } from "./lib/search";
@@ -133,10 +134,33 @@ import { buildMigrationHistory } from "./ui/migrationHistory";
 import { FUTURELOG_FOLDS_KEY } from "./lib/storageKeys";
 import type { ScheduledRow, SheetTarget } from "./ui/types";
 
+/** An open quick task line (26 October 2026, quick capture option A): the
+ *  page it logs to, captured when it opened, and what it holds. */
+interface QuickState {
+  pk: string;
+  sectionKey: Scope | "collection";
+  label: string;
+  text: string;
+}
+
 interface DeletedToast {
   entry?: Entry;
   colSnap?: CollectionSnapshot;
+  /** a quick entry just logged (26 October 2026, quick capture FR4.2): the
+   *  message as shown, and the id Undo removes, which stays right however the
+   *  entry has been edited since (FR4.4) */
+  logged?: { id: string; label: string };
+  /** a notice with nothing to undo (26 October 2026, review R-02) */
+  notice?: string;
+  /** the quick line that was open on a collection when it was deleted, put
+   *  back with its words if the deletion is undone (review R-07) */
+  quick?: QuickState;
 }
+
+// The one place a quick entry's confirmation is worded. Long text is cut to
+// 39 characters and "…", as the full form's "Logged" line already is.
+const loggedLabel = (text: string, page: string): string =>
+  `Logged “${text.length > 40 ? text.slice(0, 39) + "…" : text}” to ${page}`;
 
 type View =
   | "spread"
@@ -274,6 +298,23 @@ export default function App() {
       return next;
     });
   const [toast, setToast] = useState<DeletedToast | null>(null);
+  // The open quick task line, if any (26 October 2026, quick capture option
+  // A). The page key is captured when the line opens and never recomputed, so
+  // a line left open across midnight still logs to the day it was opened on
+  // (R-14). One line at a time, so one slot. `label` is the section heading
+  // as it read when the line opened, which the "Logged" message names (R-13).
+  // Nothing closes it but Log, Cancel and "more": not a tap elsewhere, not a
+  // scroll, not the app going to the background, not navigating away from its
+  // page (FR5.4). It is drawn only where its own page is showing, and its
+  // words wait for the person to come back to it (review R-01, R-02).
+  const [quick, setQuick] = useState<QuickState | null>(null);
+  // The row a quick entry just landed on, highlighted for 1.6s (FR4.1)
+  const [freshEntry, setFreshEntry] = useState<string | null>(null);
+  const freshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set while the capture form is open from a quick line's "more": the form's
+  // page and type were set for that opening only, and go back to the
+  // remembered ones when it closes (FR3.6)
+  const captureOneOff = useRef(false);
   const [reviewing, setReviewing] = useState(false);
   // Entry visibility filter (remediation item 7). A device preference like
   // theme and sticky capture, not journal content — never synced, so one
@@ -673,8 +714,79 @@ export default function App() {
     if (!toast) return;
     if (toast.entry) restoreEntry(toast.entry);
     if (toast.colSnap) restoreCollection(toast.colSnap);
+    // Restored in the same event as the collection, so the page is back by
+    // the time the line is looked at and the stale-line effect leaves it be.
+    // Only into an empty slot, though (26 October 2026, review R-09): a line
+    // started since the deletion, with words in it, is the newer thought and
+    // keeps its place; the collection still comes back, without its line.
+    const restoredQuick = toast.quick;
+    if (restoredQuick)
+      setQuick((q) => (q && q.text.trim() ? q : restoredQuick));
+    if (toast.logged) removeEntry(toast.logged.id);
     setToast(null);
     if (toastTimer.current) clearTimeout(toastTimer.current);
+  };
+
+  // Quick task line handlers. Log goes through the same addEntry as the full
+  // form, so a quick entry is stored and synced exactly like any other
+  // (NFR6): always a task, never priority, never inspiration (FR3.1). The
+  // remembered capture choices are deliberately not touched (FR3.6).
+  //
+  // Opening where the line already is keeps it as it is. Opening anywhere
+  // else replaces it, which is only reachable while it is empty: QuickLine
+  // refuses the tap while a line has words in it, wherever that line is
+  // (FR5.2), and an empty one simply moves (FR5.3).
+  const openQuick = (
+    sectionKey: Scope | "collection",
+    pk: string,
+    label: string
+  ) =>
+    setQuick((q) =>
+      q && q.sectionKey === sectionKey && q.pk === pk
+        ? q
+        : { pk, sectionKey, label, text: "" }
+    );
+  const logQuick = () => {
+    if (!quick) return;
+    const text = quick.text.trim();
+    setQuick(null);
+    // FR3.2: nothing typed saves nothing, and still closes the line
+    if (!text) return;
+    const e = addEntry(quick.pk, "task", text, false);
+    markCaptured();
+    // Shown whether or not the filter lets the row through, so a hidden
+    // entry is never logged in silence; the filter itself is left alone
+    // (FR4.3). A newer message takes the one slot from an older (FR4.5).
+    showToast({ logged: { id: e.id, label: loggedLabel(text, quick.label) } });
+    setFreshEntry(e.id);
+    if (freshTimer.current) clearTimeout(freshTimer.current);
+    freshTimer.current = setTimeout(() => setFreshEntry(null), 1600);
+  };
+  /**
+   * "more" (FR3.5, R-12): the line's words move into the full form, replacing
+   * whatever was left there, and the form is pointed at the line's page as a
+   * task. For this opening only: the underscore setters change what the form
+   * shows without writing the remembered choices, and closeCapture puts the
+   * remembered ones back (FR3.6). A collection needs no page set, because the
+   * form already logs into the collection on screen.
+   */
+  const moreQuick = () => {
+    if (!quick) return;
+    const sc = keyScope(quick.pk);
+    setQuick(null);
+    setInput(quick.text);
+    setCaptureDetails("");
+    setCaptureParent(null);
+    setJustLogged(null);
+    _setCaptureType("task");
+    captureOneOff.current = true;
+    if (sc) {
+      _setCaptureScope(sc);
+      setCaptureAnchor(keyToAnchor(quick.pk));
+      setCaptureOpen(true);
+    } else {
+      openCapture();
+    }
   };
 
   /**
@@ -694,6 +806,14 @@ export default function App() {
     setJustLogged(null);
     setCaptureDetails("");
     setCaptureParent(null);
+    // Opened from a quick line's "more": back to the remembered page kind and
+    // type, including any the person chose in the form, which were written
+    // to them as usual (FR3.6)
+    if (captureOneOff.current) {
+      captureOneOff.current = false;
+      _setCaptureScope(sticky.current.scope);
+      _setCaptureType(sticky.current.type);
+    }
   };
 
   /** Open capture with the entry pre-set as parent, for a run of sub-bullets */
@@ -977,13 +1097,84 @@ export default function App() {
     foundTimer.current = setTimeout(() => setFoundEntry(null), 4000);
   };
 
+  // Whether the open quick line's page still exists (review R-07). Only a
+  // collection can go: deleted here, or by another device and arriving by
+  // sync. A line whose page has gone can never be drawn again, so it would
+  // block every tap area with no Cancel in reach; it is treated as gone at
+  // once, here, and dropped by the effect below.
+  const quickPageGone =
+    !!quick &&
+    quick.sectionKey === "collection" &&
+    !collections.some((c) => colPageKey(c.id) === quick.pk);
+  useEffect(() => {
+    if (loaded && quickPageGone) setQuick(null);
+  }, [loaded, quickPageGone]);
+  const liveQuick = quickPageGone ? null : quick;
+
+  // Whether the open quick line, if any, is on the screen now showing: its
+  // collection's page, or the spread with its section showing its page.
+  const quickOnScreen =
+    !!quick &&
+    !quickPageGone &&
+    (quick.sectionKey === "collection"
+      ? !!activeCol && quick.pk === colPageKey(activeCol.id)
+      : !activeCol &&
+        view === "spread" &&
+        periodKey(quick.sectionKey, anchors[quick.sectionKey]) === quick.pk);
+
+  // A tap refused because a line with words in it is open somewhere else. On
+  // this screen the line is in plain view and says why by itself; off it, the
+  // tap would otherwise do nothing for no visible reason, so the message slot
+  // says where the unfinished task is (review R-02). No Undo: nothing changed.
+  const quickRefused = () => {
+    if (!quick || quickOnScreen) return;
+    showToast({
+      notice: `Finish or cancel the task you started on ${quick.label} first`,
+    });
+  };
+
+  /**
+   * The quick task line for a home section or a list collection (26 October
+   * 2026, quick capture option A). Matched on the section and the page key
+   * both (review R-01), so a line is only ever drawn under the page it will
+   * log to. When a section moves to another page by any route (a jump to an
+   * entry's page, the day turning over), the line is simply not drawn there
+   * and keeps its words until its own page is showing again (R-14).
+   */
+  const renderQuickLine = (
+    sectionKey: Scope | "collection",
+    pk: string,
+    heading: string,
+    emptyText: string | null
+  ) => {
+    const open =
+      !!quick && quick.sectionKey === sectionKey && quick.pk === pk;
+    return (
+      <QuickLine
+        sectionKey={sectionKey}
+        pageLabel={heading}
+        open={open}
+        text={open && quick ? quick.text : ""}
+        emptyText={emptyText}
+        blocked={!open && !!liveQuick?.text.trim()}
+        onBlocked={quickRefused}
+        onOpen={() => openQuick(sectionKey, pk, heading)}
+        onChangeText={(text) => setQuick((q) => (q ? { ...q, text } : q))}
+        onLog={logQuick}
+        onCancel={() => setQuick(null)}
+        onMore={moreQuick}
+      />
+    );
+  };
+
   const renderEntry = (e: Entry, pk: string, sc: Scope | null) => (
     <li
       key={e.id}
       className={
         "entry" +
         (e.parentId ? " isSub" : "") +
-        (foundEntry === e.id ? " isFound" : "")
+        (foundEntry === e.id ? " isFound" : "") +
+        (freshEntry === e.id ? " isFresh" : "")
       }
       // Everything right of the bullet opens the entry's actions. The more
       // button stays where it was, visible and labelled: this is a larger
@@ -1556,10 +1747,17 @@ export default function App() {
             filter={filter}
             order={order}
             threadedHere={renderThreadedHere(colPageKey(activeCol.id))}
+            renderQuickLine={(pk, heading, emptyText) =>
+              renderQuickLine("collection", pk, heading, emptyText)
+            }
             onDelete={() => {
+              // A quick line open on this collection goes with it, words and
+              // all, and comes back with it on Undo (review R-07)
+              const stranded =
+                quick && quick.pk === colPageKey(activeCol.id) ? quick : undefined;
               const snap = removeCollection(activeCol.id);
               setView("index");
-              if (snap) showToast({ colSnap: snap });
+              if (snap) showToast({ colSnap: snap, quick: stranded });
             }}
           />
         )}
@@ -1568,6 +1766,10 @@ export default function App() {
             renderEntry={renderEntry}
             renderScheduledRow={renderScheduledRow}
             renderThreadedHere={renderThreadedHere}
+            renderQuickLine={renderQuickLine}
+            quickPage={
+              quick && quick.sectionKey !== "collection" ? quick.pk : null
+            }
             pastOpen={pastOpen}
             dueItems={dueItems}
             days={days}
@@ -1703,9 +1905,22 @@ export default function App() {
         />
       )}
 
-      {toast && (
-        <UndoToast isCollection={!!toast.colSnap} onUndo={undoDelete} />
-      )}
+      {/* Always mounted, so its live region is in place before the first
+          message arrives (review R-04) */}
+      <UndoToast
+        label={
+          !toast
+            ? null
+            : toast.notice
+              ? toast.notice
+              : toast.logged
+                ? toast.logged.label
+                : toast.colSnap
+                  ? "Collection deleted"
+                  : "Entry deleted"
+        }
+        onUndo={toast?.notice ? undefined : undoDelete}
+      />
 
       {install.showBanner && (
         // Docked above the capture bar.
