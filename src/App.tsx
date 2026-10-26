@@ -1841,7 +1841,12 @@ export default function App() {
         // Search is a screen for finding, not writing: the bar would sit over
         // the results and the keyboard has the room instead. It is also the
         // one page where a Find button would point at itself.
-        view !== "search" && (
+        view !== "search" &&
+        // Nor while a quick line is open here (27 October 2026): its own
+        // Cancel, more and Log are the controls in play, and on a phone the
+        // bar rode up on top of the keyboard, under the line it was not part
+        // of. It comes back when the line is logged or cancelled.
+        !quickOnScreen && (
         <CaptureLauncher
           onOpen={openCapture}
           onFind={openSearch}

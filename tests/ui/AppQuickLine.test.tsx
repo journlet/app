@@ -197,6 +197,43 @@ describe("a line belongs to its page (review R-01, R-02)", () => {
   });
 });
 
+// The "Log an entry…" bar steps aside while a quick line is open on the screen
+// (27 October 2026): on a phone it rode up on top of the keyboard, under a
+// line whose own Cancel, more and Log are the controls in play.
+describe("the bottom bar while a line is open", () => {
+  const bar = () => screen.queryByRole("button", { name: /^Log an entry/ });
+
+  test("is hidden while the line is open, and back after Log or Cancel", async () => {
+    await start();
+    expect(bar()).not.toBeNull();
+    tap("day");
+    expect(bar()).toBeNull();
+    type("day", "bar goes away");
+    fireEvent.click(logButton());
+    expect(bar()).not.toBeNull();
+    tap("day");
+    expect(bar()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(bar()).not.toBeNull();
+  });
+
+  test("is back on a screen the open line is not on", async () => {
+    const inTwoDays = new Date();
+    inTwoDays.setDate(inTwoDays.getDate() + 2);
+    const link = addEntry(periodKey("week", todayKey()), "note", "a link for the bar", false);
+    toggleThread(link.id, dkey(inTwoDays));
+    await start();
+    tap("day");
+    type("day", "waiting on today");
+    expect(bar()).toBeNull();
+    // Follow the link: the day section shows another day, without the line
+    const linkRow = screen.getAllByText(/a link for the bar/)[0].closest("li")!;
+    fireEvent.click(linkRow.querySelector("button.detailsToggle")!);
+    expect(screen.queryByDisplayValue("waiting on today")).toBeNull();
+    expect(bar()).not.toBeNull();
+  });
+});
+
 // A list collection's line, driven from the app (26 October 2026, review R-07,
 // R-08). Each test makes a collection of its own and a link to it from this
 // week's page, which is how it gets there without the index screen.
