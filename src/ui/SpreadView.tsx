@@ -36,8 +36,9 @@ interface SpreadViewProps {
    *  option A), placed directly under the section's own entries and above
    *  everything drawn from elsewhere (FR1.1). `heading` is what the section
    *  reads as on screen, which names the line for screen readers and the
-   *  "Logged" message. `emptyText` is the section's empty-state text when it
-   *  has nothing to show, which the line's tap area then wears (FR1.3).
+   *  "Logged" message. `emptyText` is the filter's note when it is why the
+   *  section shows nothing, said above the line's "add a task" row; an empty
+   *  page's "nothing logged" is left to that row (27 October 2026).
    *  Asked for only on a current or future period (FR1.6). Optional: without
    *  it the view reads exactly as it did before quick entry. */
   renderQuickLine?: (
@@ -156,10 +157,12 @@ export default function SpreadView({
                       hidden === 1 ? "y" : "ies"
                     } hidden by the filter`;
             // Past pages take no new entries from here (FR1.6): no tap area,
-            // and their empty-state text stays plain text
+            // and their empty-state text stays plain text. Elsewhere the "add
+            // a task" row stands in for "nothing logged", and only the
+            // filter's note is still worth saying above it.
             const quickLine =
               renderQuickLine && pk >= nowKeys[sc]
-                ? renderQuickLine(sc, pk, heading, emptyText)
+                ? renderQuickLine(sc, pk, heading, hidden > 0 ? emptyText : null)
                 : null;
             const navLocked = quickPage === pk;
             const step = (delta: number) =>
@@ -233,10 +236,11 @@ export default function SpreadView({
                     something say nothing extra — the note under the filter
                     row already names what is hidden, and four running
                     counts would put back the clutter the filter removes.
-                    Where a quick line can open, the same words are its tap
-                    area instead, drawn by the line below so that it keeps
-                    one place in the tree whether or not the page is empty
-                    (and focus can come back to it after Log). */}
+                    Where a quick line can open, its "add a task" row says it
+                    instead, with the filter's note above it, drawn by the
+                    line below so that it keeps one place in the tree whether
+                    or not the page is empty (and focus can come back to it
+                    after Log). */}
                 {emptyText && !quickLine && (
                   <div style={S.sectionEmpty}>{emptyText}</div>
                 )}

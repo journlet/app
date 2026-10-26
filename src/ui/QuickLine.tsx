@@ -1,7 +1,7 @@
 // Quick task entry, "add in place" (26 October 2026, quick capture option A).
-// A tap on the empty strip under a section's own entries opens a line right
-// there, cursor in it and the phone keyboard up, with Cancel / more / Log
-// beneath. Presentational: App owns the line's state (which page it is open
+// A tap on the "+ add a task" row under a section's own entries opens a line
+// right there, cursor in it and the phone keyboard up, with Cancel / more /
+// Log beneath. Presentational: App owns the line's state (which page it is open
 // on, and its text) and what Log, Cancel and more do.
 //
 // Both halves are always mounted and only one is shown at a time. That is the
@@ -21,9 +21,10 @@ interface QuickLineProps {
   pageLabel: string;
   open: boolean;
   text: string;
-  /** the section's empty-state text ("nothing logged", or what the filter is
-   *  hiding), when it has nothing to show: the text itself is then the tap
-   *  area, so an empty page needs no strip of blank beneath it (FR1.3) */
+  /** what the filter is hiding ("nothing matching — 2 entries hidden by the
+   *  filter"), when that is why the section shows nothing: said as plain text
+   *  above the "add a task" row, which an empty page shows instead of
+   *  "nothing logged" (27 October 2026) */
   emptyText?: string | null;
   /** another line is open with words in it, here or on another page, so a
    *  tap here opens nothing and that line stays as it is (FR5.2) */
@@ -140,11 +141,17 @@ export default function QuickLine({
   return (
     <>
       <div ref={tapWrapRef} hidden={open}>
+        {emptyText && <div style={S.sectionEmpty}>{emptyText}</div>}
+        {/* Drawn as the journal's next line, "+" in the bullet column and the
+            words where an entry's text goes, so it can be seen without being
+            pointed at (27 October 2026: blank space alone was found by no one).
+            The "+" is a child of the button and so takes the button font, as
+            the entries' bullets do. */}
         <button
           ref={tapRef}
           type="button"
           className="quickTap"
-          style={emptyText ? S.quickTapEmpty : S.quickTap}
+          style={S.quickTap}
           data-testid={`quick-tap-${sectionKey}`}
           aria-label={`Add a task to ${pageLabel}`}
           onPointerDown={(ev) => {
@@ -184,14 +191,26 @@ export default function QuickLine({
             reveal();
           }}
         >
-          {emptyText}
+          <span className="bullet" style={S.quickHintMark} aria-hidden="true">
+            +
+          </span>
+          <span style={S.quickHintText}>add a task</span>
         </button>
       </div>
       <div ref={lineRef} hidden={!open} onMouseDown={keepFocus}>
         <div style={S.quickLine}>
-          <span className="bullet" aria-hidden="true">
+          {/* A button, like the entries' bullets, for no reason but its font:
+              a span took the page font and drew a smaller "•" that sat off the
+              column (27 October 2026). Out of the tab order and the
+              accessibility tree; keepFocus stops a press on it moving focus. */}
+          <button
+            type="button"
+            className="bullet"
+            tabIndex={-1}
+            aria-hidden="true"
+          >
             •
-          </span>
+          </button>
           <input
             ref={inputRef}
             type="text"

@@ -271,15 +271,14 @@ body {
   outline-offset: 2px;
   border-radius: 4px;
 }
-/* Quick entry's tap area (26 October 2026, quick capture FR1.1): blank page
-   until pointed at, then shaded like the segmented-control track so a mouse
-   can see where a click will open the line. The background lives here rather
-   than in S.quickTap because an inline one would beat the hover. */
+/* Quick entry's "+ add a task" row (26 October 2026, quick capture FR1.1),
+   shaded on hover as an entry row is. The background lives here rather than
+   in S.quickTap because an inline one would beat the hover. */
 .quickTap {
   background: none;
 }
 .quickTap:hover {
-  background: var(--track);
+  background: var(--hover);
 }
 .etext {
   flex: 1;

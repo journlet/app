@@ -107,6 +107,10 @@ describe("the open line", () => {
     expect(bullet.className).toBe("bullet");
     expect(bullet.textContent).toBe("•");
     expect(bullet.getAttribute("aria-hidden")).toBe("true");
+    // a button, as the entries' bullets are, so the "•" is drawn in the same
+    // font and sits on the same column; never a stop in the tab order
+    expect(bullet.tagName).toBe("BUTTON");
+    expect(bullet.tabIndex).toBe(-1);
     // Pulled left by its own 8px padding and 1px border, so the typed text
     // starts where an entry's text does; and it takes the rest of the row
     expect(input().style.marginLeft).toBe("-9px");

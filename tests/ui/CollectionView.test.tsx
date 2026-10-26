@@ -279,7 +279,7 @@ describe("quick task line", () => {
     const tap = screen.getByTestId("quick-tap-collection");
     // Node.compareDocumentPosition: 4 = the argument follows the reference node
     expect(screen.getByText("Middlemarch").compareDocumentPosition(tap) & 4).toBeTruthy();
-    expect(tap.textContent).toBe("");
+    expect(tap.textContent).toBe("+add a task");
   });
 
   test("a habit tracker has none", () => {
@@ -288,17 +288,31 @@ describe("quick task line", () => {
     expect(quickLine).not.toHaveBeenCalled();
   });
 
-  test("an empty list's \"nothing logged\" is the tap area (FR1.3)", () => {
+  test("an empty list shows the add row instead of \"nothing logged\" (FR1.3)", () => {
     setup({ collection: list, renderQuickLine: quickLine });
     const tap = screen.getByTestId("quick-tap-collection");
     expect(tap.tagName).toBe("BUTTON");
-    expect(tap.textContent).toBe("nothing logged");
-    expect(screen.getAllByText("nothing logged")).toHaveLength(1);
+    expect(tap.textContent).toBe("+add a task");
+    expect(screen.queryAllByText("nothing logged")).toHaveLength(0);
   });
 
   test("logs into the collection's own page, not a day's", () => {
     setup({ collection: list, renderQuickLine: quickLine });
-    expect(quickLine).toHaveBeenCalledWith("col:c1", "Reading list", "nothing logged");
+    expect(quickLine).toHaveBeenCalledWith("col:c1", "Reading list", null);
+  });
+
+  test("passes on the filter's note when that is why the list is empty", () => {
+    setup({
+      collection: list,
+      entries: [{ ...item("a", "Middlemarch"), state: "done" }],
+      filter: "open" as EntryFilter,
+      renderQuickLine: quickLine,
+    });
+    expect(quickLine).toHaveBeenCalledWith(
+      "col:c1",
+      "Reading list",
+      "nothing matching — 1 entry hidden by the filter"
+    );
   });
 
   test("the tap area is named for the collection (NFR5)", () => {
