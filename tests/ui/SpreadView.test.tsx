@@ -348,21 +348,26 @@ describe("quick task line", () => {
     expect(follows(monthTap, screen.getByText("Later this month"))).toBe(true);
   });
 
-  test("an empty section's \"nothing logged\" is itself the tap area (FR1.3)", () => {
-    setup({ renderQuickLine: quickLine, days: {} });
+  test("the tap area is a visible \"+ add a task\" row (27 October 2026)", () => {
+    setup({ renderQuickLine: quickLine });
     const tap = screen.getByTestId("quick-tap-day");
-    expect(tap.textContent).toBe("nothing logged");
     expect(tap.tagName).toBe("BUTTON");
-    // and it is not said twice
-    expect(screen.getAllByText("nothing logged")).toHaveLength(4);
+    expect(tap.textContent).toBe("+add a task");
   });
 
-  test("so is the note saying the filter is hiding everything (FR1.3)", () => {
+  test("an empty section shows the add row instead of \"nothing logged\" (FR1.3)", () => {
+    setup({ renderQuickLine: quickLine, days: {} });
+    expect(screen.getByTestId("quick-tap-day").textContent).toBe("+add a task");
+    // all four sections are current, so none says "nothing logged" as well
+    expect(screen.queryAllByText("nothing logged")).toHaveLength(0);
+  });
+
+  test("the filter's note stays, as plain text above the add row (FR1.3)", () => {
     const done: Entry = { ...entry, state: "done" };
     setup({ renderQuickLine: quickLine, filter: "open", days: { [nowKeys.day]: [done] } });
-    expect(screen.getByTestId("quick-tap-day").textContent).toBe(
-      "nothing matching — 1 entry hidden by the filter"
-    );
+    const note = screen.getByText("nothing matching — 1 entry hidden by the filter");
+    expect(note.tagName).not.toBe("BUTTON");
+    expect(follows(note, screen.getByTestId("quick-tap-day"))).toBe(true);
   });
 
   test("a section showing a past period has none, and its empty text stays plain (FR1.6)", () => {

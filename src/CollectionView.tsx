@@ -66,8 +66,8 @@ interface Props {
   onDelete: () => void;
   /** the quick task line (26 October 2026, quick capture FR1.2), for list
    *  collections only: a habit tracker has no entries to add a task to. Given
-   *  the collection's page key and name, and its empty-state text when it has
-   *  nothing to show, which the line's tap area then wears (FR1.3). Optional:
+   *  the collection's page key and name, and the filter's note when that is
+   *  why the list shows nothing, said above the "add a task" row. Optional:
    *  without it the page reads exactly as it did before quick entry. */
   renderQuickLine?: (
     pk: string,
@@ -102,7 +102,13 @@ export default function CollectionView({
           } hidden by the filter`;
   const quickLine =
     collection.kind === "list" && renderQuickLine
-      ? renderQuickLine(colPageKey(collection.id), collection.name, emptyText)
+      ? renderQuickLine(
+          colPageKey(collection.id),
+          collection.name,
+          // "add a task" stands in for "nothing logged"; only the filter's
+          // note is still said above it (see SpreadView)
+          hidden > 0 ? emptyText : null
+        )
       : null;
   const [habitName, setHabitName] = useState<string | null>(null);
 
@@ -132,8 +138,8 @@ export default function CollectionView({
 
       {collection.kind === "list" && (
         <>
-          {/* With a quick line the empty-state text is its tap area, drawn
-              by the line under the list (see SpreadView for why there) */}
+          {/* With a quick line its "add a task" row stands in for the
+              empty-state text, drawn under the list (see SpreadView) */}
           {emptyText && !quickLine && (
             <div style={ST.empty}>{emptyText}</div>
           )}

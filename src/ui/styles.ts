@@ -170,25 +170,16 @@ export const S = {
     padding: "0 4px",
   },
   // Quick task entry, add in place (26 October 2026, quick capture FR1.5,
-  // FR2.1 to FR2.3). The tap area is one GRID row of blank page across the
-  // whole list, so it costs no rhythm and reads as the next empty line of the
-  // journal; ui/quickTap's TAP_AREA_MIN_PX is the same 33px. Hover and focus
-  // come from the .quickTap rules in index.css (background too, so the hover
-  // can win over it), which inline styles can't do.
+  // FR2.1 to FR2.3). The tap area is one GRID row across the whole list,
+  // laid out like an entry row (.entry: 4px pad, 22px bullet, 10px gap) so it
+  // reads as the journal's next line; ui/quickTap's TAP_AREA_MIN_PX is the
+  // same 33px. Hover and focus come from the .quickTap rules in index.css
+  // (background too, so the hover can win over it), which inline styles
+  // can't do.
   quickTap: {
-    display: "block",
-    width: "100%",
-    height: GRID,
-    border: "none",
-    borderRadius: 6,
-    padding: 0,
-    cursor: "text",
-  },
-  // The same tap area when the section is empty: it wears the empty-state
-  // text (sectionEmpty's look) and is still a full GRID row across the list,
-  // so the words are the target and so is the space after them (FR1.3)
-  quickTapEmpty: {
-    display: "block",
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 10,
     width: "100%",
     height: GRID,
     border: "none",
@@ -196,10 +187,17 @@ export const S = {
     padding: "0 4px",
     cursor: "text",
     textAlign: "left",
+  },
+  // "+ add a task", soft so a page full of them doesn't shout (27 October
+  // 2026: blank space alone gave no sign it could be tapped). The words take
+  // the page font back from the button they sit in, and the entries' size.
+  quickHintMark: {
     color: INK_SOFT,
-    fontSize: 12.5,
-    fontStyle: "italic",
-    fontFamily: "inherit",
+  },
+  quickHintText: {
+    color: INK_SOFT,
+    fontFamily: "'Public Sans', system-ui, sans-serif",
+    fontSize: 15.5,
     lineHeight: `${GRID}px`,
   },
   // The open line is built like an entry row (.entry: 4px pad, 22px bullet,
